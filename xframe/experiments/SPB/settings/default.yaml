@@ -1,0 +1,194 @@
+save_settings: true
+out_settings_path: will_be_set_on_runtime
+
+data_mode: proc
+
+good_cells:
+  command: np.arange(1,352)   #1,127
+
+bad_cells:
+  command: '[0]' # also accepts slice
+
+
+save:
+  settings: true
+
+custom_mask: false # 'agipd_mask' #'mask'
+
+detector:
+  name: AGIPD
+
+filter_sequence: [normalization] #adu
+
+load_pump_diod_data: true
+
+filters:
+  gain:
+    class: GainFilter
+    mask:
+      high: false
+      medium: false
+      low: false
+    roi: all
+  adu:
+    class: ADUFilter
+    limits:
+      command: '[None,None]' #'[-40,4000]' # min_adu, max_adu. All other pixel will be masked
+    roi: rect
+  normalization:
+    class: NormalizationFilter
+    ROIs: [normalization_region]
+    
+ROIs:
+  all:
+    class: All
+    parameters:
+      center: [0, 0]
+      x_len: 3
+      y_len: 3
+  rect:
+    class: Rectangle
+    parameters:
+      center: [0.3, 0.02]
+      x_len: 0.2
+      y_len: 0.2
+  normalization_region:
+    class: Annulus
+    parameters:
+      center: [0, 0]
+      inner_radius: 0.07
+      outer_radius: 0.12
+      
+# 2 corresponds roughly to 200GB RAM usage for 256GB of available RAM
+# 1 corresponds roughly to 200GB RAM usage for 256GB of available RAM
+RAM_multiplier: 0.5 # choosing this to big can cause out of memory
+
+runs:
+  command: np.array([63])
+#  command: '[108]'
+#  command: '[1]'
+#sample_distance: 215
+# starting from run 120
+sample_distance: 285
+detector_origin: [0, 0, 217]
+x_ray_energy: 8000
+n_processes: 10
+
+
+IO:
+  folders:
+    # h5 folders
+    h5_internal_base: /INSTRUMENT/SPB_DET_AGIPD1M-1/DET/{module}CH0:xtdf/image/
+    h5_agipd_data:
+      h5_internal_base: data
+    h5_agipd_cellId:
+      h5_internal_base: cellId
+    h5_agipd_trainId:
+      h5_internal_base: trainId
+    h5_agipd_pulseId:
+      h5_internal_base: pulseId
+    h5_agipd_mask:
+      h5_internal_base: mask
+    h5_agipd_gain:
+      h5_internal_base: gain
+    h5_agipd_baseline_shift:
+      h5_internal_base: blShift
+    h5_pump_diod: False
+
+    vds_internal_base: /INSTRUMENT/SPB_DET_AGIPD1M-1/DET/image/
+    vds_agipd_data:
+      vds_internal_base: data
+    vds_agipd_trainId:
+      vds_internal_base: trainId
+    vds_agipd_pulseId:
+      vds_internal_base: pulseId
+    vds_agipd_cellId:
+      vds_internal_base: cellId
+    vds_agipd_mask:
+      vds_internal_base: mask
+    vds_agipd_gain:
+      vds_internal_base: gain
+    vds_agipd_frame_mask:
+      vds_internal_base: frame_mask
+    vds_agipd_baseline_shift:
+      vds_internal_base: blShift
+    
+    #exp_data: '/gpfs/exfel/exp/SPB/202102/p002510/{data_mode}/r{run:04d}'
+    #exp_data_base: '/gpfs/exfel/theory_group/user/berberic/p2510/cm-20_20_03_4/'
+    exp_data_base: /gpfs/exfel/exp/SPB/202202/p003046/
+    raw_data_base:
+      exp_data_base: raw/r{run:04d}/
+    proc_data_base:
+      exp_data_base: proc/r{run:04d}/
+    run_data:
+      exp_data_base: '{data_mode}/r{run:04d}/'
+    #exp_data: '/gpfs/exfel/exp/SPB/201901/p002304/{data_mode}/r{run:04d}'
+    #exp_data: '/gpfs/exfel/exp/SPB/202130/p900201/{data_mode}/r{run:04d}'
+    #exp_data: '/gpfs/exfel/exp/SPB/201802/p002145/{data_mode}/r{run:04d}'
+    out_base: /gpfs/exfel/theory_group/user/berberic/p3046/
+    settings_base:
+      out_base: settings/{time}/
+    settings:
+      out_base: settings/{time}/
+    
+    vds_base:
+      out_base: vds_temp/r{run:04d}/
+    geometry:
+      out_base: geometry/
+    pump_diod:
+      out_base: pump_diod/
+  files:
+    settings:
+      name: experiment.yaml
+      folder: settings
+    vds_regexpr:
+      name: '*AGIPD{module:02d}-S*.h5'
+      folder: run_data
+    vds:
+      name: vds_{data_mode}_module_{module}.h5
+      #name: 'r{run:04d}_vds_{data_mode}_0.h5'
+      folder: vds_base
+      options:
+        allow_vds_creation: true
+    pump_diod:
+      name: r{run:04d}.h5
+      folder: pump_diod
+    calibration_meta_data:
+      name: '{name}.h5'
+      folder: cal_meta_data
+
+    geometry:
+      #name: 'agipd_2304_opt_102020.geom'
+      #name: 'b2.geom'
+      #name: 'agipd_2995_v04.geom'
+      #name: 'opt-shift1.geom'
+      #name: 'new_p3046.geom'
+      name: agipd_september_2022_v03.geom
+      folder: geometry
+    custom_mask:
+      name: masks/{name}.h5
+      folder: out_base
+      options:
+        file_name: new_mask
+        key: combined
+    background:
+      name: '{name}.h5'
+      folder: data
+    calibration_constants_cheetah_latest:
+      name: Cheetah*.h5
+      folder: calib_cheetah_latest
+    calibration_constants_cheetah_by_run:
+      name: Cheetah*.h5
+      folder: calib_cheetah_by_run
+    calibration_constants_alireza:
+      name: Cheetah-AGIPD-calib.h5
+      folder: calib_alireza
+    alireza_bad_pixel_mask:
+      name: bad-pixel-mask.h5
+      folder: calib_alireza
+    calibration_constants:
+      options:
+        calibrator: AGIPD_VDS_calibrator
+        mode: alireza2020ver1
+        n_pulses: 176
+        #calib_run: 'latest'        

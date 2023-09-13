@@ -1,0 +1,120 @@
+import time
+from copy import copy
+import numpy as np
+import numpy.ma as mp
+import scipy.integrate as spIntegrate
+from itertools import repeat
+import logging
+
+import xframe.library.mathLibrary as mLib
+import xframe.library.physicsLibrary as pLib
+import xframe.library.pythonLibrary as pyLib
+from xframe.analysis.interfaces import DatabaseInterface,PresenterInterface
+
+from .classes import NestedArray
+from .classes import SampledFunction
+from .harmonic_transforms import HarmonicTransform
+
+
+log=logging.getLogger('root')
+
+
+###FXS setup
+
+def generate_extract_b_coefficients(orders,fxs_data,comm_module):
+    bm_grid=fxs_data.invariant_extraction_grid
+    dimension=copy(fxs_data.dimension)
+    ccd=fxs_data.CCD
+    max_order=np.max(orders)
+    if dimension==2:
+        n_phi_points=bm_grid.shape[-1]
+        harm_trf = HarmonicTransform('real',{'dimensions':2,'n_phi':n_phi_points})
+        ht_forward,ht_inverse = harm_trf.forward,harm_trf.inverse 
+        def extract_b_coefficients_2d(fxs_data):            
+            fxs_data.bCoeff=ht_forward(ccd)[:,:,:max_order+2]
+            log.info('ccd={}'.format(ccd[1,:100,0]))
+            #log.info('b_coeff={}'.format(fxs_data.bCoeff))
+            log.info('max_order +2 ={}'.format(max_order+2))
+            fxs_data.CCD=False
+            return fxs_data
+        
+        extract_b_coefficients=extract_b_coefficients_2d
+        
+    elif dimension==3:
+        def extract_b_coefficients_3d(fxs_data):
+            theta=pLib.getEwaldSphereTheta(fxs_data.incidentWavelength)
+            b_coefficients=get_b_coefficients_3d(ccd,theta,comm_module.request_mp_evaluation)
+            fxs_data.bCoeff=b_coefficients
+            return fxs_data
+        extract_b_coefficients=extract_b_coefficients_3d
+    else:
+        raise AssertionError('Aceptable dimensions in the Exstraction of B coefficients are 2 and 3 but {} was given'.format(dimension))
+    return extract_b_coefficients
+
+def extractBCoefficients_2D(fxsData):
+    #the follwing will overrite the CCD to save RAM 
+    fxsData.bCoeff= mLibfxsData.CCD.apply_along_axis(mLib.circularHarmonicTransform_real_forward,2)
+#    fxsData.bCoeff=fxsData.CCD.apply_along_axis(np.fft.fft,2)
+#    fxsData.bCoeff.data.array/=fxsData.bCoeff.data.array.shape[2]
+    #As indication of override set CCD to False
+    fxsData.CCD=False
+    return fxsData
+
+def get_b_coefficients_3D(crossCorrelationData,theta,requestMPEvaluation):
+    CCData=crossCorrelationData.data
+    CCGrid=crossCorrelationData.grid
+    nRadialSteps=crossCorrelationData.array.shape[0]
+    radialIndices=np.arange(nRadialSteps)
+    maxPolarSteps=crossCorrelationData.array.shape[2]
+    legendrePolynomials=tuple(map(mLib.legendrePlFunction,arange(maxPolarSteps)))
+
+    initialNPolarSteps=len(crossCorrelationData[0,0,:])
+    currentNPolarSteps=initialNPolarSteps
+    prefactorFunctions=[]
+    stopIndices=[]
+    for qIndex in radialIndices:
+        nPolarSteps=len(crossCorrelationData[qIndex,0,:])
+        if nPolarSteps!=currentNPolarSteps:
+            stopIndex=qIndex-1
+            polynomials=legendrePolynomials[:qIndex]
+            polarAngles=CCGrid[stopIndex,0,:][:,2]
+            F_l_phi=getLegendreCoeffMatrix(polarAngles,polynomials,theta)
+            prefactorFunctions.append[F_l_phi]
+            stopIndices.append(stopIndex)
+            currentNPolarSteps=nPolarSteps
+    stopIndices=np.array(stopIndices)
+    calculationParameters={'CCGrid':CCGrid,'CCData':CCData,'prefactorFunctions':prefactorFunctions,'stopIndices':stopIndices,}
+
+    B=Grid.copy(CCData)
+    B[:]=requestMPEvaluation(calculateBCoefficients_3D,[radialIndices,radialIndices])
+            
+
+    
+    
+def getLegendreCoefficientFunc(degrees,polarAngles,theta):
+    def legendreCoeffFunc(q,qq):
+        argument=np.cos(theta(q))*np.cos(theta(qq))+np.sin(theta(q))*np.sin(theta(qq))*np.cos(phi)
+        value=mLib.legendrePl(degree,argument)/(4*np.pi)
+        return value
+    return legendreCoeffFunc
+
+def calculateBCoefficients_3D(qIndices,qqIndices,calculationParameters):
+    CCgrid=calculationParameters['CCGrid']
+    CCData=calculationParameters['CCData']
+    prefactorFunctions=calculationParameters['prefactorParameters']
+    stopIndices=calculationParameters['stopIndices']
+    B=Grid.copy(CCData)
+    
+    def calculateB_q_qq(qIndex,qqIndex):
+        prefactorIndex=np.searchsorted(stopIndices,qIndex)
+        F_l_phi=prefactorFunctions[prefactorIndex]
+        q,qq=grid[qIndex,qqIndex,0][:2]
+        inverse=np.linalg.pinv(F_l_phi(q,qq))
+        # @ means matrix multiplication
+        B_l_q_qq=inverse@CCData[qIndex,qqIndex,:]
+        
+
+    BCoefficients=np.fromiter(map(calculateB_q_qq,qIndices,qqIndices)).flatten()
+    return BCoefficients
+        
+

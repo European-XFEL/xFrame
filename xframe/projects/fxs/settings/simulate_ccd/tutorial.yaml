@@ -1,0 +1,24 @@
+dimensions: 3
+
+structure_name: '3d_tutorial'
+
+grid:
+  max_q: 0.322416
+  n_radial_points: 512
+  max_order: 128
+
+shapes:
+  types:
+    command: "['sphere']*6"
+  centers:
+    command: "[(0,0,0)] + [(140.0,np.pi/2,phi*2*np.pi/5) for phi in range(5) ]"  #3D centers
+    #command: "[(0,0)] + [(140.0,phi*2*np.pi/5) for phi in range(5) ]"           #2D centers
+  sizes:
+    command: '[70]*6'
+  densities: [25,50,25,50,25,50]
+  random_orientation:
+    command: '[False]*6'
+cross_correlation:
+  method: 'back_substitution'
+  xray_wavelength: 1.23984
+

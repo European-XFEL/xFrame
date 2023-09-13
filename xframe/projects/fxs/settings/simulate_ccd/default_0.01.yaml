@@ -1,0 +1,155 @@
+settings_version:
+  _value: 0.01
+
+dimensions:
+  _value: 3
+  _possible_values: [3,2]
+  _description: Assumed sample dimension.
+
+structure_name:
+  _value: default
+
+grid:
+  max_q:
+    _value: False
+    _description: Sets the maximal radial mometumtransver value resolved in the reciprocal grid.
+  oversampling:
+    _value: 8
+    _description: defines max_q if max_q is set to False
+  max_order:
+    _value: 63
+  n_phi:
+    _value: 0
+    _desctipton: 'Number of azimutal angular grid points in [0,2pi) has to obey: n_phi >= 2*(max_order+1).'
+  n_theta:
+    _value: 0
+    _desctipton: 'Number of polar angular grid points in [0,pi) has to obey: n_phi >= (max_order+1)'
+  n_radial_points:
+    _value: 256
+    _from_file: fourier_transform
+  
+fourier_transform:
+  type:
+    _value: 'midpoint'
+    _possible_values: ['midpoint','zernike']
+    _description: Choose midpoint rule or zernike approximation for the hankel transform inside used to calculate the fourier transform
+  reciprocity_coefficient:
+    _value:
+      command: '1'
+    _description: 'Reciprocity relation is Q R = x N where Q,R are the radial limits in real an d reciprocal space and N is the number of radial steps of the grid (n_radial_point). The reciprocity coefficient is x. For x = pi this relation mimics the corresponding relation of cartesian grids used in Fast Fourier Transforms. Lowering x while keeping Q fixed effectively causes a smoothening of the real space density.'
+  allow_weight_calculation:
+    _value: True
+    _description: 'Whether or not to allow on-the-fly calculation of hankel transform weights.'
+  allow_weight_saving:
+    _value: True
+    _description: 'Whether or not to allow calculated hankel transform weights to be saved for future use.'
+    _from_file: fourier_transform
+
+
+shapes:
+  _description: Specefications for the considered density parts.
+  types:
+    _value:
+      command: '["sphere"]*6'
+    _possible_values: ['sphere,thetrahedron,cube']
+  centers:
+    _value:
+      command: "[(0,0,0)] + [(140.0,np.pi/2,phi*2*np.pi/5) for phi in range(5) ]"
+    _description: 'Center positions of the different shapes given in polar/spherical coordinates.'
+  sizes:
+    _value:
+      command: '[70]*6'
+    _descripton: 'Sizes of the specified shapes'
+  densities:
+    _value: [25,50,25,50,25,50]
+    _descripton: 'Density values of the specified shapes'
+    _possible_values:
+      command: '[np.number]'
+  random_orientation:
+    _value:
+      command: '[False]*6'
+    _description: Whether or not to randomly rotate each shape
+n_particles:
+  _description: Assumed number of particles per difrraction pattern.
+  _value: 1
+  _possible_values:
+    command: '[int]'
+
+cross_correlation:
+  method:
+    _value: 'back_substitution'
+    _possible_values:
+      command: '["back_substitution","lstsq","legendre"]'
+    _description: ''
+  xray_wavelength:
+    _value: 1.23984
+    _description: ''
+    
+GPU:
+  use:
+    _value: True
+  n_gpu_workers:
+    _only_if:
+      x: use
+      condition: 'x'
+    _value: 1
+    
+n_processes:
+  _value: True
+
+save_vtk_density:
+  _value: True
+save_vtk_intensity:
+  _value: False
+    
+IO:
+  _description: Standard Files
+  folders:
+    base:
+      _value:
+        command: 'xframe_opt.IO.folders.home'
+    data:
+      base:
+        _value: 'data/fxs/'
+    ccd:
+      data:
+        _value: "ccd/"
+    ccd_archive:
+      ccd:
+        _value: "archive/{structure_name}/{date}/run_{run}/"
+    ft_weights:
+      data:
+        _value: 'ft_weights/'
+  files:
+    ccd:
+      name:
+        _value: 'ccd.h5'
+      folder:
+        _value: 'ccd_archive'
+      options:
+        save_model_vtk:
+          _value: True
+        save_symlink:
+          _value: True
+        save_settings:
+          _value: True
+    ccd_symlink:
+      name:
+        _value: '{structure_name}.h5'
+      folder:
+        _value: 'ccd'
+    ft_weights:
+      name:
+        _value: 'weights{postfix}_{type}.h5'
+      folder:
+        _value: 'ft_weights'
+    model_density:
+      name:
+        _value: 'model_density.vts'
+      folder:
+        _value: 'ccd_archive'
+    model_intensity:
+      name:
+        _value: 'model_intensity.vts'
+      folder:
+        _value: 'ccd_archive'      

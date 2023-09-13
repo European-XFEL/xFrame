@@ -1,0 +1,32 @@
+structure_name: '3d_tutorial'
+image_dimensions: [512,512]
+
+n_processes: 32
+max_n_patterns: 2000
+
+
+compute: ['is_good','waxs_aver','ccf_q1q2']
+pixel_size: 200.0                 #Detector pixel size in microns
+sample_distance: 800.0            #Detector to sample distance in [mm]
+wavelength: 1.23984               #X-ray wavelength in Angstrem
+detector_origin: [255.2,255.5]    #2D detector origin in pixel coordinates
+
+interpolation_order: 2            #Cartesian to Polar spline interpolation order
+
+phi_range:                        #Azimutal angle grid via (start,stop,npoints,???)
+    command: '(0.0, 2*np.pi, 1024, "exact")'
+fc_n_max: 70                      #maximal resolved harmonic order
+
+
+IO:
+  folders:
+    home:
+      command: 'xframe_opt.IO.folders.home'
+    in_base:
+      home: 'data/fxs/input_files/'
+  files:
+    input_file_list:
+      name: patterns_list.txt
+      folder: in_base
+
+    

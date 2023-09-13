@@ -1,0 +1,13 @@
+name: Pi
+random_number:
+  command: 'np.random.rand()'
+
+IO:
+  folders:
+    base: ~/.xframe/
+    data:
+      base: data/
+  files:
+    my_data:
+      name: hello_dat.h5
+      folder: data

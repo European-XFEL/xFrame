@@ -1,0 +1,184 @@
+site_name: xFrame
+repo_url: https://github.com/TimBerberich/xframe
+
+docs_dir: docs/
+nav:
+  - Home : index.md
+  - FXS :
+    - fxs/index.md
+    - Getting Started: fxs/getting_started.md
+    - Scripting: fxs/scripting.md      
+  - Framework :
+    - framework/index.md
+    - Getting Started: framework/getting_started.md
+    - Details:
+        - Settings: framework/settings.md
+        - Data Access: framework/data_access.md
+        - Multiprocessing: framework/multiprocessing.md
+        - GPU Access: framework/gpu_access.md
+
+theme:
+  name: material
+  logo: images/xFrame_logo_bw.svg
+    #logo: material/book-open-page-variant
+
+
+  palette:
+    # Palette toggle for automatic mode
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: slate 
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: default
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+
+  font:
+    text: Roboto
+    code: Roboto Mono
+  features:
+    - search.highlight
+    - search.suggest
+    - navigation.tabs
+    - navigation.top
+    - navigation.instant
+    - navigation.indexes
+    - content.tabs.link
+    - toc.follow
+    - search.share
+    - content.code.copy
+    - content.code.annotations
+
+markdown_extensions:
+  - markdown.extensions.md_in_html:
+  - markdown.extensions.toc:
+  #- markdown_captions:
+  - markdown.extensions.admonition:
+  - markdown.extensions.smarty:
+      smart_quotes: false
+  - pymdownx.betterem:
+  - markdown.extensions.attr_list:
+  - markdown.extensions.def_list:
+  - markdown.extensions.tables:
+  - markdown.extensions.abbr:
+  - markdown.extensions.footnotes:
+  - pymdownx.superfences:
+      preserve_tabs: true
+      custom_fences:
+        # Mermaid diagrams
+        - name: diagram
+          class: diagram
+          format: !!python/name:pymdownx.superfences.fence_code_format
+        - name: math
+          class: arithmatex
+          format: !!python/object/apply:pymdownx.arithmatex.arithmatex_fenced_format {kwds: {mode: generic, tag: pre}}
+  - pymdownx.highlight:
+      extend_pygments_lang:
+        - name: php-inline
+          lang: php
+          options:
+            startinline: true
+        - name: pycon3
+          lang: pycon
+          options:
+            python3: true
+        - name: yaml
+          lang: yaml
+      linenums_style: pymdownx-inline
+  - pymdownx.inlinehilite:
+      custom_inline:
+        - name: math
+          class: arithmatex
+          format: !!python/object/apply:pymdownx.arithmatex.arithmatex_inline_format {kwds: {mode: generic}}
+  - pymdownx.magiclink:
+      repo_url_shortener: true
+      repo_url_shorthand: true
+      social_url_shorthand: true
+      social_url_shortener: true
+      user: facelessuser
+      repo: pymdown-extensions
+      normalize_issue_symbols: true
+  - pymdownx.tilde:
+  - pymdownx.caret:
+  #- pymdownx.smartsymbols:
+  #- pymdownx.emoji:
+  - pymdownx.escapeall:
+      hardbreak: True
+      nbsp: True
+  #- pymdownx.tasklist:
+  #    custom_checkbox: true
+  - pymdownx.progressbar:
+  - pymdownx.arithmatex:
+      generic: true
+      block_tag: 'pre'
+  - pymdownx.mark:
+  - pymdownx.details:
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.saneheaders:
+  - pymdownx.blocks.admonition:
+      types:
+      - new
+      - settings
+      - note
+      - abstract
+      - info
+      - tip
+      - success
+      - question
+      - warning
+      - failure
+      - danger
+      - bug
+      - example
+      - quote
+  - pymdownx.blocks.details:
+  - pymdownx.blocks.html:
+  - pymdownx.blocks.definition:
+  - pymdownx.blocks.tab:
+    
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/facelessuser
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/TWs8Tgr
+
+extra_javascript:
+  - javascripts/config.js
+  #- https://unpkg.com/mermaid@9.4.0/dist/mermaid.min.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+
+plugins:
+  - glightbox:
+      touchNavigation: true
+      loop: false
+      effect: zoom
+      slide_effect: slide
+      width: 100%
+      height: auto
+      zoomable: true
+      draggable: true
+      skip_classes:
+        - custom-skip-class-name
+      auto_caption: False
+      caption_position: bottom    
+  - search:
+      lang: en
+      separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
+
+
+
+
+

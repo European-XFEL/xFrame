@@ -1,0 +1,31 @@
+structure_name: 'tutorial'
+
+reconstruction_files:
+  - 3d_tutorial/{today}/run_0/data.h5
+  #- 3d_tutorial/{today}/run_1/data.h5
+  #- 3d_tutorial/4_2_2042/run_0/data.h5
+
+multi_process:
+  use: True
+  n_processes: 20
+
+selection:
+  method: "least_error"      #"least_error" or "manual"
+  error_limit:  0.01         #only reconstructions with lower erros will be used
+  n_reconstructions: 100     # <number> or 'all'. Limits the used number of reconstructions
+
+center_reconstructions: True
+normalize_reconstructions:
+  use: True
+  mode: 'max'                # 'max' or 'mean'
+
+l2_error_limit: 0.5          # The relative difference between reference and aligned pattern is larger
+                             # exclude the alinged pattern from the average.
+                             # Typical values (good alignment <0.1) (bad alignment >0.5) 
+
+find_rotation:
+  r_limit_ids:               # List of radial shell ids to be used in rotational alignment
+      command: 'np.arange(20,80,2)'
+
+resolution_metrics:
+  PRTF: True

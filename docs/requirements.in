@@ -1,0 +1,7 @@
+markdown
+mkdocs
+mkdocs-material
+mkdocstrings[python]
+markdown-include
+pymdown-extensions
+mkdocs-glightbox

@@ -1,0 +1,72 @@
+structure_name: 'tutorial'
+dimensions: 3
+particle_radius: 250
+
+grid:
+  n_radial_grid_points: 128
+  max_order: 63
+
+density_guess:
+  type: 'bump' #'bump','ball'
+  bump:
+    slope: 0.3 #rho(r) = e^(-slope*r_max^2/(r_max^2-r^2))
+  amplitude_function: random
+  random:
+    SNR: 2
+
+projections:
+  real:
+    shrink_wrap:
+      sigmas: [[20,[False,5],-2],False]
+      thresholds: [0.09,0.09]
+    HIO:
+      beta:
+        command: '[[0.5,0.4,-1/250,500],[0.01,0.002,-1/200,200]]'
+    projections:
+      apply: [support,value_threshold,limit_imag]
+      support:
+        initial_support:
+          type: 'max_radius'
+        enforce_initial_support:
+          apply: True
+          if_error_bigger_than: 6e-3
+      value_threshold:
+        threshold: [0,False]
+      limit_imag:
+        threshold: 2
+        
+  reciprocal:
+    number_of_particles:
+      initial: 1
+    use_averaged_intensity: True
+    q_mask:
+      type: 'none'
+    used_order_ids:
+      command: 'np.arange(64)'
+
+multi_process:
+  n_parallel_reconstructions: True
+GPU:
+  use: True
+
+main_loop:
+  sub_loops:
+    order: ['main','refinement']
+    main:
+      methods:
+        HIO:
+          iterations: 60
+        ER:
+          iterations: 40
+        SW:
+          iterations: 1
+      iterations: 5
+      order: ['HIO','SW','ER']
+    refinement:
+      methods:
+        ER:
+          iterations: 100
+        SW:
+          iterations: 1
+      iterations: 1
+      order: ['SW','ER']

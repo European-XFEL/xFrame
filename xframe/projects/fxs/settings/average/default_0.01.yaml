@@ -1,0 +1,147 @@
+structure_name:
+  _value: 'default'
+
+multi_process:
+  use:
+    _value: True
+  n_processes:
+    _only_if:
+      x: use
+      condition: 'x'
+    _value: False
+
+selection:
+  method:
+    _value: 'least_error'
+    _possible_values: ['least_error','manual']
+  error_metric:
+    _value: 'main'
+  error_limit:
+    _value: 0.001
+  manual_specifier:
+    _only_if:
+      x: method
+      condition: 'x == "manual"'
+    _value: [0,0]
+  n_reconstructions:
+    _value: 100
+  max_density_range:
+    _value: [0,None]
+
+pointinvert_reference:
+  _value: False
+alignment_error_limit:
+  _value: 0.5
+l2_error_limit:
+  _value: 0.05
+
+find_rotation:
+  r_limit_ids:
+    _value:
+      command: 'np.arange(40)'
+
+resolution_metrics:
+  PRTF:
+    _value: True
+    
+  
+load_routine:
+  _value: 'load_reconstructions'
+use_masks:
+  _value: False
+shifted_mask_threshold:
+  _only_if:
+    x: use_masks
+    condition: 'x'
+  _value: 0.5
+  
+center_reconstructions:
+  _value: True
+normalize_reconstructions:
+  use:
+    _value: True
+  mode:
+    _value: 'max'
+    _possible_values: ['mean','max']
+average_normalization_min:
+  _value: 0
+
+
+max_iterations:
+  _value: 1
+
+
+IO:
+  folders:
+    home:
+      _value:
+        command: 'xframe_opt.IO.folders.home'
+    data:
+      home:
+        _value: 'data/fxs/'
+    reconstructions:
+      data:
+        _value: 'reconstructions/'
+    averaged_results:
+      data:
+        _value: 'averages/{dimensions}d_{structure_name}/{time}/run_{run}/'
+    vtk_results:
+      averaged_results:
+        _value: 'vtk/'
+    ft_weights:
+      data:
+        _value: 'ft_weights/'
+  files:
+    ft_weights:
+      name:
+        _value: 'weights{postfix}_{type}.h5'
+      folder:
+        _value: 'ft_weights'
+    reconstructions:
+      name:
+        _value: '{path}'
+      folder:
+        _value: 'reconstructions'
+      options:
+        generate_vtk_files:
+          _value: True
+    reconstruction_settings:
+      name: 
+        _value: '{path}/settings.yaml'
+      folder:
+        _value: 'reconstructions'
+      
+    average_results:
+      name:
+        _value: 'average_results.h5'
+      folder:
+        _value: 'averaged_results'
+      options:
+        generate_average_vtk:
+          _value: True
+        generate_aligned_vtk:
+          _value: False
+        generate_input_vtk:
+          _value: False
+        generate_rotation_metric_vtk:
+          _value: False
+        save_settings:
+          _value: True
+        plot_resolution_metrics:
+          _value: True
+    real_vtk:
+      name:
+        _value: 'real_{reconstruction}.vts'
+      folder:
+        _value: 'vtk_results'
+    rotation_metric_vtk:
+      name:
+        _value: 'rotation_metric_{reconstruction}_{iteration}.vtr'
+      folder:
+        _value: 'vtk_results'      
+    reciprocal_vtk:
+      name:
+        _value: 'reciprocal_{reconstruction}.vts'
+      folder:
+        _value: 'vtk_results'
+

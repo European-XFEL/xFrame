@@ -1,0 +1,29 @@
+dimensions: 3
+
+structure_name: 'tutorial'
+
+max_order: 69
+
+extraction_mode: 'cross_correlation'
+
+cross_correlation:
+  datasets_to_process: ['I1I1']
+  datasets:
+    I1I1:
+      bl_extraction_method: 'back_substitution'
+      assume_zero_odd_orders: True
+      modify_cc:
+        subtract_average_intensity: True
+
+IO:
+  folders:
+    base:
+      command: 'xframe_opt.IO.folders.home'
+    data:
+      base: 'data/fxs/'
+    ccd:
+      data: 'ccd/'
+  files:
+    ccd:
+      name: 3d_tutorial.h5
+      folder: ccd

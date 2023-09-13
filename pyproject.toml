@@ -1,0 +1,74 @@
+[project]
+name = "xframe"
+dynamic = ["version"]
+
+#dynamic = ["version"]
+
+#description = "Python framework for Fluctuation X-ray Scattering techniques, including the MTIP phasing algorithm"
+description = "Python framework for the creation of scientific algorithms targeting X-ray science."
+#keywords = ["Fluctuation X-ray Scattering", "Phasing algorithms", "inverse problems", "MTIP"]
+keywords = ["Scientific algorithms"]
+readme = "README.md"
+authors = [
+    {email = "tim.berberich@xfel.eu"},
+]
+
+classifiers = [
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU Lesser General Public License v2 (LGPLv2)",
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "h5py",
+    "numpy",
+    "ruamel.yaml",
+    "scipy",
+]
+requires-python = ">=3.8"
+
+
+[project.optional-dependencies]
+fxs = [
+    "pysofft",    
+    "shtns",
+    "pyopencl",
+    "vtk",	
+    "matplotlib",	
+    "opencv-python",
+    "pygsl",
+    "psutil",
+    "click"
+]
+all = [
+    "matplotlib",
+    "pysofft",
+    "pyopencl",
+    "shtns",
+    "vtk",
+    "pygsl",
+    "flt",
+    "psutil",
+    "opencv-python",
+    "SharedArray"
+]
+
+
+[project.scripts]
+xframe = "xframe.main:start_routine_cmd"
+
+
+[build-system]
+requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+[tool.setuptools_scm]
+
+#[build-system]	
+#requires = ["pdm-backend"]
+#build-backend = "pdm.backend"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["xframe*"]
+
+#[tool.setuptools.dynamic]
+#version = {attr = "xframe.__version__"}
