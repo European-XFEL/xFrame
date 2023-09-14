@@ -1,4 +1,9 @@
 ![image](docs/images/xFrame_logo_title.svg)
+[![Lates Release](https://img.shields.io/github/v/release/European-XFEL/xFrame)](https://github.com/European-XFEL/xFrame/releases)
+[![License](https://img.shields.io/github/license/European-XFEL/xFrame)](https://github.com/European-XFEL/xFrame/releases)
+[![Documentation](https://img.shields.io/readthedocs/extra-foam)](https://xframe-fxs.readthedocs.io/en/latest/)
+[![Documentation](https://img.shields.io/badge/documentation-online-blue)](https://xframe-fxs.readthedocs.io/en/latest/)
+![Language](https://img.shields.io/badge/language-python-blue)
 # Introduction
 The main objective of __xFrame__ is to provide an easy and flexible framwork that handles details such as File
 - Data storage / File access
