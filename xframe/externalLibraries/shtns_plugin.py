@@ -187,7 +187,7 @@ class sh(SphericalHarmonicTransformInterface):
                 l_max=self.l_max
                 lm_shape=(l_max**2+2*l_max+1,)
                 r_shape=data[0].shape[:-1]                
-                input_data=np.zeros(r_shape+lm_shape,dtype=np.complex)
+                input_data=np.zeros(r_shape+lm_shape,dtype=complex)
                 for m_id,index in enumerate(self.cplx_m_indices):
                     input_data[...,index]=data[m_id]
                 return fun(self,input_data)

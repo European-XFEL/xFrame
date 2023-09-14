@@ -99,9 +99,12 @@ class ProjectWorker(ProjectWorkerInterface):
                 log.warning('Problem with GPU initialization. There maybe no GPU or pyOpenCL is missing. Defaulting to CPU only computations.')
                 settings.project.GPU.use = False
                 settings.general.n_control_workers = 0
+                xprint('Starting Reconstruction in CPU only mode. This is gonna be slow!')
             else:
                 settings.general.n_control_workers = settings.project.GPU.get("n_gpu_workers",6)
             Multiprocessing.comm_module.restart_control_worker()
+        else:
+            xprint('Starting Reconstruction in CPU only mode. This is gonna be slow!')
 
         self.results={}
         self.results['stats']={}

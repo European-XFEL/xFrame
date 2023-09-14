@@ -32,6 +32,29 @@ The dependencies are as follows:
 	* [click(BSD-3)](https://click.palletsprojects.com/en/8.1.x/): Commandline interface
 	* [psutil(BSD-3)](https://github.com/giampaolo/psutil): Hardware info
 
-Note that the python packages [pygsl](https://bitbucket.org/nschaeff/shtns/src/master/) and [pyopencl](https://documen.tician.de/pyopencl/) require the libraries [gsl](https://www.gnu.org/software/gsl/) and [opencl](https://www.khronos.org/opencl/) to be installed on your system to function properly. 
+Note that the python packages [pygsl](https://bitbucket.org/nschaeff/shtns/src/master/) and [pyopencl](https://documen.tician.de/pyopencl/) require the libraries [gsl](https://www.gnu.org/software/gsl/) and [opencl](https://www.khronos.org/opencl/) to be installed on your system to function properly.
 
 In order to view the opututed 3d vtk datasets we recomend to install a vtk viewer such as [paraview](https://www.paraview.org/).
+
+## Setup on [Maxwell cluster](https://confluence.desy.de/display/MXW/Maxwell+Cluster/) at Desy
+In order to setup xframe on Maxwell you need to follow a few steps (time of writing 9.2023)  
+
+ 1. Create a conda environment using the commands
+	 ```
+	 module load maxwell mamba
+	 . mamba-init
+	 mamba create --name xframe python=3.8
+	 mamba activate xframe
+	 ```
+	 You can alternatively call the environment by whatever name you like instead of "xframe"
+ 2. Install GSL
+	```
+	mamba install -c anaconda gsl
+	```
+ 3. Install xframe
+	```
+	pip install 'xframe[fxs]'
+	```
+	
+This should have done the trick :)  
+If you are still facing issues feel free to create an issue at github.
