@@ -1,5 +1,4 @@
-![image](images/xFrame_logo_title.svg)
-# Introduction
+# ![image](images/xFrame_logo_title.svg#only-light)![image](images/xFrame_logo_title_dark.svg#only-dark)
 The main objective of __xFrame__ is to provide an easy and flexible framwork that handles details such as File
 
 - Data storage / File access

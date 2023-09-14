@@ -42,9 +42,9 @@ theme:
         icon: material/brightness-4
         name: Switch to system preference
 
-  font:
-    text: Roboto
-    code: Roboto Mono
+  font: false
+ #   text: Roboto
+ #   code: Roboto Mono
   features:
     - search.highlight
     - search.suggest
