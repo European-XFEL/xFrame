@@ -61,16 +61,17 @@ We can now use these settings by importing settings.analysis from xframe as foll
 
 ```py linenums="1" 
 from xframe.interfaces import ProjectWorkerInterface
-from xframe.settings import project as opt
+from xframe import settings
 	
 class ProjectWorker(ProjectWorkerInterface):
 	def run(self):
+		opt = settings.project
 		print(f'Hello {opt.name}, your random number is: {opt.random_number}')
 ```
 
 When executing the xframe command we can tell the project which settings file to use by simply appending the name of the settings file as follows:
 
-	$ xframe tutorial.hello set123
+	$ xframe tmp hello set123
 
 	 ------- Start <tutorial.hello.Worker object at 0x7fc352b05090> ------- 
 

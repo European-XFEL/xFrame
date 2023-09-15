@@ -388,16 +388,16 @@ class DefaultProjectClick:
     
     def add_default_worker_click(self,group,click,worker_name,help='',short_help='',epilog=''):
         @group.command(worker_name,help=help,short_help=short_help,epilog=epilog)
-        @click.argument('settings_name',nargs=-1)
+        @click.argument('settings_name',required=False)
         def worker(settings_name=False,**kwargs):
             log.info(f'start: {worker_name}')
             #xprint(f'selecting worker {worker_name}')
-            if len(settings_name)==0:
-                print('no settings provided')
+            if settings_name is None:
+                #print('no settings provided')
                 select_project(name=self.project_name,worker_name=worker_name)
             else:
-                print('settings provided')
-                select_project(name=self.project_name,worker_name=worker_name,project_settings=settings_name[0])
+                #print('settings provided')
+                select_project(name=self.project_name,worker_name=worker_name,project_settings=settings_name)
             xframe.library.pythonLibrary.measureTime(run)(oneshot=False)
     def add_default_project_click(self,group,click):
         @group.group(self.project_name,chain=True,help = self.project_description, short_help= self.short_description)
