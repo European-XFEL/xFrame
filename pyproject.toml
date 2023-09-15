@@ -5,9 +5,9 @@ dynamic = ["version"]
 #dynamic = ["version"]
 
 #description = "Python framework for Fluctuation X-ray Scattering techniques, including the MTIP phasing algorithm"
-description = "Python framework for the creation of scientific algorithms targeting X-ray science."
+description = "A framework for scientific algorithms targeting X-ray scattering"
 #keywords = ["Fluctuation X-ray Scattering", "Phasing algorithms", "inverse problems", "MTIP"]
-keywords = ["Scientific algorithms"]
+keywords = ["scientific computing","xray","FXS","physics"]
 readme = "README.md"
 authors = [
     {email = "tim.berberich@xfel.eu"},
@@ -15,7 +15,7 @@ authors = [
 
 classifiers = [
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: GNU Lesser General Public License v2 (LGPLv2)",
+    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
@@ -26,6 +26,9 @@ dependencies = [
 ]
 requires-python = ">=3.8"
 
+[project.urls]
+"Homepage" = "https://github.com/European-XFEL/xFrame"
+"Documentation" = "https://xframe-fxs.readthedocs.io"
 
 [project.optional-dependencies]
 fxs = [
