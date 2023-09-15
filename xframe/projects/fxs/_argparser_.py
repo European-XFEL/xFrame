@@ -50,7 +50,10 @@ class ProjectClick(DefaultProjectClick):
         }
 
     def add_fxs(self,group,click):
-        project = self.add_default_project_click(group,click)
+        @group.group(self.project_name,chain=True,help = self.project_description, short_help= self.short_description)
+        def project():
+            pass
+        #project = self.add_default_project_click(group,click)
         return project
     def add_worker_correlate(self,group,click,worker):
         short_help=self.worker_short_help['correlate']

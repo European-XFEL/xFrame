@@ -1,14 +1,13 @@
 # Getting Started
-The following section walks you through the outlined fxs workflow.
+The following section walks you through the fxs workflow.
 First lets setup the xframe home directory by calling:
-
 ```console
 $ xframe --setup_home HOME_PATH
 ```
 and substituting `HOME_PATH` with where ever you want xframe to store files by default, if no value for `HOME_PATH` is given `~/.xframe` will be used. 
 
-??? note "Super short version of getting started"
-	If you are willing to skip first outline step of extracting correlations from scattering patterns, the super short version of this tutorial consists of executing the commands	
+??? note "Short version of getting started"
+	If you are willing to skip first step of extracting correlations from scattering patterns, the short version of this tutorial consists of executing the commands	
 	```console
 	$ xframe fxs simulate_ccd tutorial
 	$ xframe fxs extract tutorial
@@ -22,12 +21,17 @@ and substituting `HOME_PATH` with where ever you want xframe to store files by d
 	- `xframe fxs reconstruct` runs phase retrieval using the computed invariants
 	- `xframe fxs average` averages a set of provided reconstructions
 			
-	If you are running these scripts on a machine with less than 4 physical cpu cores you will have to run
-
+	You want it all in one command? No problem!  
+	*xFrame* supports command chaining so you can equivalently just call
+	```
+	$ xframe fxs simulate_ccd tutorial extract tutorial reconstruct tutorial average tutorial
+	```
+	
+	Note if you are running these scripts on a machine with less than 4 physical cpu cores you will have to run
 	```console
 	$ xframe fxs reconstruct tutorial
 	```
-	twice and change the settings for the `average` command at  `HOME_PATH/settings/projects/fxs/average/tutorial.yaml` before the averaging command can be run.
+	twice and change the settings for the `average` command at  `HOME_PATH/settings/projects/fxs/average/tutorial.yaml` before the averaging command can be run sucessfully.
 	In the settings file change the lines
 	```yaml
 	reconstruction_files:
@@ -39,6 +43,8 @@ and substituting `HOME_PATH` with where ever you want xframe to store files by d
 	  - 3d_tutorial/{today}/run_0/data.h5
 	  - 3d_tutorial/{today}/run_1/data.h5
 	```
+	
+	
 	
 	
 
@@ -91,6 +97,12 @@ There are two options to generate an initial cross-correlation dataset. In [1a](
 In [1b](#1b-simulating-cross-correlation-dataset-from-a-given-density-no-download-required) we simulate cross-correlations from a given density distribution. 
 
 If you try xframe fxs on a Laptop with only two or four physical cpu cores the computation in [1a](#1a-from-scattering-patterns-download-required) will take between 60 and 120 minutes. So if you only want to try xframe quickly simulating the cross-correlation dataset as in [1b](#1b-simulating-cross-correlation-dataset-from-a-given-density-no-download-required) is recomended.
+
+You may also chain commands to perform several actions in a row, e.g.:
+```console
+$ xframe fxs reconstruct tutorial average tutorial
+```	
+will first execute the reconstruction command using its "tutorial" settings file followed by a call to the averaging routine using its "tutorial" settings file.
 
 ### 1a. From scattering Patterns (Download required)
 Please download the files/folder 
@@ -251,7 +263,7 @@ ccd.h5
 	└── I1I1 
 ```
 
-In case the cross-correlation was created from an electron density the corresponding model density is saved in `model_density.vts`, whhich can be visualized with paraview:
+In case the cross-correlation was created from an electron density the corresponding model density is saved in `model_density.vts`, which can be visualized with paraview:
 
 |3D model (1b.)|2D model (1b.)|
 |:-:|:-:|
@@ -394,17 +406,18 @@ HOME_PATH/data/projects/fxs/
 - `first_I1I1_Bl.png` Contains images of the absolute value of $B_l(q1,q2)$ for the first few orders.
 - `proj_data.h5` is the main data output file wich is used in the reconstruction step. It contains the following fields.
 
+??? info "proj_data.h5 contents"
 	```console
     ├── dimensions
-    ├── xray_wavelength
-    ├── max_order
-    ├── average_intensity
-    ├── data_angular_points
-    ├── data_radial_points
+    ├── xray_wavelength                        # In Angstrom
+    ├── max_order                              # Maximum harmonic order for which invariants where extracted
+    ├── average_intensity                      # Angularly integrated average intensity <I>(q) (i.e.: SAXS)
+    ├── data_angular_points                    # Angular grid points of cross-correlation
+    ├── data_radial_points                     # Radial grid points of cross-correlation
     ├── data_projection_matrices
-    |   └── I1I1
+    |   └── I1I1                               # V_l,v_n from our paper (I1I1 stands for I,I correlaitons) 
     ├── data_projection_matrices_q_id_limits
-    |   └── I1I1
+    |   └── I1I1                               # Tuples of (q_min,q_max) for each harmonic order. ()
     ├── deg_2_invariant
     |   └── I1I1
     ├── deg_2_invariant_q_id_limits
@@ -685,7 +698,41 @@ HOME_PATH/data/fxs/reconstructions/
 - `pics` only for 2d reconstructions. It contains `.png` images of all computed reconstructions.
 - `data.h5` is the main putput file. It has the following structure
 ```console
-
+data.h5
+├configuration
+│ ├internal_grid
+│ │ ├real_grid
+│ │ └reciprocal_grid
+│ ├reciprocity_coefficient
+│ └xray_wavelength
+├projection_matrices (1 attributes)
+│ ├ 0
+│ ┆
+├reconstruction_results
+│ ├ 0
+│ │ ├error_dict
+│ │ │ ├main
+│ │ │ ├real
+│ │ │ │ └l2_projection_diff
+│ │ │ └reciprocal
+│ │ ├final_error
+│ │ ├fxs_unknowns
+│ │ │ ├ 0
+│ │ │ ┆
+│ │ ├initial_density
+│ │ ├initial_support
+│ │ ├last_deg2_invariant
+│ │ ├last_real_density
+│ │ ├last_reciprocal_density
+│ │ ├last_support_mask
+│ │ ├real_density
+│ │ ├reciprocal_density
+│ │ ├support_mask
+│ │ ├n_particles
+│ │ └loop_iterations
+| ┆
+└stats
+  └run_time
 ```
 
 ## 4. Align and average
@@ -790,7 +837,6 @@ HOME_PATH/data/fxs/averages/
 ```
 
 - `settings.yaml` Used settings file with included default options.
-- `Average_results.h5` Main data output file containing the following fields
 - `PRTF.png` Phase tretrieval transfer function for the averaged structure. Here are some examples
 
   | 3d 1a. | 3d 1b. | 2d 1b. |
@@ -802,3 +848,41 @@ HOME_PATH/data/fxs/averages/
   | 3d 1a. | 3d 1b. | 2d 1b. |
   |:------:|:-----:|:-----:|
   |![3D model (1b.)](../images/3d_1a_average.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} |![3D model (1b.)](../images/3d_1b_average.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} | ![3D model (1b.)](../images/2d_1b_average.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} |
+
+- `average_results.h5` Main data output file containing the following fields
+```consle
+average_results.h5
+├aligned
+│ └0
+│   ├real_density [(r: float64, i: float64): 256 × 64 × 128]
+│   └reciprocal_density   [(r: float64, i: float64): 256 × 64 × 128]
+├average
+│ ├intensity_from_densities       [float64: 256 × 64 × 128]
+│ ├intensity_from_ft_densities    [float64: 256 × 64 × 128]
+│ ├normalized_real_density        [(r: float64, i: float64): 256 × 64 × 128]
+│ ├real_density   [(r: float64, i: float64): 256 × 64 × 128]
+│ └reciprocal_density     [(r: float64, i: float64): 256 × 64 × 128]
+├average_ids (1 attributes)
+│ ├0      [int64: scalar]
+│ └1      [int64: scalar]
+├centered_average
+│ ├normalized_real_density        [(r: float64, i: float64): 256 × 64 × 128]
+│ ├real_density   [(r: float64, i: float64): 256 × 64 × 128]
+│ └reciprocal_density     [(r: float64, i: float64): 256 × 64 × 128]
+├input
+│ ├0
+│ │ ├real_density [(r: float64, i: float64): 256 × 64 × 128]
+│ │ ├reciprocal_density   [(r: float64, i: float64): 256 × 64 × 128]
+│ │ └support_mask [float64: 256 × 64 × 128]
+│ └1
+│   ├real_density [(r: float64, i: float64): 256 × 64 × 128]
+│   ├reciprocal_density   [(r: float64, i: float64): 256 × 64 × 128]
+│   └support_mask [float64: 256 × 64 × 128]
+├input_meta
+│ ├average_scaling_factors_per_file       [float64: 2]
+│ ├grids
+│ │ ├real_grid    [float64: 256 × 64 × 128 × 3] (2 attributes)
+│ │ └reciprocal_grid      [float64: 256 × 64 × 128 × 3] (2 attributes)
+│ ├projection_matrices (1 attributes)
+
+```

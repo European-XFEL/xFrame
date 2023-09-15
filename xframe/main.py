@@ -108,7 +108,7 @@ def start_routine_click(click):
    
    startup_dict = {'experiment_name':False,'exp_settings':False}
    known_experiments = xframe.known_experiments
-   xframe_help = f'xFrame {xframe.__version__}: A framwork for scientific computing targeting X-ray scattering experiments.'
+   xframe_help = f'xFrame {xframe.__version__}: A framwork for scientific algorithms targeting X-ray scattering'
    
    @click.group(invoke_without_command=True,help=xframe_help)
    @click.option('--setup_home',is_flag = False,flag_value=xframe.settings.general.default_folder,is_eager=True,type=click.Path(exists=False,resolve_path=True), help='create home folder. If PATH not specified use ~/.xframe')
