@@ -11,3 +11,4 @@ The dependencies installed alongside xframe:
 * [scipy](https://scipy.org/)
 * [h5py](https://www.h5py.org/)
 * [ruamel.yaml](http://yaml.readthedocs.io)
+* [click](https://click.palletsprojects.com/en/8.1.x/): Commandline interface

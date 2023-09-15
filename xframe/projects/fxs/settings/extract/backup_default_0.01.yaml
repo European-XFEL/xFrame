@@ -1,0 +1,345 @@
+settings_version:
+  _value: 0.01
+  
+dimensions:
+  _value: 3
+  _possible_values: [3,2]
+  _description: Assumed sample dimension.
+  
+structure_name:
+  _value: default
+  
+max_order:
+  _value: 69
+  _description: Maximal harmonic order for which to calculate FXS invariants
+  _possible_values:
+    command: '[int]'
+    
+bl_eig_sort_mode:
+  _value: 'eigenvalues'
+  _possible_values: ['eigenvalues','median_of_scaled_eigenvector']
+  _description: "Determines method for selection of eigenvector eigenvalue pairs from the degree two invariant (q1,q2) matrices Bl,Bn. By standard the required number of eigenvectors are picked by the magnitude of their eigenvalue from high to low ('eigenvalue'). If 'median_of_scaled_eigenvector' is specified the median of the corresponding eigenvector times its eigenvalue are used for selection (sorting is from high to low values.)"
+
+optimize_projection_matrices:
+  _description: "The raw projection matrices Vlm computed out of eigenvalues of the degree2 invariants don't satisfy the condition that they should be computable by a spherical harmonic transform of some real positive intensity. This method Iteratively changes "
+  use:
+    _value: False
+  n_iterations:
+    _value: 1000
+  error_change_limit:
+    _value: 1e-5
+low_resolution_intensity_approximation:
+  _description: "The raw projection matrices Vlm computed out of eigenvalues of the degree2 invariants don't satisfy the condition that they should be computable by a spherical harmonic transform of some real positive intensity. This method Iteratively changes "
+  max_order:
+    _value: 20
+    _description: 'Has to be smaller than max_order.'
+  n_iterations:
+    _value: 1000
+  error_change_limit:
+    _value: 1e-5
+
+I2I1_unknown_tranrform_extraction_method:
+  _value: 'procrustes'
+  _possible_values: ['procrustes','direct']
+  _description: 'Method for extracting the W matrix connecting the Unknowns of I1I1 correlations to those of I2I2 correlations.'
+  
+unitary_transform:
+  enforce_unitarity:
+    _value: False
+    _description: In chase I1I1 I2I2 and I2I1 deg2 coefficients could be computed. This allows to calculate a relation between the Unknowns in I^2 and I this relation should be a unitary matrix, if it is not, we can use the closest unitary appriximation to it, which can be calculated using singular-value decomposition. If this option is true the closes unitary matrix is used otherwise we just run with what ever we computed for the unitary transform.
+    
+extraction_mode:
+  _value: 'cross_correlation'
+  _possible_values: ['cross_correlation','shapes']
+  _describtion: Select mode for FXS invariant generation
+  
+cross_correlation:
+  _only_if:
+    x: extraction_mode
+    condition: 'x =="cross_correlation"'
+  _description: Settings for extracting degree 2 invariants from cross-correlation input data.
+  assume_poisson_noise:
+    _value: False
+  datasets_to_process:
+    _value: ['I1I1']
+  datasets:
+    I1I1:
+      _description: Extraction Settings for <I,I> correlations.
+      bl_extraction_method:
+        _value: 'back_substitution'
+        _possible_values: ['back_substitution','lstsq','legendre_approx']
+        _description: "Selects extraction method for invariants. back_substitution: Uses harmonic coefficients of the cross-correlation and solves for Bl using back substitution. lstsq: Works on the level of cross-correlation and uses least square methods to solve for Bl. legendre_approx: Assumes a flat ewaldssphere and combutes Bl as legendre series coefficients of the cross-correlation."
+      assume_zero_odd_orders:
+        _value: True        
+      cc_mask:
+        _description: Defines a mask for the input cross-correlation data. Usage of said mask depends on the Bl extraction method.
+        type:
+          _value: 'none'
+          _possible_values: ['none','pixel_arc','pixel_custom','custom']
+        pixel_arc:
+          _only_if:
+            x: type
+            condition: 'x=="pixel_arc"'
+          _description: Masks point pairs q1,q2,delta which correspond to distances on the ewald's sphere that are lower than a threshold value.
+          pixel_size:
+            _value: 2000
+            _description: Distance threshold in Angstroem.
+          mask_at_pi:
+            _value: False
+        pixel_custom:
+          _only_if:
+            x: type
+            condition: 'x=="pixel_custom"'
+          _description: Masks specified number of angular points around delta = 0 and specified number of q1,q2 pairs around the diagonal q1=q2.
+          n_masked_pixels_phi:
+            _value: 0.01
+            _description: relative number of masked points around delta = 0. Values between 0 and 1 as value between.
+          n_masked_pixels_q:
+            _value: 0.01
+            _description: relative number of masked points around delta = 0. Values between 0 and 1 as value between.
+          mask_at_pi:
+            _value: False
+      modify_cc:
+        pi_periodicity:
+          _value: False
+          _description: 'Only use cross-correlation values with angle pi/2<phi<=3*pi/2 to define the complete-correlation using its pi periodicity C(q1,q2,\delta)=C(q1,q2,\delta+\pi)'
+        q1q2_symmetric:
+          _value: False
+          _description: 'Enforces radial symmetry C(q1,q2,\delta)=C(q2,q1,\delta)'
+        subtract_average_intensity:
+          _value: True
+          _description: 'Whether or not to subtract the average intensity before invariant extraction.'
+      bl_enforce_psd:
+        _value: False
+      bl_q_limits:
+        min:
+          type:
+            _value: 'none'
+            _possible_values: ['none','line']
+            line:
+              _description: Defines a mask for the degree 2 invariant by specifing start and stop points according to (start_order,sart_q)-(stop_order,stop_q).
+              _only_if:
+                x: type
+                condition: 'x =="line"'
+                _value: [[4,0.004],[70,0.34]]
+        max:
+          _copy: min            
+      masked_values_to_zero:
+        _value: False                  
+    I2I1:
+      _description: Extraction Settings for <I2,I> correlations.
+      bl_extraction_method:
+        _value: 'back_substitution'
+        _possible_values: ['back_substitution','inverse','legendre_approx']
+        _description: "Selects extraction method for invariants. back_substitution: Uses harmonic coefficients of the cross-correlation and solves for Bl using back substitution. inverse: Works on the level of cross-correlation and uses least square methods to solve for Bl. legendre_approx: Assumes a flat ewaldssphere and combutes Bl as legendre series coefficients of the cross-correlation."
+      assume_zero_odd_orders:
+        _value: True
+      cc_mask:
+        _description: Defines a mask for the input cross-correlation data. Usage of said mask depends on the Bl extraction method.
+        type:
+          _value: 'none'
+          _possible_values: ['none','pixel_arc','pixel_custom','custom']
+        pixel_arc:
+          _only_if:
+            x: type
+            condition: 'x=="pixel_arc"'
+          _description: Masks point pairs q1,q2,delta which correspond to distances on the ewald's sphere that are lower than a threshold value.
+          pixel_size:
+            _value: 2000
+            _description: Distance threshold in Angstroem.
+        pixel_custom:
+          _only_if:
+            x: type
+            condition: 'x=="pixel_custom"'
+          _description: Masks specified number of angular points around delta = 0 and specified number of q1,q2 pairs around the diagonal q1=q2.
+          n_masked_pixels_phi:
+            _value: 0.01
+            _description: relative number of masked points around delta = 0. Values between 0 and 1 as value between.
+          n_masked_q1q2:
+            _value: 0.01
+            _description: relative number of masked points around delta = 0. Values between 0 and 1 as value between.
+      modify_cc:
+          pi_periodicity:
+            _value: False
+            _description: 'Only use cross-correlation values with angle pi/2<phi<=3*pi/2 to define the complete-correlation using its pi periodicity C(q1,q2,\delta)=C(q1,q2,\delta+\pi)'
+          q1q2_symmetric:
+            _value: False
+            _description: 'Enforces radial symmetry C(q1,q2,\delta)=C(q2,q1,\delta)'
+      bl_enforce_psd:
+        _value: False
+      bl_q_limits:
+        min:
+          type:
+            _value: 'none'
+            _possible_values: ['none','line']
+            line:
+              _description: Defines a mask for the degree 2 invariant by specifing start and stop points according to (start_order,sart_q)-(stop_order,stop_q).
+              _only_if:
+                x: type
+                condition: 'x =="line"'
+                _value: [[4,0.004],[70,0.34]]
+        max:
+          _copy: min
+      masked_values_to_zero:
+        _value: False
+    I2I2:
+      _copy: I1I1
+  
+shapes:
+  _only_if:
+    x: extraction_mode
+    condition: 'x=="shapes"'
+  _description: Settings for extracting degree 2 invariants from predefined 2d/3d shapes.
+  shapes:
+    _description: Specefications for the considered density parts.
+    types:
+      _value:
+        command: '["sphere"]*6'
+      _possible_values: ['sphere,thetrahedron,qube']
+    centers:
+      _value:
+        command: "[(0,0,0)] + [(140.0,np.pi/2,phi*2*np.pi/5) for phi in range(5) ]"
+      _description: 'Center positions of the different shapes given in polar/spherical coordinates.'
+    sizes:
+      _value:
+        command: '[70]*6'
+      _descripton: 'Sizes of the specified shapes'
+    densities:
+      _value: [25,50,25,50,25,50]
+      _descripton: 'Density values of the specified shapes'
+      _possible_values:
+        command: '[np.number]'
+    random_orientation:
+      _value:
+        command: '[False]*6'
+      _description: Whether or not to randomly rotate each shape
+  n_particles:
+    _description: Assumed number of particles per difrraction pattern.
+    _value: 1
+    _possible_values:
+      command: '[int]'
+  fourier_transform:
+    type:
+      _value: 'midpoint'
+      _possible_values: ['midpoint','zernike']
+      _description: Choose midpoint rule or zernike approximation for the hankel transform inside used to calculate the fourier transform
+    reciprocity_coefficient:
+      _value:
+        command: 'np.pi'
+      _description: 'Reciprocity relation is Q R = x N where Q,R are the radial limits in real an d reciprocal space and N is the number of radial steps of the grid (n_radial_point). The reciprocity coefficient is x. For x = pi this relation mimics the corresponding relation of cartesian grids used in Fast Fourier Transforms. Lowering x while keeping Q fixed effectively causes a smoothening of the real space density.'
+    allow_weight_calculation:
+      _value: True
+      _description: 'Whether or not to allow on-the-fly calculation of hankel transform weights.'
+    allow_weight_saving:
+      _value: True
+      _description: 'Whether or not to allow calculated hankel transform weights to be saved for future use.'
+      _from_file: fourier_transform
+  grid:
+    max_q:
+      _value: False
+      _description: Sets the maximal radial mometumtransver value resolved in the reciprocal grid.
+    #oversampling:
+    #  _value: 4
+    #  _description: defines max_q if max_q is set to False
+    max_order:
+      _value: 63
+    n_phi:
+      _value: 0
+      _desctipton: 'Number of azimutal angular grid points in [0,2pi) has to obey: n_phi >= 2*(max_order+1).'
+    n_theta:
+      _value: 0
+      _desctipton: 'Number of polar angular grid points in [0,pi) has to obey: n_phi >= (max_order+1)'
+    n_radial_points:
+      _value: 256
+      _from_file: fourier_transform
+  GPU:
+    use:
+      _value: True
+    n_gpu_workers:
+      _only_if:
+        x: use
+        condition: 'x'
+      _value: 1
+  save_vtk_density:
+    _value: True
+  save_vtk_intensity:
+    _value: False
+    
+IO:
+  _description: Standard Files
+  folders:
+    base:
+      _value:
+        command: 'xframe_opt.IO.folders.home'
+    data:
+      base: 'data/fxs/'
+    ccd:
+      data:
+        _value: "ccd/"
+    invariants:
+      data:
+        _value: 'invariants/'
+    invariants_archive:
+      invariants:
+        _value: 'archive/{dimensions}d_{structure_name}/{date}/run_{run}/'
+    ft_weights:
+      data:
+        _value: 'ft_weights/'
+  files:
+    ccd:
+      name:
+        _value: '3d_tutorial.h5'
+      folder:
+        _value: 'ccd'
+      options:
+        type:
+          _value: 'direct'
+    invariants:
+      name:
+        _value: 'proj_data.h5'
+      folder:
+        _value: 'invariants_archive'
+      options:
+        create_symlink:
+          _value: True # crating a symlink will make the projection data available for reconstructions
+        plot_first_invariants:
+          _value: True        
+        save_invariant:
+          _value: True  # whether or not to save deg2 invariant $B_l$ in addition to the projection matrices which satisfy $B_l=V_l V_l^/dagger$
+        plot_first_ccn:
+          _value: False
+        plot_first_invariants_from_proj_matrices:
+          _value: True
+        plot_first_projection_matrix_error_estimates:
+          _value: False
+        save_intensity_vtk:
+          _value: False
+    invariant_symlink:
+      name:
+        _value: '{dimensions}d_{structure_name}.h5'
+      folder:
+        _value: 'invariants'
+    ft_weights:
+      _only_if:
+        x: '../../extraction_mode'
+        condition: 'x == "shapes"'
+      name:
+        _value: 'weights{postfix}_{type}.h5'
+      folder:
+        _value: 'ft_weights'
+    model_density:
+      _only_if:
+        x: '../../extraction_mode'
+        condition: 'x == "shapes"'
+      name:
+        _value: '{name}_density_model.vts'
+      folder:
+        _value: 'ccd'
+    model_intensity:
+      _only_if:
+        x: '../../extraction_mode'
+        condition: 'x == "shapes"'
+      name:
+        _value: '{name}_intensity_model.vts'
+      folder:
+        _value: 'ccd'      

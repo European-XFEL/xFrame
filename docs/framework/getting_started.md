@@ -1,3 +1,5 @@
+# Note: Contents of this site are outdated and will be updated shortly !! 
+
 # Getting Started
 The follwing tutorials assume you are using a Linux operating system.
 ## Project

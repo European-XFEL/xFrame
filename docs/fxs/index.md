@@ -22,6 +22,7 @@ The dependencies are as follows:
 	* [pysofft(GPL3.0)](https://github.com/TimBerberich/pysofft) : 3D rotational alignment
 	* [shtns(CeCILL2.1)](https://bitbucket.org/nschaeff/shtns/src/master/) : Spherical harmonic Transforms
 	* [pygsl(GPL2.0)](https://github.com/pygsl/pygsl) : Invariant extraction
+	* [click(BSD-3)](https://click.palletsprojects.com/en/8.1.x/): Commandline interface
    
 * optional:
 	* [pyopencl(MIT/X)](https://documen.tician.de/pyopencl/) : GPU Support
@@ -29,7 +30,6 @@ The dependencies are as follows:
 	* [matplotlib(BSD compatible)](https://matplotlib.org/) : 2D visualization
 	* [opencv-python(MIT)](https://github.com/opencv/opencv-python) : 2D visualization
 	* [flt(MIT)](https://github.com/ntessore/flt) : Invariant extraction
-	* [click(BSD-3)](https://click.palletsprojects.com/en/8.1.x/): Commandline interface
 	* [psutil(BSD-3)](https://github.com/giampaolo/psutil): Hardware info
 
 Note that the python packages [pygsl](https://bitbucket.org/nschaeff/shtns/src/master/) and [pyopencl](https://documen.tician.de/pyopencl/) require the libraries [gsl](https://www.gnu.org/software/gsl/) and [opencl](https://www.khronos.org/opencl/) to be installed on your system to function properly.

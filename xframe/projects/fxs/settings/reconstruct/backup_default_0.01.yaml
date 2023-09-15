@@ -1,0 +1,424 @@
+dimensions:
+  _value: 3
+structure_name:
+  _value: default_structure
+particle_radius:
+  _value: 150
+  _description: Particle radius in nanometer
+grid:
+  max_q:
+    _value: False
+    _description: Sets the maximal radial mometumtransver value resolved in the reciprocal grid.
+  max_order:
+    _value: 63
+  n_phi:
+    _value: 0
+    _desctipton: 'Number of azimutal angular grid points in [0,2pi) has to obey: n_phi >= 2*(max_order+1).'
+  n_theta:
+    _value: 0
+    _desctipton: 'Number of polar angular grid points in [0,pi) has to obey: n_phi >= (max_order+1)'
+  n_radial_points:
+    _value: 256
+fourier_transform:
+  type:
+    _value: 'midpoint'
+    _possible_values: ['midpoint','zernike']
+    _description: Choose midpoint rule or zernike approximation for the hankel transform inside used to calculate the fourier transform
+  reciprocity_coefficient:
+    _value:
+      command: '1'
+    _description: 'Reciprocity relation is Q R = x N where Q,R are the radial limits in real an d reciprocal space and N is the number of radial steps of the grid (n_radial_point). The reciprocity coefficient is x. For x = pi this relation mimics the corresponding relation of cartesian grids used in Fast Fourier Transforms. Lowering x while keeping Q fixed effectively causes a smoothening of the real space density.'
+  allow_weight_calculation:
+    _value: True
+    _description: 'Whether or not to allow on-the-fly calculation of hankel transform weights.'
+  allow_weight_saving:
+    _value: True
+    _description: 'Whether or not to allow calculated hankel transform weights to be saved for future use.'
+
+density_guess:
+  _descripton: Parameters for the initial density guess. Each guess consists of random numbers of a given SNR whose envelope is either a ball or a spherically symmetric bump function.
+  type:
+    _value: 'bump'
+    _possible_values: ['bump','ball','low_resolution_autocorrelation']
+    _descroption: Types of initial density guess Functions. 
+  bump:
+    _only_if:
+      x: type 
+      condition: 'x=="bump"'
+    slope:
+      _value: 0.3
+      _description: 'Envelope function is a test function i.e.: F(r) = e^(-slope*r_max^2/(r_max^2-r^2)). Decreasing slope causes a sharper drop off near the support edge.'
+  low_resolution_autocorrelation:
+    threshold_to_max:
+      _value: 0.01
+  radius:
+    _value:
+      _copy: /particle_radius
+    _description: 'Maximal radius for which the envelop function is non-zero.'
+  amplitude_function:
+    _value: random
+  random:
+    _only_if:
+      x: amplitude_function
+      condition: 'x=="random"'
+    SNR:
+      _value: 2
+projections:
+  real:
+    projections:
+      apply:
+        _value: [support,value_threshold,assert_real]
+      value_threshold:
+        _only_if:
+          x: apply
+          condition: '"value_threshold" in x'
+        threshold:
+          _value:
+            command: "[0,False]"
+        _description: "Asserts that the real part of a given density quess is in a bounded range. All values violating the bounds will be projected to the neares bound."
+      limit_imag:
+        _only_if:
+          x: apply
+          condition: '"limit_imag" in x'
+        threshold:
+          _value: 2
+        _description: 'Upper limit on the absolute value of the imaginary part in a given electron density. All violating imaginary parts will be caped.'
+      support:
+        _only_if:
+          x: apply
+          condition: '"support" in x'        
+        initial_support:
+          type:
+            _value: max_radius
+          max_radius:
+            _only_if:
+              x: type
+              condition: 'x == "max_radius"'
+            _value:
+              _copy: /particle_radius
+          auto_correlation:
+            _only_if:
+              x: type
+              condition: 'x == "auto_correlation"'
+            threshold:
+              _value: 0.01
+        enforce_initial_support:
+          _description: 'Allows to force the support projection to be confined within the initial support independend of the current shrink wrap support. Usage of this feature is regulated by a reconstruction error metric boundary.'
+          apply:
+            _value: True
+          if_error_bigger_than:
+            _value: 6e-3
+    shrink_wrap:
+      _description: 'Shrink wrap options.'
+      sigmas:
+        _description: 'Default standart deviation of the Gaussian kernel is constant during phasing and equal to the radial steplength of the chosen grid. Otherwise a linear ramp is defined via [start_value,[stop_value,n_shrink_wrap_iterations],slope]'
+        _value:
+          command: '[[False,[False,False],False],[False,[False,False],False]]'
+      thresholds:
+        _description: 'Cutoff value relative to the maximal value in the blurred density. Can be varied by defining a linear ramp, default is constant'
+        _value:
+          command: '[[0.08,[0,0],0],[0.08,[0,0],0]]'
+    HIO:
+      beta:
+        _value:
+          command: '[[0.5,0.4,-1/700,1600],[0.01,0.002,-1/200,200]]' # start stop ,exponet and stop argument of natural exponetial decay
+        #command: '[0.5,0.5,-1/700,1600]' # start stop ,exponet and stop argument of natural exponetial decay
+        #command: '[0,0,-1/700,1500]' # start stop ,exponet and stop argument of natural exponetial decay
+      considered_projections:
+        _value:
+          command: '["all"]'   # by default all projections in projections.apply are used to generate ghe mask \gamma   
+        
+  reciprocal:
+    number_of_particles:
+      initial:
+        _value: 1
+      estimate:
+        _value: False
+        _description: Whether or not to try and estimate the number of particles during Phasing. NOT WORKING, CAUSES RECONSTRUCTION TO CRASH! 
+      settings:
+        _only_if:
+          x: estimate
+          condition: 'x'
+        project:
+          _value: False
+        estimate_in:
+          _value:
+            command: '["ER"]'
+        scan_space:
+          _value:
+            command: '[1,20,40]'
+    regrid:
+      _description: 'Input projection matrices (Eigenvalues of deg2 invariants) are regridded onto the internal radial grid. The interpolation type can be specified below.'
+      interpolation:
+        _value: 'cubic'
+        _possible_values: ['nearest','linear','cubic']
+    used_order_ids:
+      _value:
+        command: 'np.arange(64)'
+      _description: 'Specifies the harmonic orders that are used in the reciprocal constraint.'
+    odd_orders_to_0:
+      _value: True
+      _description: 'Whether or not to project all odd intensity harmonic coefficients to 0 (Equivaluent to enforcing Point inversion symmetry)'
+    use_averaged_intensity:
+      _value: True
+      _description: 'Whether or not the averaged intensity is used instead of the 0-order projection vector coming from the 0th order degree 2 invariant B_0.'
+    q_mask:
+      type:
+        _value: 'none'
+      _possible_values: ['none','from_projection_matrices','manual']
+      manual:
+        _only_if:
+          x: type
+          condition: '"manual"==x'
+        type: 'region'
+        _possible_values: ['region','order_dependent_line']
+        region:
+          _only_if:
+            x: type
+            condition: 'x == "region"'
+          _value: [False,False]
+        order_dependent_line:
+          _only_if:
+            x: type
+            condition: 'x == "order_dependent_line"'
+          _value: [[4,0.004],[70,0.3]]
+    SO_freedom:
+      _description: 'Whether or not to use the overall rotational freedom during phasing. Default is True in 2D and False in 3D. This is because usage in 3D has neglgible effect.'
+      use:
+        _if:
+          x: '/dimensions'
+          condition: 'x==3'
+          values: [False,True]
+
+output_density_modifiers:
+  shift_to_center:
+    _value: False
+  fix_orientation:
+    _only_if:
+      x: /dimensions
+      condition: 'x == 2'
+    _value: True
+
+main_loop:
+  error:
+    methods:
+      real:
+        calculate:
+          _value: [l2_projection_diff]
+        l2_projection_diff:
+          _only_if:
+            x: calculate
+            condition: '"l2_projection_diff" in x'
+          inside_initial_support:
+            _value: True
+      reciprocal:
+        calculate:
+          _value: []
+        l2_projection_diff:
+          _only_if:
+            x: calculate
+            condition: '"l2_projection_diff" in x'
+          inside_initial_support:
+            _value: True
+        deg2_invariant_l2_diff:
+          _only_if:
+            x: calculate
+            condition: '"deg2_invariant_l2_diff" in x'
+          order:
+            _value: 2
+      main:
+        metrics:
+          real:
+            _value: ['l2_projection_diff']
+          reciprocal:
+            _value: []
+        type:
+          _value: 'mean'
+    limits:
+      use:
+        _value: False
+      values:
+        _only_if:
+          x: use
+          condition: 'x'
+        _value: [False,False]
+    gain_limits:
+      use:
+        _value: False
+      values:
+        _only_if:
+          x: use
+          condition: 'x'
+        _value: [False,False]
+  sub_loops:
+    order:
+      _value: ['main','refinement']
+    main:
+      methods:
+        HIO:
+          iterations:
+            _if:
+              x: /dimensions
+              condition: 'x==3'
+              values: [60,90]
+          ft_stab:
+            _value: True
+        ER:
+          iterations:
+            _if:
+              x: /dimensions
+              condition: 'x==3'
+              values: [40,10]
+          ft_stab:
+            _value: True
+        SW:
+          _value: 1
+      order:
+        _value:
+          command: "['HIO','SW','ER']"
+      iterations:
+        _value: 15
+      best_density_not_in_first_n_iterations:
+        _value:
+          command: 'np.inf'
+    refinement:
+      methods:
+        ER:
+          iterations:
+            _if:
+              x: /dimensions
+              condition: 'x==3'
+              values: [100,100]
+          ft_stab:
+            _value: True
+        SW:
+          _value: 1
+      order:
+        _value:
+          command: "['SW','ER']"
+      iterations:
+        _value: 2
+      best_density_not_in_first_n_iterations:
+        _value:
+          command: 'np.inf'
+GPU:
+  use:
+    _value: True
+  n_gpu_workers:
+    _value:
+      command: 'max(Multiprocessing.free_cpus//10,1)'
+multi_process:
+  use:
+    _value: True
+  n_parallel_reconstructions:
+    _value: False
+profiling:
+  enable:
+    _value: False
+  reconstruction_process_id:
+    _value: 1
+  gpu_worker_id:
+    _value: -1
+
+IO:
+  folders:
+    home:
+      _value:
+        command: 'xframe_opt.IO.folders.home'
+    data:
+      home:
+        _value: 'data/fxs/'
+    invariants:
+      data:
+        _value: 'invariants/'
+    results:
+      data:
+        _value:
+          'reconstructions/{dimensions}d_{structure_name}/{time}/run_{run}/'
+    vtk_files:
+      results:
+        _value: 'vtk/'
+    ft_weights:
+      data:
+        _value: 'ft_weights/'
+    result_image:
+      _only_if:
+        x: '/dimensions'
+        condition: 'x==2'
+      results:
+        _value: 'pics/'
+    
+  files:
+    invariants:
+      name:
+        _value: '{dimensions}d_{structure_name}.h5'
+      folder:
+        _value: invariants
+      options:
+        plot_first_invariants:
+          _value: True
+        plot_range:
+          _only_if:
+            x: plot_first_invariants
+            condition: 'x'
+          _value: False
+          _possible_values: '[False,[lower_bound,upper_bound]]'
+        save_invariant:
+          _value: true
+    ft_weights:
+      name:
+        _value: 'weights{postfix}_{type}.h5'
+      folder:
+        _value: 'ft_weights'
+    reconstructions:
+      name:
+        _value: data.h5
+      folder:
+        _value: results
+      options:
+        generate_vtk_files:
+          _value:
+            command: 'slice(2)'
+        generate_2d_images:
+          _only_if:
+            x: '/dimensions'
+            condition: 'x==2'
+          _value: True
+        plot_error_metrics:
+          _value: True
+        plot_first_used_invariants:
+          _value: True
+        plot_reconstructed_deg2_invariants:
+          _value:
+            command: slice(0,3) 
+        plot_invariant_error:
+          _value: False #[0, 2, 40]
+    real_vtk:
+      name:
+        _value: real_{reconstruction}.vts
+      folder:
+        _value: vtk_files
+    reciprocal_vtk:
+      name:
+        _value: reciprocal_{reconstruction}.vts
+      folder:
+        _value: vtk_files
+        
+    result_image_intensity:
+      _only_if:
+        x: '/dimensions'
+        condition: 'x==2'
+      name:
+        _value: reconstruction_{reconstruction}.cv
+      folder:
+        _value: result_image_intensity
+    result_image:
+      _only_if:
+        x: '/dimensions'
+        condition: 'x==2'
+      name:
+        _value: reconstruction_{reconstruction}.cv
+      folder:
+        _value: result_image
+
+  

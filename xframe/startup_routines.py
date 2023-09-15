@@ -178,7 +178,6 @@ def lookup_workers(project_path):
     pattern = re.compile(opt.worker_regexpr)
     worker_names = [os.path.splitext(name)[0] for name in file_names if pattern.match(name)]
     #print(f'workers = {worker_names}')
-    names_to_exclude = ['database','interfaces']
     return worker_names
 
 def _parse_project_name(name,worker_name=False):

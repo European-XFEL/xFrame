@@ -133,7 +133,7 @@ def start_routine_click(click):
       if isinstance(kwargs['experiment'],str):
          startup_dict['experiment_name']=kwargs['experiment']
          xframe.select_experiment(exp_name=kwargs['experiment'],exp_settings=kwargs['experiment_options'])
-      
+
       @ctx.call_on_close
       def close_workers():
          xframe.controller.control_worker.stop_working()

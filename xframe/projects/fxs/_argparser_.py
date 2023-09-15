@@ -1,5 +1,12 @@
+import logging
+import glob
+import os
 from xframe.startup_routines import DefaultProjectArgparser
 from xframe.startup_routines import DefaultProjectClick
+from xframe.library.pythonLibrary import xprint
+import xframe
+
+log=logging.getLogger('root')
 
 class ProjectArgparser(DefaultProjectArgparser):
     def __init__(self):
@@ -50,9 +57,24 @@ class ProjectClick(DefaultProjectClick):
         }
 
     def add_fxs(self,group,click):
-        @group.group(self.project_name,chain=True,help = self.project_description, short_help= self.short_description)
-        def project():
-            pass
+        @group.group(self.project_name,chain=True,help = self.project_description, short_help= self.short_description,invoke_without_command=True)
+        @click.option('--restore_defaults', is_flag = True,is_eager=True,help='Restores default settings for all commands.')
+        @click.pass_context
+        def project(ctx,**kwargs):
+            if kwargs['restore_defaults']:
+                db = xframe.database.default
+                workers = xframe.startup_routines.lookup_workers(xframe.known_projects['fxs'])
+                for worker in workers:
+                    project_path_modifier = {'project':'fxs','worker':worker}
+                    settings_install_path = db.get_path('settings_install_project',path_modifiers=project_path_modifier,is_file=False)
+                    backup_default_settings_files = glob.glob(os.path.join(settings_install_path,'backup_default_*.yaml'))
+                    default_settings_files = [os.path.join(os.path.dirname(p),os.path.basename(p)[7:]) for p in backup_default_settings_files]
+                    for orig,target in zip(backup_default_settings_files,default_settings_files):
+                        log.info(f'Copying {orig} to {target}')
+                        db.copy(orig,target)
+                xprint(f'Default settings restored for {workers}')                
+            else:
+                print(ctx.get_help())
         #project = self.add_default_project_click(group,click)
         return project
     def add_worker_correlate(self,group,click,worker):

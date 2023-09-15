@@ -1,0 +1,124 @@
+structure_name: 'default'
+image_dimensions:
+  _value: [512,512]
+
+n_processes:
+  _value: 32
+split_mode:
+  _value: 'sequential'
+batch_size:
+  _value: 16
+max_n_patterns:
+  _value: 12288
+
+
+compute:
+  _possible_values: [['is_good','waxs_aver','ccf']]
+  _value: ['is_good','waxs_aver','ccf_q1q2']
+intensity_pixel_threshold:
+  _value:
+    command: '[False,4.0,1e4]'
+intensity_radial_pixel_filter:
+  _value:
+    command: '[False,["average_sigma",3]]'
+use_binary_mask:
+  _value: False
+subtract_background:
+  _value: False
+ROI_normalization:
+  _value:
+    command: '[False,0.3,0.9]'
+ROI_mean_filter:
+  _value:
+    command: '[False,1e2,1e4]'
+
+pixel_size:
+  _value: 200.0
+  _description: 'Detector pixel size in microns'
+sample_distance:
+  _value: 620.0
+  _description: 'Detector to sample distance in [mm]'
+wavelength:
+  _value: 1.23984
+  _description: 'X-ray wavelength in Angstrem'
+detector_origin:
+  _value: [255.2,255.5]
+  _description: '2D detector origin in pixel coordinates.'
+
+
+polarization_correction:
+  _value:
+    command: '[False,"h"]'
+solid_angle_correction:
+  _value: False
+interpolation_order:
+  _value: 2
+    
+qrange:
+  _value: False
+qrange_xcca:
+  _value: False
+phi_range:
+  _value:
+    command: '(0.0, 2*np.pi, 1536, "exact")'
+fc_n_max:
+  _value: 15 
+
+ccf_2p_symmetrize:
+  _value: False
+
+profile:
+  use:
+    _value: False
+  process_id:
+    _value: 1
+
+IO:
+  folders:
+    home:
+      _value:
+        command: 'xframe_opt.IO.folders.home'
+    data:
+      home:
+        _value: 'data/fxs/'
+    in_base:
+      data:
+        _value: 'input_files/'
+    ccd:
+      data:
+        _value: "ccd/"
+    ccd_archive:
+      ccd:
+        _value: "archive/{structure_name}/{date}/run_{run}/"
+  files:
+    ccd:
+      name:
+        _value: 'ccd.h5'
+      folder:
+        _value: 'ccd_archive'
+      options:
+        save_symlink:
+          _value: True
+        save_settings:
+          _value: True
+    ccd_symlink:
+      name:
+        _value: '{structure_name}.h5'
+      folder:
+        _value: 'ccd'
+    input_file_list:
+      name:
+        _value: patterns_list.txt
+      folder:
+        _value: in_base
+    binary_mask:
+      name:
+        _value: mask.raw
+      folder:
+        _value: in_base
+    background:
+      name:
+        _value: background.raw
+      folder:
+        _value: in_base
+    
