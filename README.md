@@ -1,4 +1,4 @@
-![image](docs/images/xFrame_logo_title.svg)
+![](https://raw.githubusercontent.com/European-XFEL/xframe/main/docs/images/xFrame_logo_title.svg "xFrame logo")
 [![Lates Release](https://img.shields.io/github/v/release/European-XFEL/xframe)](https://github.com/European-XFEL/xframe/releases)
 ![License](https://img.shields.io/github/license/European-XFEL/xframe)
 [![Documentation](https://img.shields.io/readthedocs/extra-foam)](https://xframe-fxs.readthedocs.io/en/latest/)
