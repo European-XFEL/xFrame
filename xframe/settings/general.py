@@ -47,6 +47,7 @@ IO = {"folders":
       {"default_home":'~/.xframe/',
        "home":home_folder,
        'install':install_folder,
+       'direct':'{path}',
        'experiments':{'home':'experiments/'},
        'projects':
        {'home':'projects/'},
@@ -69,7 +70,9 @@ IO = {"folders":
        'settings_default_project':
        {'default_home':'settings/projects/{project}/{worker}/'},
        'settings_default_experiment':
-       {'default_home':'settings/experiments/{experiment}/'}
+       {'default_home':'settings/experiments/{experiment}/'},
+       'settings_direct':
+           {'direct':'settings/{worker}/'}
        },
       'files':{
           'config':{
@@ -103,6 +106,10 @@ IO = {"folders":
           'settings_install_project':{
               'name': '{name}.yaml',
               'folder': 'settings_install_project'
+          },
+          'settings_direct':{
+              'name': '{name}.yaml',
+              'folder': 'direct'
           }
       }
     }

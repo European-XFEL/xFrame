@@ -74,7 +74,8 @@ class ProjectClick(DefaultProjectClick):
                         db.copy(orig,target)
                 xprint(f'Default settings restored for {workers}')                
             else:
-                print(ctx.get_help())
+                if ctx.invoked_subcommand is None:
+                    print(ctx.get_help())
         #project = self.add_default_project_click(group,click)
         return project
     def add_worker_correlate(self,group,click,worker):

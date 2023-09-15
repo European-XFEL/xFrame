@@ -122,8 +122,12 @@ def start_routine_click(click):
    def run(ctx,*args,**kwargs):
       if kwargs['debug']:
          logging.getLogger('root').setLevel(logging.DEBUG)
+         if ctx.invoked_subcommand is None:
+            print(ctx.get_help())
       elif kwargs['verbose']:
          logging.getLogger('root').setLevel(logging.INFO)
+         if ctx.invoked_subcommand is None:
+            print(ctx.get_help())
       if isinstance(kwargs['setup_home'],str):
          xframe.startup_routines.setup_home(kwargs['setup_home'])
       if kwargs['print_home']:
@@ -133,6 +137,8 @@ def start_routine_click(click):
       if isinstance(kwargs['experiment'],str):
          startup_dict['experiment_name']=kwargs['experiment']
          xframe.select_experiment(exp_name=kwargs['experiment'],exp_settings=kwargs['experiment_options'])
+         if ctx.invoked_subcommand is None:
+            print(ctx.get_help())
 
       @ctx.call_on_close
       def close_workers():

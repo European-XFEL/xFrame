@@ -304,8 +304,9 @@ class DefaultDB(FileAccess,DatabaseInterface):
         dir_name = os.path.basename(os.path.dirname(project_path))
         settings_folders = [
             self.get_path('settings_'+target,path_modifiers={target:dir_name,'worker':worker_name},is_file=False),
+            self.get_path('settings_direct',path_modifiers={'path':project_path,'worker':worker_name},is_file=False),
             self.get_path('settings_default_'+target,path_modifiers={target:dir_name,'worker':worker_name},is_file=False),
-            self.get_path('settings_install_'+target,path_modifiers={target:dir_name,'worker':worker_name},is_file=False)
+            self.get_path('settings_install_'+target,path_modifiers={target:dir_name,'worker':worker_name},is_file=False),      
         ]
         s_load = SettingsLoader(loader,settings_folders,ignore_file_not_found=ignore_file_not_found)
         settings,defaults,loader_sub_defaults = s_load.load_settings_files(project_path,worker_name,settings_file_name,direct_path = direct_path)

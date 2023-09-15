@@ -1,56 +1,72 @@
-# Note: Contents of this site are outdated and will be updated shortly !! 
-
 # Getting Started
-The follwing tutorials assume you are using a Linux operating system.
+The follwing tutorials assume you are using a Linux operating system.  
+First lets create the home folder for *xFrame* by calling
+```console
+$ xframe --setup_home HOME_PATH
+```
+and substituting `HOME_PATH` with where ever you want *xFrame* to store files and lookup projects by default. If no value for `HOME_PATH` is given `~/.xframe` will be used. 
+
+
 ## Project
-To create a project create the folders
-
-	~/.xframe/projects/tutorial/
-
+To create a project simply create the folder
+```
+HOME_PATH/projects/tmp
+```
 Every subfolder of the 'projects' folder will be recognized as a *project* by xFrame.
-You can also configure xFrame to search other locations for *projects* more on that can be found in [xFrame Settings](#xframe-settings).
-Now let us bring life to our first project by creating the file 
-
-	~/.xframe/projects/tutorial/hello.py
-
-With the following content
-
-	from xframe.analysis.analysisWorker import AnalysisWorker
+You can also configure *xFrame* to search other locations for *projects* more on that can be found in [xFrame Settings](#xframe-settings).
+Now, let us bring life to our first project by creating the file 
+```
+HOME_PATH/projects/tmp/hello.py
+```
+with the following content
+```py linenums="1" 
+from xframe.interfaces import ProjectWorkerInterface	
 	
-	class Worker(AnalysisWorker):
-		def start_working(self):
-			print('Hello There!')
-
+class ProjectWorker(ProjectWorkerInterface):
+	def run(self):
+	print('Hello There!')
+```
 Going back to your command line we can now do the following
+```console
+$ xframe tmp hello
 	
-	$ xframe tutorial.hello
+ ------- Start <tutorial.hello.Worker object at 0x7f54c34d5050> ------- 
 	
-	 ------- Start <tutorial.hello.Worker object at 0x7f54c34d5050> ------- 
-	
-	Hello There!
+Hello There!
 
-	 ------- Finished <tutorial.hello.Worker object at 0x7f54c34d5050> ------- 
-
+ ------- Finished <tutorial.hello.Worker object at 0x7f54c34d5050> ------- 
+```	
 ## Settings
 Now lets add some settings to our project. For that create the following file (and its sub folders.)
-
-	~/.xframe/projects/tutorial/settings/hello/set123.yaml
-
+```	
+HOME_PATH/projects/tmp/settings/hello/set123.yaml
+```	
 with contents
-
-	name: Pi
-	random_number:
-		command: 'np.random.rand()'
-
+```yaml linenums="1" 
+name: Pi
+random_number:
+	command: 'np.random.rand()'
+```	
 Note that the whatever string is placed behind a `command:` field will be executed and stored in the settings name above it, in this case `random_number:`.
+
+??? info "Other locations for settings files"
+	If you like to keep your settings separate from your actual project you can also create the settingsfile at
+	```	
+	HOME_PATH/settings/projects/tmp/hello/set123.yaml
+	```	
+	In case both files exist the one in `HOME_PATH/settings` is usesed preferentially.
+	
+
 We can now use these settings by importing settings.analysis from xframe as follows.
+
+```py linenums="1" 
+from xframe.interfaces import ProjectWorkerInterface
+from xframe.settings import project as opt
 	
-	from xframe.analysis.analysisWorker import AnalysisWorker
-	from xframe.settings import analysis as opt
-	
-	class Worker(AnalysisWorker):
-		def start_working(self):
-			print(f'Hello {opt.name}, your random number is: {opt.random_number}')
+class ProjectWorker(ProjectWorkerInterface):
+	def run(self):
+		print(f'Hello {opt.name}, your random number is: {opt.random_number}')
+```
 
 When executing the xframe command we can tell the project which settings file to use by simply appending the name of the settings file as follows:
 
@@ -63,7 +79,7 @@ When executing the xframe command we can tell the project which settings file to
 	 ------- Finished <tutorial.hello.Worker object at 0x7fc352b05090> -------
 
 xFrame also allows for the creation of default settings for this and further details view [Settings](#settings_1).
-
+# Note: Contents from here on are outdated and will be updated shortly !! 
 ## Data Access
 Let say we want to save or load some data for this we can use xframe.database.analysis module.
 To see how this might be done consider the following change to our `hallo.py` file:
