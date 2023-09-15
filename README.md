@@ -1,6 +1,6 @@
 ![image](docs/images/xFrame_logo_title.svg)
-[![Lates Release](https://img.shields.io/github/v/release/European-XFEL/xFrame)](https://github.com/European-XFEL/xFrame/releases)
-![License](https://img.shields.io/github/license/European-XFEL/xFrame)
+[![Lates Release](https://img.shields.io/github/v/release/European-XFEL/xframe)](https://github.com/European-XFEL/xframe/releases)
+![License](https://img.shields.io/github/license/European-XFEL/xframe)
 [![Documentation](https://img.shields.io/readthedocs/extra-foam)](https://xframe-fxs.readthedocs.io/en/latest/)
 [![Documentation](https://img.shields.io/badge/documentation-online-blue)](https://xframe-fxs.readthedocs.io/en/latest/)
 ![Language](https://img.shields.io/badge/language-python-blue)
@@ -13,7 +13,6 @@ The main objective of __xFrame__ is to provide an easy and flexible framwork tha
 
 Allowing users to focus on the "scientific" part of their algorithm.  
 *xFrame* has been created during our quest of writing a toolkit for fluctuation X-ray scattering.
-
 To install *xFrame* simply call
 ```
 pip install xframe
