@@ -70,15 +70,15 @@ class ProjectWorker(ProjectWorkerInterface):
 ```
 
 When executing the xframe command we can tell the project which settings file to use by simply appending the name of the settings file as follows:
+```console
+$ xframe tmp hello set123
 
-	$ xframe tmp hello set123
+ ------- Start <tutorial.hello.Worker object at 0x7fc352b05090> ------- 
+	
+Hello Pi, your random number is: 0.9360428946014102
 
-	 ------- Start <tutorial.hello.Worker object at 0x7fc352b05090> ------- 
-
-	Hello Pi, your random number is: 0.9360428946014102
-
-	 ------- Finished <tutorial.hello.Worker object at 0x7fc352b05090> -------
-
+ ------- Finished <tutorial.hello.Worker object at 0x7fc352b05090> -------
+```
 xFrame also allows for the creation of default settings for this and further details view [Settings](#settings_1).
 # Note: Contents from here on are outdated and will be updated shortly !! 
 ## Data Access
