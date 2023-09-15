@@ -5,7 +5,7 @@
 [![Documentation](https://img.shields.io/badge/documentation-online-blue)](https://xframe-fxs.readthedocs.io/en/latest/)
 ![Language](https://img.shields.io/badge/language-python-blue)
 # Introduction
-The main objective of __xFrame__ is to provide an easy and flexible framwork that handles details such as File
+The main objective of __xFrame__ is to provide an easy and flexible framwork that handles details such as
 - Data storage / File access
 - Settings management
 - Multiprocessing
