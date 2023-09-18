@@ -241,12 +241,12 @@ HOME_PATH/data/fxs/
 └── ccd
     ├── 3d_tutorial.h5                      #symlink to ccd.h5 from below
     └── archive
-	└── 3d_tutorial
-	    └── DATE
-		└── run_0
-		    ├── settings.yaml
-		    ├── ccd.h5
-		    └── model_density.vts   #only for section 1b
+		└── 3d_tutorial
+			└── DATE
+				└── run_0
+					├── settings.yaml
+					├── ccd.h5
+					└── model_density.vts   #only for section 1b
 ```
 
 Here `settings.yaml` contains the parsed settings file used in the computation. This settings file will additionally to the above shown options contain all default options which have not been changed.
@@ -345,7 +345,8 @@ In the `dimensions: 3` case there are three possible invariant extraction method
 
 	$$
 	\begin{aligned}
-	C_n(q_1,q_2) = \sum_{l\geq |n|} \overline{P}^{|n|}_l(q_1)\overline{P}^{|n|}_l(q_2) B_l(q_1,q_2) && \overline{P}^{|n|}_l(q)= \sqrt{\frac{(l-n)!}{4\pi(l+n)!}} P^{|n|}_l(\cos(\theta(q)))
+	C_n(q_1,q_2) &= \sum_{l\geq |n|} \overline{P}^{|n|}_l(q_1)\overline{P}^{|n|}_l(q_2) B_l(q_1,q_2)\\
+	\overline{P}^{|n|}_l(q)&= \sqrt{\frac{(l-n)!}{4\pi(l+n)!}} P^{|n|}_l(\cos(\theta(q)))
 	\end{aligned}
 	$$
 	
@@ -669,8 +670,8 @@ HOME_PATH/data/fxs/reconstructions/
             ├── error_metrics.png
             ├── first_Bl.png
             ├── settings.yaml
-	    ├── pics (only in the 2d case)
-	    |   └── reconstruction_RECONSTRUCTION_NUMBER.png
+			├── pics (only in the 2d case)
+			|   └── reconstruction_RECONSTRUCTION_NUMBER.png
             └── vtk
                 ├── real_RECONSTRUCTION_NUMBER.vts
                 └── reciprocal_RECONSTRUCTION_NUMBER.vts
@@ -696,44 +697,45 @@ HOME_PATH/data/fxs/reconstructions/
   |![3D model (1b.)](../images/3d_1a_reconstruction.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} |![3D model (1b.)](../images/3d_1b_reconstruction.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} | ![3D model (1b.)](../images/2d_1b_reconstruction.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} |
 
 - `pics` only for 2d reconstructions. It contains `.png` images of all computed reconstructions.
-- `data.h5` is the main putput file. It has the following structure
-```console
-data.h5
-├configuration
-│ ├internal_grid
-│ │ ├real_grid
-│ │ └reciprocal_grid
-│ ├reciprocity_coefficient
-│ └xray_wavelength
-├projection_matrices (1 attributes)
-│ ├ 0
-│ ┆
-├reconstruction_results
-│ ├ 0
-│ │ ├error_dict
-│ │ │ ├main
-│ │ │ ├real
-│ │ │ │ └l2_projection_diff
-│ │ │ └reciprocal
-│ │ ├final_error
-│ │ ├fxs_unknowns
-│ │ │ ├ 0
-│ │ │ ┆
-│ │ ├initial_density
-│ │ ├initial_support
-│ │ ├last_deg2_invariant
-│ │ ├last_real_density
-│ │ ├last_reciprocal_density
-│ │ ├last_support_mask
-│ │ ├real_density
-│ │ ├reciprocal_density
-│ │ ├support_mask
-│ │ ├n_particles
-│ │ └loop_iterations
-| ┆
-└stats
-  └run_time
-```
+- `data.h5` is the main putput file.
+??? note "data.h5 structure"
+    ```console
+    data.h5
+    ├configuration
+    │ ├internal_grid
+    │ │ ├real_grid
+    │ │ └reciprocal_grid
+    │ ├reciprocity_coefficient
+    │ └xray_wavelength
+    ├projection_matrices (1 attributes)
+    │ ├ 0
+    │ ┆
+    ├reconstruction_results
+    │ ├ 0
+    │ │ ├error_dict
+    │ │ │ ├main
+    │ │ │ ├real
+    │ │ │ │ └l2_projection_diff
+    │ │ │ └reciprocal
+    │ │ ├final_error
+    │ │ ├fxs_unknowns
+    │ │ │ ├ 0
+    │ │ │ ┆
+    │ │ ├initial_density
+    │ │ ├initial_support
+    │ │ ├last_deg2_invariant
+    │ │ ├last_real_density
+    │ │ ├last_reciprocal_density
+    │ │ ├last_support_mask
+    │ │ ├real_density
+    │ │ ├reciprocal_density
+    │ │ ├support_mask
+    │ │ ├n_particles
+    │ │ └loop_iterations
+    | ┆
+    └stats
+      └run_time
+    ```
 
 ## 4. Align and average
 Since we only used orientation and position invariant constraints in the reconstruction, all computed densities are shifted, point inverted and rotated with respect to each other. This means that in order to average over several reconstructions we first have to align them.
@@ -828,12 +830,12 @@ HOME_PATH/data/fxs/averages/
 └── 3d_tutorial
     └── DATE
         └── run_0
-	    ├── settings.yaml	
+			├── settings.yaml	
             ├── average_results.h5
             ├── PRTF.png
             └── vtk			
-	        ├── real_average.vts	
-                └── reciprocal_average.vts				
+				├── real_average.vts	
+				└── reciprocal_average.vts				
 ```
 
 - `settings.yaml` Used settings file with included default options.
@@ -849,40 +851,41 @@ HOME_PATH/data/fxs/averages/
   |:------:|:-----:|:-----:|
   |![3D model (1b.)](../images/3d_1a_average.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} |![3D model (1b.)](../images/3d_1b_average.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} | ![3D model (1b.)](../images/2d_1b_average.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} |
 
-- `average_results.h5` Main data output file containing the following fields
-```consle
-average_results.h5
-├aligned
-│ └0
-│   ├real_density [(r: float64, i: float64): 256 × 64 × 128]
-│   └reciprocal_density   [(r: float64, i: float64): 256 × 64 × 128]
-├average
-│ ├intensity_from_densities       [float64: 256 × 64 × 128]
-│ ├intensity_from_ft_densities    [float64: 256 × 64 × 128]
-│ ├normalized_real_density        [(r: float64, i: float64): 256 × 64 × 128]
-│ ├real_density   [(r: float64, i: float64): 256 × 64 × 128]
-│ └reciprocal_density     [(r: float64, i: float64): 256 × 64 × 128]
-├average_ids (1 attributes)
-│ ├0      [int64: scalar]
-│ └1      [int64: scalar]
-├centered_average
-│ ├normalized_real_density        [(r: float64, i: float64): 256 × 64 × 128]
-│ ├real_density   [(r: float64, i: float64): 256 × 64 × 128]
-│ └reciprocal_density     [(r: float64, i: float64): 256 × 64 × 128]
-├input
-│ ├0
-│ │ ├real_density [(r: float64, i: float64): 256 × 64 × 128]
-│ │ ├reciprocal_density   [(r: float64, i: float64): 256 × 64 × 128]
-│ │ └support_mask [float64: 256 × 64 × 128]
-│ └1
-│   ├real_density [(r: float64, i: float64): 256 × 64 × 128]
-│   ├reciprocal_density   [(r: float64, i: float64): 256 × 64 × 128]
-│   └support_mask [float64: 256 × 64 × 128]
-├input_meta
-│ ├average_scaling_factors_per_file       [float64: 2]
-│ ├grids
-│ │ ├real_grid    [float64: 256 × 64 × 128 × 3] (2 attributes)
-│ │ └reciprocal_grid      [float64: 256 × 64 × 128 × 3] (2 attributes)
-│ ├projection_matrices (1 attributes)
-
-```
+- `average_results.h5` Main data output file.
+??? note "average_results.h5 structure"
+    ```consle
+    average_results.h5
+    ├aligned
+    │ └0
+    │   ├real_density [(r: float64, i: float64): 256 × 64 × 128]
+    │   └reciprocal_density   [(r: float64, i: float64): 256 × 64 × 128]
+    ├average
+    │ ├intensity_from_densities       [float64: 256 × 64 × 128]
+    │ ├intensity_from_ft_densities    [float64: 256 × 64 × 128]
+    │ ├normalized_real_density        [(r: float64, i: float64): 256 × 64 × 128]
+    │ ├real_density   [(r: float64, i: float64): 256 × 64 × 128]
+    │ └reciprocal_density     [(r: float64, i: float64): 256 × 64 × 128]
+    ├average_ids (1 attributes)
+    │ ├0      [int64: scalar]
+    │ └1      [int64: scalar]
+    ├centered_average
+    │ ├normalized_real_density        [(r: float64, i: float64): 256 × 64 × 128]
+    │ ├real_density   [(r: float64, i: float64): 256 × 64 × 128]
+    │ └reciprocal_density     [(r: float64, i: float64): 256 × 64 × 128]
+    ├input
+    │ ├0
+    │ │ ├real_density [(r: float64, i: float64): 256 × 64 × 128]
+    │ │ ├reciprocal_density   [(r: float64, i: float64): 256 × 64 × 128]
+    │ │ └support_mask [float64: 256 × 64 × 128]
+    │ └1
+    │   ├real_density [(r: float64, i: float64): 256 × 64 × 128]
+    │   ├reciprocal_density   [(r: float64, i: float64): 256 × 64 × 128]
+    │   └support_mask [float64: 256 × 64 × 128]
+    ├input_meta
+    │ ├average_scaling_factors_per_file       [float64: 2]
+    │ ├grids
+    │ │ ├real_grid    [float64: 256 × 64 × 128 × 3] (2 attributes)
+    │ │ └reciprocal_grid      [float64: 256 × 64 × 128 × 3] (2 attributes)
+    │ ├projection_matrices (1 attributes)
+    
+    ```

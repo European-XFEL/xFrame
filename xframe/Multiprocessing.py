@@ -164,18 +164,21 @@ def update_free_cpus():
     default_n_processes = free_cpus
 def check_available_cpus_before_spawning_childs(n_childs,are_daemons=False):
     update_free_cpus()
+    print('n_childs',n_childs)
     would_use_hyperthreads = (free_cpus - n_childs<0)
     would_use_more_processes_than_available_hyper_threads =  (free_threads - n_childs<0)
-    if would_use_hyperthreads:
+    if would_use_hyperthreads and (not would_use_more_processes_than_available_hyper_threads):
         if are_daemons:
             log.warning('Total number of daemon processes exceedes CPU core count. Some of the spawned daemons will use hyperthreading threads!')
         else:
-            log.info('Total number of processes exceedes CPU core count. Some of the spawned processes will use hyperthreading threads. This may slow down performance.')
-    elif would_use_more_processes_than_available_hyper_threads:
+            log.warning('Total number of processes exceedes CPU core count. Some of the spawned processes will use hyperthreading threads. This may slow down performance.')
+
+    if would_use_more_processes_than_available_hyper_threads:
         if are_daemons:
             log.warning('Total number of daemon processes exceedes CPU thread count including hyperthreads! This will slow down performance!')
         else:
             log.warning('Total number of processes exceedes CPU thread count including hyperthreads. This will slow down performance.')
+    
 
 
 def _register_processes(processes):
@@ -755,8 +758,8 @@ def _read_number_of_processes(n_processes):
         n_processes = free_cpus
     else:
         n_processes = n_processes
-    if n_processes > free_cpus:
-        n_processes = free_cpus
+    #if n_processes > free_cpus:
+    #    n_processes = free_cpus
     n_processes = max(1,n_processes)
     return n_processes
 
