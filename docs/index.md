@@ -1,5 +1,5 @@
 # ![image](images/xFrame_logo_title.svg#only-light)![image](images/xFrame_logo_title_dark.svg#only-dark)
-The main objective of __xFrame__ is to provide an easy and flexible framwork that handles details such as File
+The main objective of __xFrame__ is to provide an easy and flexible framework that handles details such as
 
 - Data storage / File access
 - Settings management

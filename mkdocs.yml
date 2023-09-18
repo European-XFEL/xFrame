@@ -114,16 +114,16 @@ markdown_extensions:
   - pymdownx.escapeall:
       hardbreak: True
       nbsp: True
-  #- pymdownx.tasklist:
-  #    custom_checkbox: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
   - pymdownx.progressbar:
   - pymdownx.arithmatex:
       generic: true
       block_tag: 'pre'
   - pymdownx.mark:
   - pymdownx.details:
-  - pymdownx.tabbed:
-      alternate_style: true
+#  - pymdownx.tabbed:
+#      alternate_style: true
   - pymdownx.saneheaders:
   - pymdownx.blocks.admonition:
       types:
@@ -144,7 +144,6 @@ markdown_extensions:
   - pymdownx.blocks.details:
   - pymdownx.blocks.html:
   - pymdownx.blocks.definition:
-  - pymdownx.blocks.tab:
     
 extra:
   social:
@@ -179,6 +178,7 @@ plugins:
       separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
 
 
-
+extra_css:
+  - style.css
 
 

@@ -23,7 +23,7 @@ with the following content
 from xframe.interfaces import ProjectWorkerInterface	
 	
 class ProjectWorker(ProjectWorkerInterface):
-	def run(self):
+def run(self):
 	print('Hello There!')
 ```
 Going back to your command line we can now do the following
@@ -82,72 +82,80 @@ Hello Pi, your random number is: 0.9360428946014102
 xFrame also allows for the creation of default settings for this and further details view [Settings](#settings_1).
 # Note: Contents from here on are outdated and will be updated shortly !! 
 ## Data Access
-Let say we want to save or load some data for this we can use xframe.database.analysis module.
+Lets assume we want to save or load some data.
+In this case we can use the xframe.database.project module.
 To see how this might be done consider the following change to our `hallo.py` file:
 
-	from xframe.analysis.analysisWorker import AnalysisWorker
-	from xframe.settings import analysis as opt
-	from xframe.database import analysis
-	import numpy as np
-	
-	
-	class Worker(AnalysisWorker):
-		def start_working(self):
-			print(f'Hello {opt.name}, your random number is: {opt.random_number}')
-			
-			data = {'name':opt.name,'random_number':opt.random_number,'data':np.arange(10,dtype=float)}			
-			path = '~/.xframe/data/hello_dat.h5'
-			db.save(path,data)
-			data2 = db.load(path)
-			print(f'Loaded data = {data2}')
+```py linenums="1" 
+from xframe.interfaces import ProjectWorkerInterface
+from xframe import settings
+from xframe import database	
+import numpy as np
 
-			
+class ProjectWorker(ProjectWorkerInterface):
+	def run(self):
+		opt = settings.project
+		db  = database.project
+		print(f'Hello {opt.name}, your random number is: {opt.random_number}')
+		
+		data = {'name':opt.name,'random_number':opt.random_number,'data':np.arange(10,dtype=float)}			
+		path = '~/.xframe/data/hello_data.h5'
+		db.save(path,data)
+		data2 = db.load(path)
+		print(f'Loaded data = {data2}')
+```
+
 Upon execution this gives:
 
-	$ xframe tutorial.hello set123
-	 ------- Start <tutorial.hello.Worker object at 0x7fb101b4efd0> ------- 
+```console
+$ xframe tutorial.hello set123
+ ------- Start <tutorial.hello.Worker object at 0x7fb101b4efd0> ------- 
+ 
+Hello Pi, your random number is: 0.5233796142886044
+Loaded data = {'data': array([0., 1., 2., 3., 4., 5., 6., 7., 8., 9.]), 'name': 'Pi', 'random_number': 0.5233796142886044}
 
-	Hello Pi, your random number is: 0.5233796142886044
-	Loaded data = {'data': array([0., 1., 2., 3., 4., 5., 6., 7., 8., 9.]), 'name': 'Pi', 'random_number': 0.5233796142886044}
-	
-	 ------- Finished <tutorial.hello.Worker object at 0x7fb101b4efd0> -------
+ ------- Finished <tutorial.hello.Worker object at 0x7fb101b4efd0> -------
+```	
 
 #### Integration with settings file
+
 Always having to keep track of your file paths in code, as above, is cumbersome and does not scale well when trying to manage a whole suite of different files and folders.
-A solution is to let your settings file handle the file and folder locations. 
-To achive this lets modify our `set123.yaml` :
+*xFrame* provides a solution using the sittings file.  You are able to add files and folders by modifying  our `set123.yaml` file as follows :
 
-	name: Pi
-	random_number:
-		command: 'np.random.rand()'
-	
-	IO:
-		folders:
-			base: ~/.xframe/
-			data:
-				base: data/
-		files:
-			my_data:
-				name: hello_dat.h5
-				folder: data
-				
+```yaml linenums="1" 
+name: Pi
+random_number:
+	command: 'np.random.rand()'
+IO:
+	folders:
+		base: ~/.xframe/
+		data:
+			base: data/
+	files:
+		my_data:
+			name: hello_data.h5
+			folder: data				
+```
 
-This allows us to save our dataset using the alias `'my_data'` using `db.save('my_data',data)`, i.e.:
+This allows us to save our dataset using the alias `'my_data'` as follows:
 
-	from xframe.analysis.analysisWorker import AnalysisWorker
-	from xframe.settings import analysis as opt
-	from xframe.database import analysis
-	import numpy as np
-	
-	
-	class Worker(AnalysisWorker):
-		def start_working(self):
-			print(f'Hello {opt.name}, your random number is: {opt.random_number}')
+```py linenums="1" 
+from xframe.interfaces import ProjectWorkerInterface
+from xframe import settings
+from xframe import database	
+import numpy as np
 
-	        data = {'name':opt.name,'random_number':opt.random_number,'data':np.arange(10,dtype=float)}	
-			db.save('my_data',data)
-			data2 = db.load('my_data')
-			print(f'Loaded data = {data2}')
+class ProjectWorker(ProjectWorkerInterface):
+	def run(self):
+		opt = settings.project
+		db  = database.project
+		print(f'Hello {opt.name}, your random number is: {opt.random_number}')	
+		
+		data = {'name':opt.name,'random_number':opt.random_number,'data':np.arange(10,dtype=float)}			
+		db.save('my_data',data)
+		data2 = db.load('my_data')
+		print(f'Loaded data = {data2}')
+```
 
 Note that, changing the base location of our system of folders and potentially files can now simply be done by changing path stored in the `base:` folder of the settings file. All other deriving folders will be automatically updated.
 ### Dynamic paths (i.e. *path_modifiers*)
