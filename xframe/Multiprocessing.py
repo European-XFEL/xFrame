@@ -1,6 +1,12 @@
-'''
+"""Multiprocessing
 Module that contains all logic concerning multiprocessing (including GPU access management) and harware info.
-'''
+
+Attributes:
+    comm_module: Communication module.
+    workers: .
+    daemons: .
+    free_cpus: .
+"""
 import logging
 from itertools import repeat
 import sys

@@ -176,7 +176,7 @@ plugins:
   - search:
       lang: en
       separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
-
+  - mkdocstrings
 
 extra_css:
   - style.css
