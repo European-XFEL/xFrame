@@ -61,9 +61,12 @@ xframe = "xframe.main:start_routine_cmd"
 
 
 [build-system]
+#requires = ["setuptools>=60","setuptools-scm>=8.0"]
 requires = ["setuptools>=45", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 [tool.setuptools_scm]
+write_to = "xframe/_version.py"
+
 
 #[build-system]	
 #requires = ["pdm-backend"]

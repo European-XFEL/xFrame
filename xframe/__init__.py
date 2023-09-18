@@ -1,4 +1,4 @@
-__version__ = "0.1.0"
+from xframe._version import __version__
 
 #make sure  numpy does not try to multiprocess over xframes multiprocessing
 import os
