@@ -72,7 +72,7 @@ markdown_extensions:
   - markdown.extensions.abbr:
   - markdown.extensions.footnotes:
   - pymdownx.superfences:
-      preserve_tabs: true
+      preserve_tabs: false
       custom_fences:
         # Mermaid diagrams
         - name: diagram
