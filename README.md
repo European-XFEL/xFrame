@@ -22,7 +22,7 @@ For more information and tutorials visit the documentaiton at [xframe-fxs.readth
 # Fluctuation X-Ray Scattering Toolkit [fxs]
 The project __fxs__ comes bundled with *xFrame* and provides a workflow for 3D structure determination from fluctuation X-ray scattering data.
 
-Additional dependencies needed by *fxs* can be installed via
+To install *xFrame* together with the dependencies needed by *fxs* simply call
 ```
 pip install 'xframe[fxs]'
 ```
