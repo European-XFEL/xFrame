@@ -170,7 +170,6 @@ def update_free_cpus():
     default_n_processes = free_cpus
 def check_available_cpus_before_spawning_childs(n_childs,are_daemons=False):
     update_free_cpus()
-    print('n_childs',n_childs)
     would_use_hyperthreads = (free_cpus - n_childs<0)
     would_use_more_processes_than_available_hyper_threads =  (free_threads - n_childs<0)
     if would_use_hyperthreads and (not would_use_more_processes_than_available_hyper_threads):
