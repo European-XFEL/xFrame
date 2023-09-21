@@ -20,7 +20,7 @@ detector:
 
 filter_sequence: [normalization] #adu
 
-load_pump_diod_data: true
+load_pump_diod_data: False
 
 filters:
   gain:
@@ -125,7 +125,9 @@ IO:
     #exp_data: '/gpfs/exfel/exp/SPB/201901/p002304/{data_mode}/r{run:04d}'
     #exp_data: '/gpfs/exfel/exp/SPB/202130/p900201/{data_mode}/r{run:04d}'
     #exp_data: '/gpfs/exfel/exp/SPB/201802/p002145/{data_mode}/r{run:04d}'
-    out_base: /gpfs/exfel/theory_group/user/berberic/p3046/
+    out_base:
+      command: "os.path.join(xframe_opt.IO.folders.home,'data/SPB/')"
+    #/gpfs/exfel/theory_group/user/berberic/p3046/
     settings_base:
       out_base: settings/{time}/
     settings:
@@ -153,10 +155,6 @@ IO:
     pump_diod:
       name: r{run:04d}.h5
       folder: pump_diod
-    calibration_meta_data:
-      name: '{name}.h5'
-      folder: cal_meta_data
-
     geometry:
       #name: 'agipd_2304_opt_102020.geom'
       #name: 'b2.geom'
@@ -174,21 +172,4 @@ IO:
     background:
       name: '{name}.h5'
       folder: data
-    calibration_constants_cheetah_latest:
-      name: Cheetah*.h5
-      folder: calib_cheetah_latest
-    calibration_constants_cheetah_by_run:
-      name: Cheetah*.h5
-      folder: calib_cheetah_by_run
-    calibration_constants_alireza:
-      name: Cheetah-AGIPD-calib.h5
-      folder: calib_alireza
-    alireza_bad_pixel_mask:
-      name: bad-pixel-mask.h5
-      folder: calib_alireza
-    calibration_constants:
-      options:
-        calibrator: AGIPD_VDS_calibrator
-        mode: alireza2020ver1
-        n_pulses: 176
-        #calib_run: 'latest'        
+  

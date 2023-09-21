@@ -9,6 +9,7 @@ from xframe.database.interfaces import HDF5Interface
 log=logging.getLogger('root')
 
 class HDF5_DB(HDF5Interface):
+    h5=h5
     load_custom_types=False
     save_custom_types=False
     def __init__(self):
@@ -25,8 +26,10 @@ class HDF5_DB(HDF5Interface):
         HDF5_DB.load_custom_types = load_custom_types
         
     @staticmethod
-    def save(path,value_dict,**kwargs):        
-        if isinstance(path,str):            
+    def save(path,value_dict={},as_h5_object = False,**kwargs):     
+        if isinstance(path,str):
+            if as_h5_object:
+                return h5.File(path, 'w', libver='latest')
             with h5.File(path, 'w') as h5file:
                 HDF5_DB.recursively_save_dict_to_group(h5file,'/',value_dict)
         else:

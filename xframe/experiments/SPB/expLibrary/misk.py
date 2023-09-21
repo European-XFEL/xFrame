@@ -7,9 +7,9 @@ from xframe.library.gridLibrary import NestedArray
 from xframe.library.mathLibrary import spherical_to_cartesian
 from xframe.library.mathLibrary import cartesian_to_spherical
 from xframe.library import mathLibrary as mLib
-from xframe.analysis.interfaces import DatabaseInterface
-from xframe.analysis.interfaces import PresenterInterface
-from xframe.presenters.matplolibPresenter import heatPolar2D
+from xframe.interfaces import DatabaseInterface
+from xframe.interfaces import PresenterInterface
+from xframe.presenters.matplotlibPresenter import heatPolar2D
 pres=heatPolar2D()
 log=logging.getLogger('root')
 
@@ -149,7 +149,7 @@ def generate_calc_center(real_grid):
 class Selection:
     def __init__(self,name,selection_dict):
         self.name = name
-        self.data_range= selection_dict.get('selection',slice(None))
+        self.data_range= selection_dict.get('range',slice(None))
         self.range_type=self.data_range.__class__
         if self.range_type != slice:
             self.data_range = np.asarray(self.data_range)

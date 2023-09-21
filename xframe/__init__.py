@@ -28,7 +28,7 @@ from xframe.control.Control import Controller
 _project_worker_module_name = False  # will be a string
 _experiment_module_name = False      # will be a string
 project_worker = ProjectWorkerInterface
-experiment_worker = ExperimentWorkerInterface
+experiment = ExperimentWorkerInterface
 controller = Controller()
 
 startup_routines.setup_projects()

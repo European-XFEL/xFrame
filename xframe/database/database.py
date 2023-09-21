@@ -75,9 +75,13 @@ class FileAccess():
             #traceback.print_exc()
             #log.info()
             #log.error(e)
-            log.debug('No path specified in settings for name "{}"'.format(name))
-            path=name
-            
+            log.debug('No path specified in settings for name "{}".Try to use it as direct path'.format(name))
+            path = None
+            if isinstance(name,str):
+                if len(name)>0:
+                    path = os.path.expanduser(name)
+            if path is None:
+                raise AssertionError(f'Saving to path {name} is not possible. Wrong path definition.')           
         return path
     def create_path_if_nonexistent(self,path):
         dirname=os.path.dirname(path)
@@ -234,7 +238,8 @@ class DefaultDB(FileAccess,DatabaseInterface):
                 path = self.remove_access_method_from_path(path)
                 self.create_path_if_nonexistent(path)
             log.debug('saving "{}" to path:  {}'.format(name,path))
-            saver(path,data,**{**kwargs,**file_options})
+            return_value = saver(path,data,**{**kwargs,**file_options})
+            return return_value
         except Exception as e:
             traceback.print_exc()
             log.error(e)
@@ -242,8 +247,8 @@ class DefaultDB(FileAccess,DatabaseInterface):
 
     def load_direct(self,name,**kwargs):
         return self.load(name,skip_custom_methods=True,**kwargs)
-    def save_direct(self,name,data,**kwargs):
-        self.save(name,data,skip_custom_methods=True,**kwargs)
+    def save_direct(self,name,data={},**kwargs):
+        return self.save(name,data,skip_custom_methods=True,**kwargs)
 
         
     def remove_access_method_from_path(self,path):

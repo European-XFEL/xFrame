@@ -215,7 +215,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         project_settings, experiment_settings = settings.get_settings_to_save()
         if isinstance(xframe.project_worker,ProjectWorkerInterface):
             self.save(pjoin(path,project_name+'.yaml'),project_settings)
-        if isinstance(xframe.experiment_worker,ExperimentWorkerInterface):
+        if isinstance(xframe.experiment,ExperimentWorkerInterface):
             self.save(pjoin(path,exp_name+'.yaml'),experiment_settings)
         #log.info(f'settings raw = \n {settings.raw_analysis} \n')
     

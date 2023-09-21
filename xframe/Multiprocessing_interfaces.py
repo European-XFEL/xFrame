@@ -71,3 +71,5 @@ class PsutilInterface(abc.ABC):
 class PsutilDependency(PsutilInterface,metaclass = DependencyMeta):
     pass
 
+class SharedArrayDependency(metaclass = DependencyMeta):
+    _external_dependency_name_ = 'shared_array'

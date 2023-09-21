@@ -4,31 +4,49 @@ import numpy as np
 
 from xframe.library import physicsLibrary as pLib
 from xframe.library.pythonLibrary import convert_to_slice_if_possible
+from xframe.library.pythonLibrary import split_into_simple_slices
+from xframe.library.pythonLibrary import xprint
 
-from xframe.experiment.interfaces import ExperimentWorkerInterface
-from xframe.experiment.interfaces import CommunicationInterface
+from xframe.interfaces import ExperimentWorkerInterface
+from xframe.interfaces import CommunicationInterface
 
 from .detectors.agipd import AGIPD
-from .analysisLibrary import filters
-from .analysisLibrary.filters import Filter,FilterSequence,FilterTools
-from .analysisLibrary.rois import ROIManager
-from .analysisLibrary.misk import Selection
-from xframe.library.pythonLibrary import split_into_simple_slices
+from .expLibrary import filters
+from .expLibrary.filters import Filter,FilterSequence,FilterTools
+from .expLibrary.rois import ROIManager
+from .expLibrary.misk import Selection
+
 from multiprocessing import cpu_count
-from psutil import virtual_memory
 from xframe import settings
 from xframe import database
 from xframe import Multiprocessing
+from xframe.library.pythonLibrary import DictNamespace
 
 log=logging.getLogger('root')
 
+class AgipdDataSelection(DictNamespace):
+    def __init__(self,run : int,frame_range=slice(None),cells=slice(None),cells_mode='relative',pulses=slice(None),pulses_mode='relative',trains=slice(None),trains_mode='relative',modules = np.arange(16),n_frames=20000,good_cells=np.arange(1,202),in_multiples_of=False):
+        super().__init__()
+        self['run'] = run
+        self['frame_range']=frame_range
+        
+        selection = DictNamespace(cells=DictNamespace(range=cells,mode=cells_mode),
+                                  pulses = DictNamespace(range=pulses,mode=pulses_mode),
+                                  trains = DictNamespace(range=trains,mode=trains_mode)
+                                  )
+        self['selection']=selection
+        self['modules']=modules
+        self['n_frames']=n_frames
+        self['good_cells']=good_cells
+        self['in_multiples_of']=in_multiples_of
 
-class Worker(ExperimentWorkerInterface):
+class ExperimentWorker(ExperimentWorkerInterface):
+    DataSelection = AgipdDataSelection
     def __init__(self,detector=False,calibrator=False):
         opt = settings.experiment
         comm_module = Multiprocessing.comm_module
         self.opt=opt
-        self.data_mode = opt.get('data_mode','raw')
+        self.data_mode = opt.get('data_mode','proc')
         self.sample_distance = opt.get('sample_distance',700)# in mm
         self.x_ray_energy = opt.get('x_ray_energy',6010)# in eV
         self.x_ray_wavelength = pLib.energy_to_wavelength(self.x_ray_energy)
@@ -301,7 +319,7 @@ class Worker(ExperimentWorkerInterface):
         #        log.warning('Process {} didnt synchronice after 20 min stop waiting in process {}'.format(p_id,process_id))
         synchronize(timeout = 60*20)
                 
-    def get_data(self,opt:dict):
+    def get_data(self,opt:AgipdDataSelection):
         ex_opt = settings.experiment
         run = opt['run']
         if not str(run) in self.info:
@@ -332,7 +350,7 @@ class Worker(ExperimentWorkerInterface):
         if self.opt['data_mode'] == 'proc':
             def mp_process_data(c_id,chunk):                
                 frame_mask = chunked_metadata[c_id]['good_frames_mask']
-                log.info('processing chunk {} of {} with {} patterns'.format(c_id+1,len(chunks),len(chunk)))                
+                xprint('Loading data chunk {} of {} with {} patterns'.format(c_id+1,len(chunks),len(chunk)))                
                 chunk_shape = (len(modules),len(chunk))+data_shape[1:]
                 len_chunk = len(chunk)
                 frame_slices,out_slices = split_into_simple_slices(chunk,return_sliced_args=True)
@@ -396,5 +414,5 @@ class Worker(ExperimentWorkerInterface):
 
     ## satisfy interface ##
     ## currently empty since experiment and analysis workers are not disconnected in separate processes yet##
-    def start_working(self):
+    def run(self):
         pass           

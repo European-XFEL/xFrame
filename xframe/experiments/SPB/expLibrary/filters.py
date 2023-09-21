@@ -3,7 +3,6 @@ import numpy as np
 #from numba import njit
 import traceback
 import abc
-from xframe.analysis.interfaces import CommunicationInterface
 from xframe.library.pythonLibrary import grow_mask
 from xframe.library.pythonLibrary import DictNamespace
 from xframe.library.mathLibrary import masked_mean

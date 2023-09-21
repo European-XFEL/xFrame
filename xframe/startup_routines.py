@@ -304,9 +304,9 @@ def import_selected_experiment(update_worker=True):
         if update_worker:
             settings.raw_experiment = database.default.format_settings(settings.experiment)
     
-        moduel_name = xframe._experiment_module_name
+        module_name = xframe._experiment_module_name
         module_imported = module_name in sys.modules
-        instance_exists = isinstance(xframe.experiment_worker,xframe.interfaces.ExperimentWorkerInterface)
+        instance_exists = isinstance(xframe.experiment,xframe.interfaces.ExperimentWorkerInterface)
         needs_experiment_creation = (not module_imported) or (not instance_exists) or update_worker
         
         if needs_experiment_creation:        
@@ -316,19 +316,22 @@ def import_selected_experiment(update_worker=True):
                 else:
                     exp_module = importlib.import_module(module_name)            
                 exp_instance = getattr(exp_module,settings.general.default_experiment_worker_name)()
-                xframe.experiment_worker =  exp_instance
+                xframe.experiment =  exp_instance
                 controller.experiment_worker = exp_instance
             
             except Exception as e:
-                log.error(f'Could not import experiment {moduel_name},\n with error {e}\n {traceback.format_exc()}\n Terminating.')
+                log.error(f'Could not import experiment {module_name},\n with error {e}\n {traceback.format_exc()}\n Terminating.')
                 sys.exit()
 
                 
-def _get_worker_module_name(name,worker,is_experiment=False):
+def _get_worker_module_name(name,worker=None,is_experiment=False):
     if is_experiment:
         worker_module_name = 'xframe.experiments.'+name+'.'+xframe.settings.general.default_experiment_module_name
     else:
-        worker_module_name = 'xframe.projects.'+name+'.'+worker
+        if isinstance(worker,str):
+            worker_module_name = 'xframe.projects.'+name+'.'+worker
+        else:
+            raise AssertionError(f"Project worker not specified.")
     return worker_module_name
     
 

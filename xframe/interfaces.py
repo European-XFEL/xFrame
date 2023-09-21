@@ -139,3 +139,8 @@ class ClickInterface(abc.ABC):
         pass    
 class ClickDependency(ClickInterface,metaclass=DependencyMeta):
     pass
+
+class DetectorInterface(abc.ABC):
+    @abc.abstractmethod
+    def get_geometry(self):
+        pass

@@ -2,15 +2,13 @@ import logging
 import numpy as np
 
 
-from xframe.experiment.interfaces import DetectorInterface
-from xframe.simulators.interfaces import DetectorInterfaceSimulation
-from xframe.detectors.interfaces import DatabaseInterfaceDetector
+from xframe.interfaces import DetectorInterface
 from xframe.library.mathLibrary import plane3D
 from xframe.library.gridLibrary import GridFactory
 
 log=logging.getLogger('root')
 
-class AGIPD(DetectorInterface,DetectorInterfaceSimulation):
+class AGIPD(DetectorInterface):
     dimensions=3
     number_of_modules=16    
     groups = np.array([[[12,13,14,15],[8,9,10,11]],[[0,1,2,3],[4,5,6,7]]],dtype = int)
@@ -30,12 +28,7 @@ class AGIPD(DetectorInterface,DetectorInterfaceSimulation):
         for i in range(8)]
     
     def __init__(self,database,load_geometry_file=False,**kwargs):
-        try:
-            assert isinstance(database,DatabaseInterfaceDetector)
-            self.database=database
-        except AssertionError:
-            log.error('database is not instance of DatabaseInterfaceDetector')
-        
+        self.database=database                
         self._origin = np.zeros(3,dtype = float)
         self.quadrants=np.zeros([2,2])
         self.pixel_grid=np.zeros([self.number_of_modules,self.module_width_in_pixel+1, self.module_height_in_pixel+1,self.dimensions])

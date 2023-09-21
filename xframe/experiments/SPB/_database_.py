@@ -18,8 +18,11 @@ from xframe.library.pythonLibrary import convert_to_slice_if_possible
 from xframe.library.pythonLibrary import split_into_simple_slices
 from xframe.library.pythonLibrary import split_ids_by_unique_values
 from xframe.library.pythonLibrary import getArrayOfArray
+from xframe.library.pythonLibrary import xprint
 from xframe.database.database import DefaultDB
 from xframe import Multiprocessing
+
+log = logging.getLogger("root")
 
 
 class ExperimentDB(DefaultDB,DatabaseInterface):
@@ -35,6 +38,9 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         self.frame_mask_path = self.get_path('vds_agipd_frame_mask',is_file=False)
         self.pump_diod_path = self.get_path('h5_pump_diod',is_file=False)
         self.comm_module = Multiprocessing.comm_module
+
+        self.h5_VirtualSource = self.get_db("file://_.h5").h5.VirtualSource
+        self.h5_VirtualLayout = self.get_db("file://_.h5").h5.VirtualLayout
 
 
     ## load_default, save_default will be depricated use save_direct,load_direct inherited from default_DB
@@ -373,7 +379,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
             
         ## get file path
         #paths = tuple( sorted(glob.glob(folder+'/*AGIPD%.2d*.h5'%module))for module in range(16) )
-        
+        xprint(f"Combining AGIPD data for run {run} into virtual h5 datasets.")
         paths = [sorted(glob.glob(self.get_path('vds_regexpr',path_modifiers = {'data_mode':data_mode,'run':run,'module':module}))) for module in modules]
         m_ids = np.concatenate([np.full(len(module_paths),m) for m,module_paths in zip(modules,paths)])
         #m_ids = np.concatenate(tuple(np.full(len(file_list),module,dtype = np.int) for module,file_list in enumerate(paths)))        
@@ -390,8 +396,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         start_frames = [np.sum(lookup_array[:i,0]) for i in range(len(lookup_array)+1)]
         frame_slices = [slice(start_frames[i],start_frames[i+1]) for i in range(len(lookup_array))]        
         n_frames = general_data['n_frames']
-        frame_ids = np.arange(n_frames)
-        
+        frame_ids = np.arange(n_frames)        
         log.info('Generating VDS layouts.')
         mp_mode = Multiprocessing.MPMode_Queue(assemble_outputs = False)
         results = comm_module.request_mp_evaluation(self._vds_worker,mp_mode,input_arrays=[flist,m_ids],const_inputs=[frame_slices,frame_ids,lookup_array,general_data,data_mode],split_together = True,n_processes = n_processes)
@@ -401,6 +406,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         result_module_ids = np.array([r['module'] for r in results])
         log.info('Populating VDS layouts and saving VDS files.')
         comm_module.request_mp_evaluation(self._generate_module_wise_vds_files,mp_mode,input_arrays=[modules],const_inputs = [run,results,result_module_ids,frame_slices,general_data,from_raw_data],n_processes = n_processes)
+        xprint("done.")
         
     def get_general_vds_data(self,flist,m_ids,module,from_raw_data= False,n_processes =False):
         if from_raw_data:
@@ -418,7 +424,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
                 train_path = self.get_path('h5_agipd_trainId',is_file = False,path_modifiers = {'module':m_id})
                 pulse_path = self.get_path('h5_agipd_pulseId',is_file = False,path_modifiers = {'module':m_id})
                 data_path = self.get_path('h5_agipd_data',is_file = False,path_modifiers = {'module':m_id})
-                with h5.File(fname, 'r') as f:
+                with self.load_direct(fname, as_h5_object=True) as f:
                     n_frames.append(f[data_path].shape[0])
                     train_ids = f[train_path][:]
                     min_train_id = int(np.min(train_ids[train_ids>0]))
@@ -489,7 +495,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         cell_path = self.get_path('h5_agipd_cellId',is_file = False,path_modifiers = {'module':m_ids[0]})
         train_path = self.get_path('h5_agipd_trainId',is_file = False,path_modifiers = {'module':m_ids[0]})
         pulse_path = self.get_path('h5_agipd_pulseId',is_file = False,path_modifiers = {'module':m_ids[0]})
-        with h5.File(flist[0], 'r') as f:
+        with self.load_direct(flist[0],as_h5_object=True) as f: #h5.File(flist[0], 'r') as f:
             #log.info(f['INSTRUMENT/'+det_name +'/DET/'].keys())
             data = f[data_path]                
             data_shape = data.shape
@@ -530,7 +536,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         train_path = self.get_path('h5_agipd_trainId',is_file = False,path_modifiers = {'module':module})
         pulse_path = self.get_path('h5_agipd_pulseId',is_file = False,path_modifiers = {'module':module})
         cell_path = self.get_path('h5_agipd_cellId',is_file = False,path_modifiers = {'module':module})
-        with h5.File(file_name, 'r') as f:
+        with self.load_direct(file_name, as_h5_object=True) as f: #h5.File(file_name, 'r') as f:
             #log.info(f[train_path][:])
             # Load 1D datasets of traint/pulse/cell ids which will be combined and stored directly without virtualization
             # Annoyingly, raw data has an extra dimension for the IDs
@@ -598,15 +604,15 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
                 
             # Create VDS virtualsource data for 2d virtual datasets 
             data = f[data_path]
-            vsource_data = h5.VirtualSource(data)
+            vsource_data = self.h5_VirtualSource(data)
             result['v_source'] = vsource_data
             if data_mode == 'proc':
                 mask_path = self.get_path('h5_agipd_mask',is_file = False,path_modifiers = {'module':module})
                 gain_path = self.get_path('h5_agipd_gain',is_file = False,path_modifiers = {'module':module})             
                 mask = f[mask_path]
-                vsource_mask = h5.VirtualSource(mask)                    
+                vsource_mask = self.h5_VirtualSource(mask)                    
                 gain = f[gain_path]
-                vsource_gain = h5.VirtualSource(gain)                
+                vsource_gain = self.h5_VirtualSource(gain)                
                 result['v_source_mask'] = vsource_mask
                 result['v_source_gain'] = vsource_gain
             return result
@@ -622,11 +628,11 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         n_frames = data_shape[0]
         shape_1d = (n_frames,)
         layouts = {
-            'data':h5.VirtualLayout(shape=data_shape, dtype = general_data['data_dtype']),
+            'data':self.h5_VirtualLayout(shape=data_shape, dtype = general_data['data_dtype']),
             # the following virtualLayouts are only used if data_mode = 'proc' in which case 'mask_dtype' and 'gain_dtype' are contained in general_data
             # I'm generating the following vds layouts also in case of data_mode = 'raw' with mock datatypes to eliminate if statements in this routine
-            'mask':h5.VirtualLayout(shape=data_shape, dtype = general_data.get('mask_dtype',data_dtype)),
-            'gain':h5.VirtualLayout(shape=data_shape, dtype = general_data.get('gain_dtype',data_dtype))
+            'mask':self.h5_VirtualLayout(shape=data_shape, dtype = general_data.get('mask_dtype',data_dtype)),
+            'gain':self.h5_VirtualLayout(shape=data_shape, dtype = general_data.get('gain_dtype',data_dtype))
         }
         #log.info('data layout shape = {}'.format(layouts['data'].shape))
         cell_ids = np.zeros(shape_1d,dtype = general_data['cell_dtype'])
@@ -695,20 +701,20 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         
         frame_mask_path = self.get_path('vds_agipd_frame_mask',is_file = False)
         self.create_path_if_nonexistent(file_name)
-        outf = h5.File(file_name, 'w', libver='latest')
-        outf.create_dataset(train_path,data = train_ids) 
-        outf.create_dataset(cell_path,data = cell_ids)
-        outf.create_dataset(pulse_path,data = pulse_ids)
-        outf.create_dataset(frame_mask_path,data = frame_mask)
-        outf.create_virtual_dataset(data_path, layouts['data'], fillvalue=np.nan)
-        if not from_raw_data:
-            mask_path = self.get_path('vds_agipd_mask',is_file = False)
-            gain_path = self.get_path('vds_agipd_gain',is_file = False)
-            baseline_shift_path = self.get_path('vds_agipd_baseline_shift',is_file = False)
-            outf.create_virtual_dataset(mask_path, layouts['mask'], fillvalue=np.nan)
-            outf.create_virtual_dataset(gain_path, layouts['gain'], fillvalue=np.nan)
-            outf.create_dataset(baseline_shift_path,data = baseline_shifts)
-        outf.close()
+        with self.save_direct(file_name,as_h5_object = True) as outf:
+            outf.create_dataset(train_path,data = train_ids) 
+            outf.create_dataset(cell_path,data = cell_ids)
+            outf.create_dataset(pulse_path,data = pulse_ids)
+            outf.create_dataset(frame_mask_path,data = frame_mask)
+            outf.create_virtual_dataset(data_path, layouts['data'], fillvalue=np.nan)
+            if not from_raw_data:
+                mask_path = self.get_path('vds_agipd_mask',is_file = False)
+                gain_path = self.get_path('vds_agipd_gain',is_file = False)
+                baseline_shift_path = self.get_path('vds_agipd_baseline_shift',is_file = False)
+                outf.create_virtual_dataset(mask_path, layouts['mask'], fillvalue=np.nan)
+                outf.create_virtual_dataset(gain_path, layouts['gain'], fillvalue=np.nan)
+                outf.create_dataset(baseline_shift_path,data = baseline_shifts)
+            outf.close()
         
 
     def create_vds_module_old(self, run, from_raw_data,modules = np.arange(16), create_modulewise_vds = True, create_complete_vds = False, n_processes=False):
@@ -772,7 +778,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         
         def vds_worker(file_name,module,**kwargs):
             dset_prefix = 'INSTRUMENT/'+detector_name+'/DET/%dCH0:xtdf/image/'%module
-            with h5.File(file_name, 'r') as f:
+            with self.load_direct(file_name, as_h5_object=True) as f: #h5.File(file_name, 'r') as f:
                 # Annoyingly, raw data has an extra dimension for the IDs
                 # (which is why we need the ravel)
                 train_ids = f[dset_prefix+'trainId'][:].ravel() # equivalent to  f[dset_prefix+'trainId'][:].reshape(-1)
@@ -811,13 +817,13 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
                 
                 # Create VDS virtualsource data 
                 data = f[dset_prefix+'data']
-                vsource_data = h5.VirtualSource(data)
+                vsource_data = self.h5_VirtualSource(data)
                 result['v_source'] = vsource_data
                 if not from_raw_data:
                     mask = f[dset_prefix+'mask']
-                    vsource_mask = h5.VirtualSource(mask)                    
+                    vsource_mask = self.h5_VirtualSource(mask)                    
                     gain = f[dset_prefix+'gain']
-                    vsource_gain = h5.VirtualSource(gain)                
+                    vsource_gain = self.h5_VirtualSource(gain)                
                     result['v_source_mask'] = vsource_mask
                     result['v_source_gain'] = vsource_gain
                 #if (data[0,0,0]<16.6) and (data[0,0,0]>16.5):
@@ -829,32 +835,33 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
             return result
         def save_vds_file(layouts,cell_ids,pulse_ids,train_ids,n_good_frames,file_name):
             self.create_path_if_nonexistent(file_name)
-            outf = h5.File(file_name, 'w', libver='latest')
-            outf['INSTRUMENT/'+detector_name+'/DET/image/trainId'] = train_ids # create a dataset with all train numbers and write it to the h5file (considering pulse structure of the trains)
-            # create datasets for cellid and pulseid and fill them with a number 65535
-            default_value=65535
-            outdset_cid = outf.create_dataset('INSTRUMENT/'+detector_name+'/DET/image/cellId',
-                                              shape=(n_good_frames,), dtype='u2',
-                                              data=np.full(n_good_frames,default_value, dtype=cell_dtype))
-            outdset_cid[:]=cell_ids
-            outdset_pid = outf.create_dataset('INSTRUMENT/'+detector_name+'/DET/image/pulseId',
-                                              shape=(n_good_frames,), dtype='u8',
-                                              data=np.full(n_good_frames,default_value, dtype=pulse_dtype))
-            outdset_pid[:]=pulse_ids
-            #assert (cell_ids != default_value).any(), 'There seem to be unset cell ids. Check vds_creation algorithm.'
-            #assert (pulse_ids != default_value).any(), 'There seem to be unset pulse ids. Check vds_creation algorithm'
-            outf.create_virtual_dataset('INSTRUMENT/'+detector_name+'/DET/image/data', layouts['data'], fillvalue=np.nan)
-            if not from_raw_data:
-                outf.create_virtual_dataset('INSTRUMENT/'+detector_name+'/DET/image/mask', layouts['mask'], fillvalue=np.nan)
-                outf.create_virtual_dataset('INSTRUMENT/'+detector_name+'/DET/image/gain', layouts['gain'], fillvalue=np.nan)                
-            outf.close()
+            with self.save_direct(file_name, as_h5_object=True) as outf:
+                #outf = h5.File(file_name, 'w', libver='latest')
+                outf['INSTRUMENT/'+detector_name+'/DET/image/trainId'] = train_ids # create a dataset with all train numbers and write it to the h5file (considering pulse structure of the trains)
+                # create datasets for cellid and pulseid and fill them with a number 65535
+                default_value=65535
+                outdset_cid = outf.create_dataset('INSTRUMENT/'+detector_name+'/DET/image/cellId',
+                                                  shape=(n_good_frames,), dtype='u2',
+                                                  data=np.full(n_good_frames,default_value, dtype=cell_dtype))
+                outdset_cid[:]=cell_ids
+                outdset_pid = outf.create_dataset('INSTRUMENT/'+detector_name+'/DET/image/pulseId',
+                                                  shape=(n_good_frames,), dtype='u8',
+                                                  data=np.full(n_good_frames,default_value, dtype=pulse_dtype))
+                outdset_pid[:]=pulse_ids
+                #assert (cell_ids != default_value).any(), 'There seem to be unset cell ids. Check vds_creation algorithm.'
+                #assert (pulse_ids != default_value).any(), 'There seem to be unset pulse ids. Check vds_creation algorithm'
+                outf.create_virtual_dataset('INSTRUMENT/'+detector_name+'/DET/image/data', layouts['data'], fillvalue=np.nan)
+                if not from_raw_data:
+                    outf.create_virtual_dataset('INSTRUMENT/'+detector_name+'/DET/image/mask', layouts['mask'], fillvalue=np.nan)
+                    outf.create_virtual_dataset('INSTRUMENT/'+detector_name+'/DET/image/gain', layouts['gain'], fillvalue=np.nan)                
+                outf.close()
         def generate_module_wise_vds_files(module_id,results,module_ids,n_good_frames,local_good_frame_ids_by_part,good_frame_slices,**args):
             result_ids = np.nonzero(module_ids==module_id)[0]
             #log.info('module_id = {}'.format(module_id))
             layouts = {
-                'data':h5.VirtualLayout(shape=(n_good_frames,) + data_shape[1:], dtype = data_dtype),
-                'mask':h5.VirtualLayout(shape=(n_good_frames,) + data_shape[1:], dtype = mask_dtype),
-                'gain':h5.VirtualLayout(shape=(n_good_frames,) + data_shape[1:], dtype = gain_dtype)
+                'data':self.h5_VirtualLayout(shape=(n_good_frames,) + data_shape[1:], dtype = data_dtype),
+                'mask':self.h5_VirtualLayout(shape=(n_good_frames,) + data_shape[1:], dtype = mask_dtype),
+                'gain':self.h5_VirtualLayout(shape=(n_good_frames,) + data_shape[1:], dtype = gain_dtype)
             }
             #log.info('data layout shape = {}'.format(layouts['data'].shape))
             cell_ids = np.zeros((n_good_frames,),dtype= cell_dtype)
@@ -952,7 +959,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         info = self.load_info({'runs':runs})
         n_frames=tuple(info[str(run)]['n_frames'] for run in runs)
         n_frames_total = np.sum(n_frames)
-        l_hit_specifiers = tuple(h5.VirtualLayout(shape=(n_frames_total,3), dtype=float) for module in modules)
+        l_hit_specifiers = tuple(self.h5_VirtualLayout(shape=(n_frames_total,3), dtype=float) for module in modules)
 
         runs_array = np.concatenate(
             tuple(
@@ -962,7 +969,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         for run in runs :
             filename = super().get_path('hit_specifier',path_modifiers={'run':'%04d'%run})
             length = info[str(run)]['n_frames']            
-            vsrc_hit_specifiers = tuple( h5.VirtualSource(filename, 'litpixels_{}'.format('%02d'%module), shape=(length,)) for module in modules)
+            vsrc_hit_specifiers = tuple( self.h5_VirtualSource(filename, 'litpixels_{}'.format('%02d'%module), shape=(length,)) for module in modules)
             c=current_frame
             for m_id in range(len(modules)):
                 l_hit_specifiers[m_id][c:c+length] = vsrc_hit_specifiers[m_id]
@@ -979,18 +986,18 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         runs = opt['runs'] #iterable
         n_hits=[]
         for run in runs:
-            with  h5.File(super().get_path('hits',path_modifiers={'run':run}) ,mode = 'r') as h5_file:
+            with  self.load_direct('hits',path_modifiers={'run':run},as_h5_object = True) as h5_file:
                 n_hits.append(h5_file['hits/assembled'].shape[0])
 
         n_hits_total = np.sum(n_hits)
-        l_hit_specifiers = tuple(h5.VirtualLayout(shape=(n_hits_total,1296,1138), dtype=float) for module in modules)
+        l_hit_specifiers = tuple(self.h5_VirtualLayout(shape=(n_hits_total,1296,1138), dtype=float) for module in modules)
 
         runs_array = np.concatenate(tuple( np.concatenate((np.full((n_frames[id],),run)[:,None],np.arange(n_frames[id])[:,None]),axis=1) for id,run in enumerate(runs)),axis = 0)
         current_frame = 0
         for run in runs :
             filename = super().get_path('hit_specifier',path_modifiers={'run':'%04d'%run})
             length = info[str(run)]['n_frames']            
-            vsrc_hit_specifiers = tuple( h5.VirtualSource(filename, 'litpixels_{}'.format('%02d'%module), shape=(length,)) for module in modules)
+            vsrc_hit_specifiers = tuple( self.h5_VirtualSource(filename, 'litpixels_{}'.format('%02d'%module), shape=(length,)) for module in modules)
             c = current_frame
             for m_id in range(len(modules)):
                 l_hit_specifiers[m_id][c:c+length] = vsrc_hit_specifiers[m_id]

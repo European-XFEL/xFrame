@@ -22,13 +22,13 @@ from multiprocessing import Queue
 from multiprocessing import resource_tracker
 from multiprocessing.shared_memory import SharedMemory
 #sys.stderr = sys.__stderr__
-from xframe.Multiprocessing_interfaces import OpenClDependency,PsutilDependency
+from xframe.Multiprocessing_interfaces import OpenClDependency,PsutilDependency,SharedArrayDependency
 from xframe.library.pythonLibrary import xprint
 import traceback
 import numpy as np
 from xframe import settings
 
-sa = False #will be dependency injected with SharedArray module
+sa = SharedArrayDependency #will be dependency injected with SharedArray module
 MPI = False #will be dependency injected with SharedArray module
 mpi_comm = None #will be set by create_mpi_comm #None if not jet checked False if mpi not available otherwise MPI.COMM_WORLD
 comm_module = 'Will be set by Controller.'
