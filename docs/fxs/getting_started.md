@@ -693,7 +693,7 @@ HOME_PATH/data/fxs/reconstructions/
 	
   | 3d 1a. | 3d 1b. | 2d 1b. |
   |:------:|:-----:|:-----:|
-  |![3D model (1b.)](../images/3d_1a_reconstruction.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} |![3D model (1b.)](../images/3d_1b_reconstruction.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} | ![3D model (1b.)](../images/2d_1b_reconstruction.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} |
+  |![3D model (1b.)](../images/3d_1a_reconstruction.png){width=100% data-gallery="reconstructions" data-title='' data-description=''} |![3D model (1b.)](../images/3d_1b_reconstruction.png){width=100% data-gallery="reconstructions" data-title='' data-description=''} | ![3D model (1b.)](../images/2d_1b_reconstruction.png){width=100% data-gallery="reconstructions" data-title='' data-description=''} |
 
 - `pics` only for 2d reconstructions. It contains `.png` images of all computed reconstructions.
 - `data.h5` is the main putput file.
@@ -842,13 +842,13 @@ HOME_PATH/data/fxs/averages/
 
   | 3d 1a. | 3d 1b. | 2d 1b. |
   |:------:|:-----:|:-----:|
-  |![3D model (1b.)](../images/3d_1a_PRTF.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} |![3D model (1b.)](../images/3d_1b_PRTF.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} | ![3D model (1b.)](../images/2d_1b_PRTF.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} |
+  |![3D model (1b.)](../images/3d_1a_PRTF.png){width=100% data-gallery="PRTF" data-title='' data-description=''} |![3D model (1b.)](../images/3d_1b_PRTF.png){width=100% data-gallery="PRTF" data-title='' data-description=''} | ![3D model (1b.)](../images/2d_1b_PRTF.png){width=100% data-gallery="PRTF" data-title='' data-description=''} |
 
 - `vtk` Folder for vtk data files. Averaged reconstructions may look as follows
 
   | 3d 1a. | 3d 1b. | 2d 1b. |
   |:------:|:-----:|:-----:|
-  |![3D model (1b.)](../images/3d_1a_average.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} |![3D model (1b.)](../images/3d_1b_average.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} | ![3D model (1b.)](../images/2d_1b_average.png){width=100% data-gallery="error_metrics" data-title='' data-description=''} |
+  |![3D model (1b.)](../images/3d_1a_average.png){width=100% data-gallery="averages" data-title='' data-description=''} |![3D model (1b.)](../images/3d_1b_average.png){width=100% data-gallery="averages" data-title='' data-description=''} | ![3D model (1b.)](../images/2d_1b_average.png){width=100% data-gallery="averages" data-title='' data-description=''} |
 
 - `average_results.h5` Main data output file.
 ??? note "average_results.h5 structure"
@@ -856,35 +856,35 @@ HOME_PATH/data/fxs/averages/
     average_results.h5
     ├aligned
     │ └0
-    │   ├real_density [(r: float64, i: float64): 256 × 64 × 128]
-    │   └reciprocal_density   [(r: float64, i: float64): 256 × 64 × 128]
+    │   ├real_density 
+    │   └reciprocal_density 
     ├average
-    │ ├intensity_from_densities       [float64: 256 × 64 × 128]
-    │ ├intensity_from_ft_densities    [float64: 256 × 64 × 128]
-    │ ├normalized_real_density        [(r: float64, i: float64): 256 × 64 × 128]
-    │ ├real_density   [(r: float64, i: float64): 256 × 64 × 128]
-    │ └reciprocal_density     [(r: float64, i: float64): 256 × 64 × 128]
+    │ ├intensity_from_densities 
+    │ ├intensity_from_ft_densities
+    │ ├normalized_real_density
+    │ ├real_density
+    │ └reciprocal_density
     ├average_ids (1 attributes)
-    │ ├0      [int64: scalar]
-    │ └1      [int64: scalar]
+    │ ├0
+    │ └1
     ├centered_average
-    │ ├normalized_real_density        [(r: float64, i: float64): 256 × 64 × 128]
-    │ ├real_density   [(r: float64, i: float64): 256 × 64 × 128]
-    │ └reciprocal_density     [(r: float64, i: float64): 256 × 64 × 128]
+    │ ├normalized_real_density
+    │ ├real_density
+    │ └reciprocal_density
     ├input
     │ ├0
-    │ │ ├real_density [(r: float64, i: float64): 256 × 64 × 128]
-    │ │ ├reciprocal_density   [(r: float64, i: float64): 256 × 64 × 128]
-    │ │ └support_mask [float64: 256 × 64 × 128]
+    │ │ ├real_density
+    │ │ ├reciprocal_density
+    │ │ └support_mask
     │ └1
-    │   ├real_density [(r: float64, i: float64): 256 × 64 × 128]
-    │   ├reciprocal_density   [(r: float64, i: float64): 256 × 64 × 128]
-    │   └support_mask [float64: 256 × 64 × 128]
+    │   ├real_density
+    │   ├reciprocal_density
+    │   └support_mask
     ├input_meta
-    │ ├average_scaling_factors_per_file       [float64: 2]
+    │ ├average_scaling_factors_per_file
     │ ├grids
-    │ │ ├real_grid    [float64: 256 × 64 × 128 × 3] (2 attributes)
-    │ │ └reciprocal_grid      [float64: 256 × 64 × 128 × 3] (2 attributes)
+    │ │ ├real_grid
+    │ │ └reciprocal_grid
     │ ├projection_matrices (1 attributes)
     
     ```

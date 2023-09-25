@@ -22,7 +22,7 @@
     	 You can alternatively call the environment by whatever name you like instead of "xframe"
      3. Install xframe
     	```
-    	pip install 'xframe[SPB]'
+    	pip install 'xframe[all]'
 		```
 	
 	If you already have installed *xFrame* note that the *SPB* experiment requires an additional dependency. In the mamba environment in which *xFrame* is installed you can either call
@@ -31,7 +31,7 @@
 	```
 	or 
 	```console
-	$ pip install `xframe[SPB]`
+	$ pip install `xframe[all]`
 	```
 	
 ## Access data
@@ -81,9 +81,18 @@ xframe.database.experiment
 ```
 As can be seen the result of calling `get_data` is a generator that yields chunks of scattering patterns according to the provided `DataSelection` instance.
 
-If you
-### Data Selection
-The data 
+### Data Selection 
+The `DataSelection` class takes the follwing arguments:
+
+- `run` : (int) Run number
+- `cells` : (slice|np.array) 
+    - `cells_mode` : ('exact' | 'relative') Whether to interpret the specified values as exact cell ids or as indices of the array of all present cell ids.
+- `pulses` : (slice|np.array) 
+    - `pulses_mode` : ('exact' | 'relative') Whether to interpret the specified values as exact pulse ids or as indices of the array of all present pulse ids.
+- `trains` : (slice|np.array) 
+    - `trains_mode` : ('exact' | 'relative') Whether to interpret the specified values as exact train ids or as indices of the array of all present train ids.
+- `module` : (sub array of np.arange(16)) AGIPD modules to load data from
+- `n_frames` : (int) The maximu amount of patterns to load
 
 
 ## Filters

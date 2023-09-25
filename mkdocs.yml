@@ -7,7 +7,8 @@ nav:
   - FXS :
     - fxs/index.md
     - Getting Started: fxs/getting_started.md
-    - Scripting: fxs/scripting.md      
+    - Scripting: fxs/scripting.md
+    - Paraview example: fxs/paraview_example.md      
   - Framework :
     - framework/index.md
     - Getting Started: framework/getting_started.md

@@ -25,7 +25,12 @@ from xframe.library.pythonLibrary import DictNamespace
 log=logging.getLogger('root')
 
 class DataSelection(DictNamespace):
-    def __init__(self,run : int,frame_range=slice(None),cells=slice(None),cells_mode='relative',pulses=slice(None),pulses_mode='relative',trains=slice(None),trains_mode='relative',modules = np.arange(16),n_frames=20000,good_cells=np.arange(1,202),in_multiples_of=False):
+    '''
+    Data class containing all options for pattern selection from AGIPD data.
+    '''
+    def __init__(self,
+                 run : int,
+                 frame_range=slice(None),cells=slice(None),cells_mode='relative',pulses=slice(None),pulses_mode='relative',trains=slice(None),trains_mode='relative',modules = np.arange(16,dtype=int),n_frames=20000,good_cells=np.arange(1,202),in_multiples_of=False):
         super().__init__()
         self['run'] = run
         self['frame_range']=frame_range

@@ -37,7 +37,7 @@ The dependencies are as follows:
 
 Note that the python packages [pygsl](https://bitbucket.org/nschaeff/shtns/src/master/) and [pyopencl](https://documen.tician.de/pyopencl/) require the libraries [gsl](https://www.gnu.org/software/gsl/) and [opencl](https://www.khronos.org/opencl/) to be installed on your system to function properly.
 
-In order to view the opututed 3d vtk datasets we recomend to install a vtk viewer such as [paraview](https://www.paraview.org/).
+In order to view the outputed 3d vtk datasets we recomend to install a vtk viewer such as [paraview](https://www.paraview.org/). An example for the usage of paraview can be found [here](./paraview_example)
 
 ## Setup on [Maxwell cluster](https://confluence.desy.de/display/MXW/Maxwell+Cluster/) at Desy
 In order to setup xframe on Maxwell you need to follow a few steps (time of writing 9.2023)  

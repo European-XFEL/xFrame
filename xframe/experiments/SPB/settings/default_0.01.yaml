@@ -137,7 +137,8 @@ IO:
     h5_agipd_baseline_shift:
       h5_internal_base:
         _value: blShift
-    h5_pump_diod: False
+    h5_pump_diod:
+      _value: False
 
     vds_internal_base:
       _value: /INSTRUMENT/SPB_DET_AGIPD1M-1/DET/image/
