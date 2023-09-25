@@ -552,3 +552,7 @@ def get_grid(grid_opt):
             grid = spherical_ft_grid_pair_gauss(Q,N_r,thetas,phis,reciprocity_coefficient)
 
     return grid
+
+
+def get_polar_fft_angles_from_max_order(max_order):
+    return np.arange(0,max_order*2)*np.pi/max_order

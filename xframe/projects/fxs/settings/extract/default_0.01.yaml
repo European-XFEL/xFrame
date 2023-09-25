@@ -272,7 +272,8 @@ IO:
       _value:
         command: 'xframe_opt.IO.folders.home'
     data:
-      base: 'data/fxs/'
+      base:
+        _value: 'data/fxs/'
     ccd:
       data:
         _value: "ccd/"

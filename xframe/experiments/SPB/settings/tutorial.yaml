@@ -1,0 +1,11 @@
+bad_cells:
+  command: '[0]' # also accepts slice or numpy arrays np.arange(0,1)
+
+sample_distance: 285 # in mm
+detector_origin: [0,0,217] # In laboratory coordinates [mm]
+x_ray_energy: 8000 # In ev
+
+IO:
+  folders:
+    exp_data_base: '/gpfs/exfel/exp/SPB/202202/p003046/'
+    

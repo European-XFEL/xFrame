@@ -24,7 +24,7 @@ from xframe.library.pythonLibrary import DictNamespace
 
 log=logging.getLogger('root')
 
-class AgipdDataSelection(DictNamespace):
+class DataSelection(DictNamespace):
     def __init__(self,run : int,frame_range=slice(None),cells=slice(None),cells_mode='relative',pulses=slice(None),pulses_mode='relative',trains=slice(None),trains_mode='relative',modules = np.arange(16),n_frames=20000,good_cells=np.arange(1,202),in_multiples_of=False):
         super().__init__()
         self['run'] = run
@@ -41,7 +41,7 @@ class AgipdDataSelection(DictNamespace):
         self['in_multiples_of']=in_multiples_of
 
 class ExperimentWorker(ExperimentWorkerInterface):
-    DataSelection = AgipdDataSelection
+    DataSelection = DataSelection
     def __init__(self,detector=False,calibrator=False):
         opt = settings.experiment
         comm_module = Multiprocessing.comm_module

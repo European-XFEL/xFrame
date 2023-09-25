@@ -11,7 +11,7 @@ os.chdir(plugin_dir)
 
 #from analysisLibrary.classes import ReciprocalProjectionData
 from .projectLibrary import fxs_invariant_tools as i_tools
-from .projectLibrary.ft_grid_pairs import max_order_from_n_angular_steps, get_grid
+from .projectLibrary.ft_grid_pairs import max_order_from_n_angular_steps,get_grid,get_polar_fft_angles_from_max_order
 from .projectLibrary.fourier_transforms import generate_ft,load_fourier_transform_weights
 from .projectLibrary.harmonic_transforms import HarmonicTransform
 from .projectLibrary.hankel_transforms import generate_weightDict
@@ -134,7 +134,8 @@ class InvariantExtractor:
         self.grid_pair = grid_pair
         if opt.dimensions==3:
             self.data_radial_points =  grid_pair.reciprocalGrid[:,0,0,0]
-            self.data_angular_points = grid_pair.reciprocalGrid[0,0,:,2]
+            #self.data_angular_points = grid_pair.reciprocalGrid[0,0,:,2]
+            self.data_angular_points = get_polar_fft_angles_from_max_order(self.max_order) #grid_pair.reciprocalGrid[0,0,:,2]
         elif opt.dimensions==2:
             self.data_radial_points =  grid_pair.reciprocalGrid[:,0,0]
             self.data_angular_points = grid_pair.reciprocalGrid[0,:,1]

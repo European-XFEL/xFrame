@@ -16,6 +16,9 @@ nav:
         - Data Access: framework/data_access.md
         - Multiprocessing: framework/multiprocessing.md
         - GPU Access: framework/gpu_access.md
+  - Experiments (preliminary):
+      - experiments/index.md
+      - SPB (at EuXFEL): experiments/spb.md
 
 theme:
   name: material

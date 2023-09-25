@@ -20,6 +20,9 @@ class ProjectWorkerInterface(abc.ABC):
         pass
 
 class ExperimentWorkerInterface(abc.ABC):
+    """
+    Abstract class for Experiments.    
+    """
     def __init__(self):
         from xframe.settings import experiment as settings
         from xframe.database import experiment as db
@@ -33,6 +36,9 @@ class ExperimentWorkerInterface(abc.ABC):
         pass
     @abc.abstractmethod
     def get_pixel_grid_reciprocal(self,coord_system:str):
+        pass
+    @abc.abstractmethod
+    def get_geometry(self):
         pass
     @abc.abstractmethod
     def run(self):

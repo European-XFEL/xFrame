@@ -4,7 +4,7 @@ First lets setup the xframe home directory by calling:
 ```console
 $ xframe --setup_home HOME_PATH
 ```
-and substituting `HOME_PATH` with where ever you want xframe to store files by default, if no value for `HOME_PATH` is given `~/.xframe` will be used. 
+and substituting `HOME_PATH` with where ever you want *xFrame* to store files by default, if no value for `HOME_PATH` is given `~/.xframe` will be used. 
 
 ??? note "Short version of getting started"
 	If you are willing to skip first step of extracting correlations from scattering patterns, the short version of this tutorial consists of executing the commands	
@@ -258,7 +258,6 @@ ccd.h5
 ├── angular_points
 ├── xray_wavelength
 ├── average_intensity
-├── angular_points
 └── cross_correlation
 	└── I1I1 
 ```

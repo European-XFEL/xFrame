@@ -7,6 +7,9 @@ The xFrame's `fxs` toolkit provides the following capabilities:
  3. **Reconstruction** of the electron density based on rotational invarants.
  4. **Alignment and Averaging** of reconstructions.
 
+!!! info "No data required"
+	To test the `fxs` toolkit no data is required, after installation simply follow the [getting started](getting_started) guide. 
+
 ## Installation	
 The fxs toolkit comes bundled as part of xFrame. The additional dependencies needed by `fxs` can be automatically installed via:
 

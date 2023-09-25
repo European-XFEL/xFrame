@@ -277,7 +277,7 @@ main_loop:
         _value:
           command: "['HIO','SW','ER']"
       iterations:
-        _value: 15
+        _value: 5
       best_density_not_in_first_n_iterations:
         _value:
           command: 'np.inf'

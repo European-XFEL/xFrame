@@ -1,0 +1,257 @@
+out_settings_path:
+  _value: will_be_set_on_runtime
+
+data_mode:
+  _value: proc
+
+good_cells:
+  _value:
+    command: np.arange(1,352)   #1,127
+
+bad_cells:
+  _value:
+    command: '[0]' # also accepts slice
+
+
+save:
+  settings:
+    _value: true
+
+custom_mask:
+  _value: false # 'agipd_mask' #'mask'
+
+detector:
+  name:
+    _value: AGIPD
+
+load_pump_diod_data:
+  _value: False
+    
+filter_sequence:
+  _value: [normalization] #adu
+
+filters:
+  gain:
+    class:
+      _value: GainFilter
+    mask:
+      high:
+        _value: false
+      medium:
+        _value: false
+      low:
+        _value: false
+    roi:
+      _value: all
+  adu:
+    class:
+      _value: ADUFilter
+    limits:
+      _value:
+        command: '[None,None]' #'[-40,4000]' # min_adu, max_adu. All other pixel will be masked
+    roi:
+      _value: rect
+  normalization:
+    class:
+      _value: NormalizationFilter
+    ROIs:
+      _value: [normalization_region]
+    
+ROIs:
+  all:
+    class:
+      _value: All
+    parameters:
+      center:
+        _value: [0, 0]
+      x_len:
+        _value: 3
+      y_len:
+        _value: 3
+  rect:
+    class:
+      _value: Rectangle
+    parameters:
+      center:
+        _value: [0.3, 0.02]
+      x_len:
+        _value: 0.2
+      y_len:
+        _value: 0.2
+  normalization_region:
+    class:
+      _value: Annulus
+    parameters:
+      center:
+        _value: [0, 0]
+      inner_radius:
+        _value: 0.07
+      outer_radius:
+        _value: 0.12
+      
+# 2 corresponds roughly to 200GB RAM usage for 256GB of available RAM
+# 1 corresponds roughly to 200GB RAM usage for 256GB of available RAM
+RAM_multiplier:
+  _value: 0.5 # choosing this to big can cause out of memory
+
+runs:
+  _value:
+    command: np.array([])
+#  command: '[108]'
+#  command: '[1]'
+#sample_distance: 215
+# starting from run 120
+sample_distance:
+  _value: 285
+detector_origin:
+  _value: [0, 0, 217]
+x_ray_energy:
+  _value: 8000
+n_processes:
+  _value: False
+
+
+IO:
+  folders:
+    # h5 folders
+    h5_internal_base:
+      _value: /INSTRUMENT/SPB_DET_AGIPD1M-1/DET/{module}CH0:xtdf/image/
+    h5_agipd_data:
+      h5_internal_base:
+        _value: data
+    h5_agipd_cellId:
+      h5_internal_base:
+        _value: cellId
+    h5_agipd_trainId:
+      h5_internal_base:
+        _value: trainId
+    h5_agipd_pulseId:
+      h5_internal_base:
+        _value: pulseId
+    h5_agipd_mask:
+      h5_internal_base:
+        _value: mask
+    h5_agipd_gain:
+      h5_internal_base:
+        _value: gain
+    h5_agipd_baseline_shift:
+      h5_internal_base:
+        _value: blShift
+    h5_pump_diod: False
+
+    vds_internal_base:
+      _value: /INSTRUMENT/SPB_DET_AGIPD1M-1/DET/image/
+    vds_agipd_data:
+      vds_internal_base:
+        _value: data
+    vds_agipd_trainId:
+      vds_internal_base:
+        _value: trainId
+    vds_agipd_pulseId:
+      vds_internal_base:
+        _value: pulseId
+    vds_agipd_cellId:
+      vds_internal_base:
+        _value: cellId
+    vds_agipd_mask:
+      vds_internal_base:
+        _value: mask
+    vds_agipd_gain:
+      vds_internal_base:
+        _value: gain
+    vds_agipd_frame_mask:
+      vds_internal_base:
+        _value: frame_mask
+    vds_agipd_baseline_shift:
+      vds_internal_base:
+        _value: blShift
+    
+    #exp_data: '/gpfs/exfel/exp/SPB/202102/p002510/{data_mode}/r{run:04d}'
+    #exp_data_base: '/gpfs/exfel/theory_group/user/berberic/p2510/cm-20_20_03_4/'
+    exp_data_base:
+      _value: /gpfs/exfel/exp/SPB/202202/p003046/
+    raw_data_base:
+      _value: 
+      exp_data_base:
+        _value: raw/r{run:04d}/
+    proc_data_base:
+      _value: 
+      exp_data_base:
+        _value: proc/r{run:04d}/
+    run_data:
+      exp_data_base:
+        _value: '{data_mode}/r{run:04d}/'
+    #exp_data: '/gpfs/exfel/exp/SPB/201901/p002304/{data_mode}/r{run:04d}'
+    #exp_data: '/gpfs/exfel/exp/SPB/202130/p900201/{data_mode}/r{run:04d}'
+    #exp_data: '/gpfs/exfel/exp/SPB/201802/p002145/{data_mode}/r{run:04d}'
+    out_base:
+      _value: 
+        command: "os.path.join(xframe_opt.IO.folders.home,'data/SPB/')"
+    #/gpfs/exfel/theory_group/user/berberic/p3046/
+    settings_base:
+      out_base:
+        _value: settings/{time}/
+    settings:
+      out_base:
+        _value: settings/{time}/
+    
+    vds_base:
+      out_base:
+        _value: vds_temp/r{run:04d}/
+    geometry:
+      out_base:
+        _value: geometry/
+    pump_diod:
+      out_base:
+        _value: pump_diod/
+  files:
+    settings:
+      name:
+        _value: experiment.yaml
+      folder:
+        _value: settings
+    vds_regexpr:
+      name:
+        _value: '*AGIPD{module:02d}-S*.h5'
+      folder:
+        _value: run_data
+    vds:
+      name:
+        _value: vds_{data_mode}_module_{module}.h5
+      #name: 'r{run:04d}_vds_{data_mode}_0.h5'
+      folder:
+        _value: vds_base
+      options:
+        allow_vds_creation:
+          _value: true
+    pump_diod:
+      name:
+        _value: r{run:04d}.h5
+      folder:
+        _value: pump_diod
+    geometry:
+      #name: 'agipd_2304_opt_102020.geom'
+      #name: 'b2.geom'
+      #name: 'agipd_2995_v04.geom'
+      #name: 'opt-shift1.geom'
+      #name: 'new_p3046.geom'
+      name:
+        _value: default.geom
+      folder:
+        _value: geometry
+    custom_mask:
+      name:
+        _value: masks/{name}.h5
+      folder:
+        _value: out_base
+      options:
+        file_name:
+          _value: new_mask
+        key:
+          _value: combined
+    background:
+      name:
+        _value: '{name}.h5'
+      folder:
+        _value: data
+  

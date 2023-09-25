@@ -80,8 +80,10 @@ class ProjectWorker(ProjectWorkerInterface):
             detector_edge = opt.image_dimensions[0]/2*(opt.pixel_size/1000)
             scattering_angle = np.arctan(detector_edge/sample_distance)
             q_max = scattering_angle_to_reciprocal_radii(scattering_angle,wavelength)
-            qrange = (0,q_max,q_max/(opt.image_dimensions[0]/2-1))
-            qrange_xcca = ((0,q_max,1),(0,q_max,1))
+            #qrange = (0,q_max,q_max/(opt.image_dimensions[0]/2-1))
+            #qrange_xcca = ((0,q_max,1),(0,q_max,1))
+            qrange = [0,q_max,q_max/(opt.image_dimensions[0]/2-1)]
+            qrange_xcca = [[0,q_max,1],[0,q_max,1]]
             if isinstance(opt.qrange,bool):
                 opt.qrange = qrange
             if isinstance(opt.qrange_xcca,bool):
@@ -206,7 +208,7 @@ class DataReader():
         #batches = [(i, min(i + self.batch_size, self.M)) for i in range(0, self.M, self.batch_size)]
         #self.num_batches=len(batches)
         
-        xprint("Number of CPUs available: {}, requested: {},  to be used: {} ".format(numcpus, self.numcpus_max, Multiprocessing._read_number_of_processes(self.numcpus_max)))
+        xprint("Number of CPUs available: {}, requested: {},  to be used: {} ".format(numcpus, self.numcpus_max, Multiprocessing._read_number_of_processes(self.numcpus)))
         xprint("Number of images to be processed: {}".format(self.M))
          
         # Process data batches in parallel

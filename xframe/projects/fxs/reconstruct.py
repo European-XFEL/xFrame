@@ -189,6 +189,8 @@ class ProjectWorker(ProjectWorkerInterface):
         opt = settings.project
         start_time = time.time()
         #self.MTIP.preinit()
+        #xprint(f'Reciprocal opt = {opt.projections.reciprocal.dict()}')
+        #xprint(f'grid opt = {opt.grid.dict()}')
         if opt.multi_process.use:
             result=self.start_parallel_phasing()
         else:
@@ -298,8 +300,6 @@ class MTIP:
         self.phasing_loop = False        
 
 
-
-
     def assemble_operators(self):
         #order is important, e.g. assemble_error_routines depents on self.projection_objects
         transforms,grid_pair,max_order=self.assemble_transform_op_and_grid()        
@@ -353,7 +353,7 @@ class MTIP:
         #log.info(f'spat shape = {cht._sh._sh.spat_shape} ht_opt = {ht_opt}')
         ht_forward,ht_inverse = ht.forward, ht.inverse
         #log.info(ht_forward)
-        #log.info("ht grid param = {}".format(cht.grid_param))
+        #xprint("ht grid param = {}".format(cht.grid_param))
         #log.info(f'spat shape = {cht._sh._sh.spat_shape}')
         grid_pair=get_grid({**opt.fourier_transform,**ht_opt,**cht.grid_param,'max_q':self.max_q,'n_radial_points_from_data':self.data_number_of_radial_points})
         # fourier transforms
@@ -406,7 +406,18 @@ class MTIP:
         #log.info(f'len pr = {len(pr)}')
 
         if self.dimensions ==3:
-            auto_correlation_guess = ift(icht(pr)).real
+            pr_padded = []
+            for l,p in enumerate(pr):
+                n_ms = 2*l+1
+                if p.shape[1]!= n_ms:
+                    p_padded = np.zeros((p.shape[0],n_ms),dtype=p.dtype)
+                    p_padded[:,:p.shape[1]]=p
+                    pr_padded.append(p_padded)
+                else:
+                    pr_padded.append(p)
+                        
+            #xprint(f'pr shape = {[p.shape for p in pr_padded]}')
+            auto_correlation_guess = ift(icht(pr_padded)).real
         elif self.dimensions ==2:
             #log.info(f'pr.shape = {pr.shape}')
             auto_correlation_guess = ift(icht(pr.T)).real

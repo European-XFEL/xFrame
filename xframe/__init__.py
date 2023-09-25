@@ -39,5 +39,6 @@ import_selected_project = startup_routines.import_selected_project
 import_selected_experiment= startup_routines.import_selected_experiment
 run = startup_routines.run
 select_and_run = startup_routines.select_and_run
-
+reload_home = startup_routines.reload_home
+change_home = startup_routines.change_home
 

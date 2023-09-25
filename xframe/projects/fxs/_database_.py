@@ -18,6 +18,7 @@ from xframe.library.gridLibrary import NestedArray
 from xframe.library.gridLibrary import double_first_dimension
 from xframe.library.pythonLibrary import getArrayOfArray
 from xframe.library.pythonLibrary import option_switch
+from xframe.library.pythonLibrary import xprint
 from xframe.library.physicsLibrary import ewald_sphere_theta
 from xframe.library.physicsLibrary import ewald_sphere_theta_pi
 from xframe.database.database import DefaultDB
@@ -214,9 +215,9 @@ class ProjectDB(DefaultDB,DatabaseInterface):
     def _save_settings(self,path,project_name='settings',exp_name='exp_settings'):
         project_settings, experiment_settings = settings.get_settings_to_save()
         if isinstance(xframe.project_worker,ProjectWorkerInterface):
-            self.save(pjoin(path,project_name+'.yaml'),project_settings)
+            self.save(pjoin(path,project_name+'.yaml'),project_settings,convert=True)
         if isinstance(xframe.experiment,ExperimentWorkerInterface):
-            self.save(pjoin(path,exp_name+'.yaml'),experiment_settings)
+            self.save(pjoin(path,exp_name+'.yaml'),experiment_settings,convert=True)
         #log.info(f'settings raw = \n {settings.raw_analysis} \n')
     
     def save_reconstructions(self,name,data,**kwargs):
@@ -654,6 +655,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         self._save_settings(data_folder,project_name=file_name)
 
         try:
+            xprint('first invar')
             if options.get('plot_first_invariants',False):
                 for key,bls in proj_class.b_coeff.items():
                     bl_args = np.angle(bls)+np.pi
@@ -712,6 +714,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             traceback.print_exc()
             
         try:
+            xprint('first invar proj')
             #log.info(f"trying to plot pr inv = {options.get('plot_first_invariants_from_proj_matrices',False)}")
             if options.get('plot_first_invariants_from_proj_matrices',False):
                 #log.info('plot first invariants from projection matrices')
@@ -729,7 +732,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         except Exception as e:
             log.info("Plotting Bl from projection matrices failed!")
             traceback.print_exc()
-        try:
+        try:            
             if options.get('save_intensity_vtk',False):
                 if proj_class.dimensions == 3:
                     V = proj_class.data_projection_matrices['I1I1']

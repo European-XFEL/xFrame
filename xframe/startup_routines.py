@@ -8,6 +8,7 @@ import glob
 import shutil
 import argparse
 import logging
+import importlib
 
 import xframe
 #from xframe.library.pythonLibrary import xprint
@@ -21,8 +22,8 @@ def import_settings():
     
 def setup_logging():
     from xframe.settings import general
-    from xframe import log
-    log = log.setup_custom_logger('root',general.loglevel)
+    from xframe import logger
+    log = logger.setup_custom_logger('root',general.loglevel)
     globals().update({'log':log})
 
 # xframe modules to load at import 
@@ -182,8 +183,9 @@ def lookup_workers(project_path):
 
 def _parse_project_name(name,worker_name=False):
     known_projects = xframe.known_projects
+    project_paths = [xframe.database.default.get_path(name,is_file=False) for name in xframe.settings.general.project_folders]
     if not name in known_projects:
-        raise AssertionError('Project_Name {} was not found at {}. Known projects are {}'.format(name,[path + name for path in xframe.settings.general.project_paths],known_projects.keys()))
+        raise AssertionError('Project_Name {} was not found at {}. Known projects are {}'.format(name,[path + name for path in project_paths],known_projects.keys()))
     project_path = known_projects[name]
     if isinstance(worker_name,str):        
         worker_path = os.path.join(project_path,worker_name+'.py')
@@ -230,7 +232,6 @@ def select_project(name=False,worker_name=False,project_settings=False,ignore_fi
         worker_name = ''
     else:        
         project_path,name,worker_name = _parse_project_name(name,worker_name)
-
         project_settings,project_settings_raw = database.default.load('settings',project_path = project_path,worker_name = worker_name,settings_file_name=project_settings,ignore_file_not_found=ignore_file_not_found)
 
         project_settings_raw = project_settings_raw.dict()
@@ -270,10 +271,10 @@ def import_selected_project(update_worker=True):
     settings = xframe.settings
     database = xframe.database
     controller = xframe.controller    
-
+    
     if update_worker:
         settings.raw_project = database.default.format_settings(settings.project)
-
+        
     module_name=xframe._project_worker_module_name
     worker_module_imported = module_name in sys.modules
     worker_instance_exists = isinstance(xframe.project_worker,xframe.interfaces.ProjectWorkerInterface)
@@ -410,7 +411,8 @@ class DefaultProjectClick:
     def process_arguments(self,args):
         pass
 
-def setup_home(home):
+    
+def setup_home(home,silent=False):
     db = xframe.database.default
     if os.path.expanduser(home) != db.get_path('home',is_file=False):
         if home[-1]!='/':
@@ -418,11 +420,12 @@ def setup_home(home):
         new_home_exists = os.path.exists(os.path.expanduser(home))
         if not new_home_exists:
             response = 'a'
-            while response not in 'yYnN':                
-                response = input(f'Folder "{home}" does not exist. Do you want to create the new folder [y/n]? ')
-            if response in 'nN':
-                xframe.lib.python.xprint('abborting!')
-                sys.exit()
+            if not silent:
+                while response not in 'yYnN':                
+                    response = input(f'Folder "{home}" does not exist. Do you want to create the new folder [y/n]? ')
+                if response in 'nN':
+                    xframe.lib.python.xprint('abborting!')
+                    sys.exit()
         log.info(f'Changing home from {db.get_path("home",is_file=False)} to {home}')
         settings_entry = f'home_folder = "{os.path.expanduser(home)}"\n'
         
@@ -485,11 +488,10 @@ def setup_home(home):
                 db.copy(tutorial,target_file)
                 log.info(f'source = {tutorial} target = {target_file}')
                 #print(f'source = {default} target = {target_file}')
+    log.info('symlink default experiment settings')
     for exp,exp_path in xframe.known_experiments.items():
-        xframe.database.default.create_folders('user_experiment_settings',path_modifiers={'experiment':exp})
-
+        #xframe.database.default.create_folders('user_experiment_settings',path_modifiers={'experiment':exp})
         exp_modifier = {'experiment':exp}
-
         db.create_folders('settings_experiment',path_modifiers=exp_modifier)
         settings_install_path = db.get_path('settings_install_experiment',path_modifiers=exp_modifier,is_file=False)
         home_settings_path = db.get_path('settings_experiment',path_modifiers=exp_modifier,is_file=False)
@@ -499,9 +501,59 @@ def setup_home(home):
             target_file = os.path.join(home_settings_path,os.path.basename(default))
             log.info(f'source = {default} target = {target_file}')
             db.create_symlink(default,target_file)
+            
+    log.info('copy experiment tutorial settings')
+    for exp,exp_path in xframe.known_experiments.items():
+        #xframe.database.default.create_folders('user_experiment_settings',path_modifiers={'experiment':exp})
+        exp_modifier = {'experiment':exp}
+        db.create_folders('settings_experiment',path_modifiers=exp_modifier)
+        settings_install_path = db.get_path('settings_install_experiment',path_modifiers=exp_modifier,is_file=False)
+        home_settings_path = db.get_path('settings_experiment',path_modifiers=exp_modifier,is_file=False)        
+        tutorial_settings_files = glob.glob(os.path.join(settings_install_path,'tutorial*.yaml'))
+        for tutorial in tutorial_settings_files:
+            target_file = os.path.join(home_settings_path,os.path.basename(tutorial))
+            db.copy(tutorial,target_file)
+            log.info(f'source = {tutorial} target = {target_file}')
+            #print(f'source = {default} target = {target_file}')
     xprint(f'Created xframe home at: {os.path.expanduser(home)}')
 
+ 
+def change_home(new_home_path=None):
+    if new_home_path is None:
+        new_home_path = xframe.settings.general.default_folder
+    if new_home_path[-1]!='/':
+        new_home_path+='/'
+        
+    if not os.path.exists(new_home_path):
+        setup_home(new_home_path,silent=True)
+    else:
+        log.info(f'Changing home from {db.get_path("home",is_file=False)} to {home}')
+        settings_entry = f'home_folder = "{os.path.expanduser(home)}"\n'        
+        #Creating config file in .xframe pointing to the new home directory
+        if os.path.exists(db.get_path('config')):
+            lines = db.load('config',as_text= True)
+            home_folder_found  = False
+            for _id,line in enumerate(lines):
+                if line[:11]=='home_folder':
+                    lines[_id]= settings_entry
+                    home_folder_found = True
+                    break
+            if not home_folder_found:
+                lines = [settings_entry]+lines
+            config= lines
+        else:
+            config = [settings_entry]        
+        db.save('config',config)
+        xframe.settings.general.home_folder = home
+        xframe.settings.general.IO.folders.home=home
+        db.update_folders_and_files(**xframe.settings.general.IO.dict())                
+    reload_home()
+
     
-
-
+def reload_home():
+    global xframe
+    xframe = importlib.reload(xframe)
+    xframe.projects = importlib.reload(xframe.projects)
+    xframe.experiments = importlib.reload(xframe.experiments)
+        
         
