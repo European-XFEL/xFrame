@@ -113,7 +113,8 @@ class HDF5_DB(HDF5Interface):
         if dtype==np.complex_:
             h5_file[path].create_dataset(key,data=array.astype('<c16'))
         elif dtype == np.bool_ :
-                h5_file[path].create_dataset(key,data=array.astype(int))
+            #h5_file[path].create_dataset(key,data=array.astype(int))
+            h5_file[path].create_dataset(key,data=array)
         elif 'str' in dtype.name:
             h5_file[path].create_dataset(key,data=array.astype('S'))
         else:

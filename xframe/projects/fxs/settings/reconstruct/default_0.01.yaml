@@ -18,7 +18,7 @@ grid:
     _value: 0
     _desctipton: 'Number of polar angular grid points in [0,pi) has to obey: n_phi >= (max_order+1)'
   n_radial_points:
-    _value: 256
+    _value: 128
 fourier_transform:
   type:
     _value: 'midpoint'
@@ -26,7 +26,7 @@ fourier_transform:
     _description: Choose midpoint rule or zernike approximation for the hankel transform inside used to calculate the fourier transform
   reciprocity_coefficient:
     _value:
-      command: '1'
+      command: '2.0'
     _description: 'Reciprocity relation is Q R = x N where Q,R are the radial limits in real an d reciprocal space and N is the number of radial steps of the grid (n_radial_point). The reciprocity coefficient is x. For x = pi this relation mimics the corresponding relation of cartesian grids used in Fast Fourier Transforms. Lowering x while keeping Q fixed effectively causes a smoothening of the real space density.'
   allow_weight_calculation:
     _value: True
@@ -131,7 +131,7 @@ projections:
   reciprocal:
     number_of_particles:
       initial:
-        _value: 1
+        _value: 1.0
       estimate:
         _value: False
         _description: Whether or not to try and estimate the number of particles during Phasing. NOT WORKING, CAUSES RECONSTRUCTION TO CRASH! 

@@ -669,7 +669,7 @@ class ProjectWorker(ProjectWorkerInterface):
                             reconstruction_keys2[pos] = (num,key)
                             reconstruction_ids_per_file[num].append(pos)
                             reconstructions.append(reconstr)                            
-                            support_masks.append(np.array(value['support_mask'][:],dtype=float))
+                            support_masks.append(np.asarray(value['support_mask'][:]))
                 if num == 0:                    
                     r_opt = db.load('reconstruction_settings',path_modifiers= {'path':os.path.dirname(file_path)})
                     r_opt['internal_grid'] = db.get_db('file://_.h5').recursively_load_dict_from_group(h5_file,'/configuration/')['internal_grid']

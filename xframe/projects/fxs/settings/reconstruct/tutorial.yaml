@@ -3,8 +3,8 @@ dimensions: 3
 particle_radius: 250
 
 grid:
-  n_radial_grid_points: 128
-  max_order: 63
+  n_radial_points: 128
+  max_order: 64
 
 density_guess:
   type: 'bump' #'bump','ball'

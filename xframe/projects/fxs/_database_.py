@@ -314,13 +314,13 @@ class ProjectDB(DefaultDB,DatabaseInterface):
 
                     if settings.project["dimensions"] == 3:
 
-                        self.save(real_vtk_path,[real_density,real_mask,last_real_density,last_real_mask,initial_density,initial_support],grid =real_grid,grid_type='spherical',skip_custom_methods=True,dset_names=['best_density','best_mask','last_density','last_mask','initial_density','initial_support'])
+                        self.save(real_vtk_path,[real_density,real_mask,last_real_density,last_real_mask,initial_density,initial_support],grid =real_grid,grid_type='spherical',skip_custom_methods=True,dset_names=['best_density','best_support','last_density','last_support','initial_density','initial_support'])
                         #save_vtk([real_density,real_mask],real_grid,real_vtk_path,grid_type='spherical')
                          
                         reciprocal_vtk_path=self.get_path('reciprocal_vtk',path_modifiers=vtk_path_modifiers)
                         self.save(reciprocal_vtk_path,[reciprocal_intensity,last_reciprocal_intensity],grid = reciprocal_grid,grid_type='spherical',skip_custom_methods=True,dset_names=['best_intensity','last_intensity'])
                     elif settings.project["dimensions"] == 2:
-                        self.save(real_vtk_path,[real_density,real_mask,last_real_density,last_real_mask,initial_density,initial_support],grid =real_grid,grid_type='polar',skip_custom_methods=True,dset_names=['best_density','best_mask','last_density','last_mask','initial_density','initial_support'])
+                        self.save(real_vtk_path,[real_density,real_mask,last_real_density,last_real_mask,initial_density,initial_support],grid =real_grid,grid_type='polar',skip_custom_methods=True,dset_names=['best_density','best_support','last_density','last_support','initial_density','initial_support'])
                         #save_vtk([real_density,real_mask],real_grid,real_vtk_path,grid_type='spherical')
                          
                         reciprocal_vtk_path=self.get_path('reciprocal_vtk',path_modifiers=vtk_path_modifiers)
