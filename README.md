@@ -16,11 +16,15 @@ Allowing users to focus on the "scientific" part of their algorithm.
 To install *xFrame* simply call
 ```
 pip install xframe
+# For the fluctuation scattering toolkit use the following command instead (see next section)
+pip install 'xframe[fxs]'
 ```
 For more information and tutorials visit the documentaiton at [xframe-fxs.readthedocs.io](https://xframe-fxs.readthedocs.io)
 
 # Fluctuation X-Ray Scattering Toolkit [fxs]
-The project __fxs__ comes bundled with *xFrame* and provides a workflow for 3D structure determination from fluctuation X-ray scattering data.
+The project __fxs__ comes bundled with *xFrame* and provides a workflow for 3D structure determination from fluctuation X-ray scattering data.  
+
+__Note: No data is required to perform test reconstructions__, further information as well as tutorials can be found at [xframe-fxs.readthedocs.io/en/latest/fxs](https://xframe-fxs.readthedocs.io/en/latest/fxs)
 
 To install *xFrame* together with the dependencies needed by *fxs* simply call
 ```
@@ -30,7 +34,6 @@ please make sure that the following libraries are installed on your system befor
 - [GNU Scientific Library](https://www.gnu.org/software/gsl/)
 - [OpenCL](https://www.khronos.org/opencl/)
 
-Further information as well as tutorials can be found at [xframe-fxs.readthedocs.io/en/latest/fxs](https://xframe-fxs.readthedocs.io/en/latest/fxs)
 
 # Citation
 If you find this piece of software usefull for your scientific project consider citing the paper  
