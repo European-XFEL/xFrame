@@ -32,18 +32,18 @@ class DataSelection(DictNamespace):
                  run : int,
                  frame_range=slice(None),cells=slice(None),cells_mode='relative',pulses=slice(None),pulses_mode='relative',trains=slice(None),trains_mode='relative',modules = np.arange(16,dtype=int),n_frames=20000,good_cells=np.arange(1,202),in_multiples_of=False):
         super().__init__()
-        self['run'] = run
+        self['run'] = int(run)
         self['frame_range']=frame_range
         
         selection = DictNamespace(cells=DictNamespace(range=cells,mode=cells_mode),
                                   pulses = DictNamespace(range=pulses,mode=pulses_mode),
                                   trains = DictNamespace(range=trains,mode=trains_mode)
                                   )
-        self['selection']=selection
-        self['modules']=modules
-        self['n_frames']=n_frames
-        self['good_cells']=good_cells
-        self['in_multiples_of']=in_multiples_of
+        self['selection'] = selection
+        self['modules'] = modules
+        self['n_frames'] = int(n_frames)
+        self['good_cells'] = good_cells
+        self['in_multiples_of'] = in_multiples_of
 
 class ExperimentWorker(ExperimentWorkerInterface):
     DataSelection = DataSelection
@@ -94,16 +94,9 @@ class ExperimentWorker(ExperimentWorkerInterface):
         #data_info =self.db.load('info',runs=self.opt['runs'],data_mode=self.data_mode)
         info = {'sample_distance':self.sample_distance,'x_ray_energy':self.x_ray_energy,'x_ray_wavelength':self.x_ray_wavelength}
         return info
-    def set_ids_for_run(self,run):
-        ids_by_run = self.ids_by_run
-        run_str=str(run)
-        if run_str in ids_by_run:
-            self.cell_ids = ids_by_run[run_str]['cell_ids']
-            self.pulse_ids = ids_by_run[run_str]['pulse_ids']
-            self.train_ids = ids_by_run[run_str]['train_ids']
-            self.baseline_shifts = ids_by_run[run_str]['baseline_shift']
-            self.frame_mask = ids_by_run[run_str]['frame_mask']
-        else:
+    def get_metadata(self,run):
+        run_str = str(run)
+        if run_str not in self.ids_by_run:
             load = self.db.load
             pm = {'run':run,'data_mode':self.data_mode}
             cell_ids = load('cell_ids',path_modifiers = pm)
@@ -112,11 +105,16 @@ class ExperimentWorker(ExperimentWorkerInterface):
             frame_mask = load('frame_mask',path_modifiers = pm)
             baseline_shifts= load('baseline_shift',path_modifiers = pm)
             self.ids_by_run[run_str] = {'cell_ids':cell_ids,'pulse_ids':pulse_ids, 'train_ids':train_ids,'frame_mask':frame_mask,'baseline_shift':baseline_shifts}
-            self.cell_ids = cell_ids
-            self.pulse_ids = pulse_ids
-            self.train_ids = train_ids
-            self.frame_mask = frame_mask
-            self.baseline_shifts = baseline_shifts
+        return self.ids_by_run[run_str]
+            
+    def set_ids_for_run(self,run):
+        ids_by_run = self.ids_by_run
+        meta = self.get_metadata(run)
+        self.cell_ids = meta['cell_ids']
+        self.pulse_ids = meta['pulse_ids']
+        self.train_ids = meta['train_ids']
+        self.baseline_shifts = meta['baseline_shift']
+        self.frame_mask = meta['frame_mask']
         self.nframes=len(self.cell_ids)
         
     
@@ -324,7 +322,7 @@ class ExperimentWorker(ExperimentWorkerInterface):
         #        log.warning('Process {} didnt synchronice after 20 min stop waiting in process {}'.format(p_id,process_id))
         synchronize(timeout = 60*20)
                 
-    def get_data(self,opt:AgipdDataSelection):
+    def get_data(self,opt:DataSelection):
         ex_opt = settings.experiment
         run = opt['run']
         if not str(run) in self.info:
