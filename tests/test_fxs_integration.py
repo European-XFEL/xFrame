@@ -28,12 +28,12 @@ After each execution we check whether the output files exist and contain roughly
 No detailed checks on the output data is performed.
 '''
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope='module')
 def tmp_path(tmpdir_factory):
     path = tmpdir_factory.mktemp('xtest'+str(np.random.rand()))
     return path
 
-@pytest.fixture(scope='session',autouse=True)
+@pytest.fixture(scope='module',autouse=True)
 def set_temp_home(tmp_path):    
     config_file_exists = os.path.exists(config_path)
     global tmp_config_path
@@ -119,7 +119,7 @@ def check_list_content(_list,template):
             else:
                 assert isinstance(val,temp),f'wrong dtype expected {temp} got {type(val)}'                            
             
-@pytest.fixture(scope='session')
+@pytest.fixture(scope='module')
 def patterns():
     patterns = np.random.rand(*TestsCorrelate.pattern_shape).astype(np.float32)
     paths = [os.path.join(tmp_config_path,TestsCorrelate.pattern_folder,f'{i}.raw') for i in range(TestsCorrelate.pattern_shape[0])]
@@ -128,7 +128,7 @@ def patterns():
     pattern_list = [p+'\n' for p in paths]
     xframe.database.default.save(os.path.join(tmp_config_path,TestsCorrelate.pattern_list_path),pattern_list)
       
-@pytest.fixture(scope='session')
+@pytest.fixture(scope='module')
 def run_correlate(patterns):
     pattern_shape = TestsCorrelate.pattern_shape    
     settings_path= os.path.join(tmp_config_path,'settings/projects/fxs/correlate/test.yaml')
@@ -187,7 +187,7 @@ class TestsCorrelate:
         check_dict_content(data,data_structure)
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope='module')
 def run_simulate_ccd():
     radial_points = TestsCorrelate.pattern_shape[1]//2
     max_order = TestsCorrelate.pattern_shape[1]
@@ -251,7 +251,7 @@ class TestsSimulateCCD:
         check_dict_content(data,data_structure)    
 
     
-@pytest.fixture(scope='session')
+@pytest.fixture(scope='module')
 def run_extract(run_simulate_ccd):
     radial_points = TestsCorrelate.pattern_shape[1]//2
     max_order = TestsCorrelate.pattern_shape[1]-1
@@ -319,7 +319,7 @@ class TestExtract:
             assert mat.shape == mat_shape ,f'projection matrix of order {l} has wring shape. {mat.shape} instead of {mat_shape}'
 
         
-@pytest.fixture(scope='session')
+@pytest.fixture(scope='module')
 def run_reconstruct(run_extract):
     radial_points = TestsCorrelate.pattern_shape[1]//2
     max_order = TestsCorrelate.pattern_shape[1]-1
@@ -423,7 +423,7 @@ class TestReconstruct:
         check_dict_content(data,data_structure)
 
     
-@pytest.fixture(scope='session')
+@pytest.fixture(scope='module')
 def run_average(run_reconstruct):
     settings_path= os.path.join(tmp_config_path,'settings/projects/fxs/average/test.yaml')
     settings = [

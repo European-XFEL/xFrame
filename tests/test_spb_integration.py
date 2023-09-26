@@ -29,12 +29,12 @@ After each execution we check whether the output files exist and contain roughly
 No detailed checks on the output data is performed.
 '''
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope='module')
 def tmp_path(tmpdir_factory):
     path = tmpdir_factory.mktemp('xtest'+str(np.random.rand()))
     return path
 
-@pytest.fixture(scope='session',autouse=True)
+@pytest.fixture(scope='module',autouse=True)
 def set_temp_home(tmp_path):    
     config_file_exists = os.path.exists(config_path)
     global tmp_config_path
@@ -44,7 +44,6 @@ def set_temp_home(tmp_path):
         print(f'initial config content = {initial_config}')
         copy(config_path,config_backup_path)
     xframe.change_home(tmp_config_path)
-    
     yield
     if config_file_exists:
         copy(config_backup_path,config_path)
