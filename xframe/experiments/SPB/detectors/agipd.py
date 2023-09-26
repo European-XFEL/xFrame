@@ -7,6 +7,7 @@ import numpy as np
 from xframe.interfaces import DetectorInterface
 from xframe.library.mathLibrary import plane3D
 from xframe.library.gridLibrary import GridFactory
+from xframe import database
 
 log=logging.getLogger('root')
 
@@ -87,10 +88,15 @@ class AGIPD(DetectorInterface):
         geom_path = self.database.get_path("geometry")
         if os.path.exists(geom_path):
             modulePlains=self.database.load('geometry')
-            listOfQuadrants=self.quadrants.flatten()
-            for module in self.modules:
-                module.detection_plane = modulePlains[module.id]
-            self.assemblePixelGrid()
+        else:
+            path = database.default.get_path('install_experiments',is_file=False)
+            geom_path = os.path.join(path,'SPB/default.geom')
+            modulePlains = self.database.load_geometry(geom_path)
+        listOfQuadrants=self.quadrants.flatten()
+        for module in self.modules:
+            module.detection_plane = modulePlains[module.id]
+        self.assemblePixelGrid()
+            
                 
     def get_geometry(self):
         return self.pixel_grid        

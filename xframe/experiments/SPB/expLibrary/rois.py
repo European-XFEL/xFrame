@@ -15,6 +15,7 @@ class RegionOfInterest(abc.ABC):
         self.pixel_grid_cart = spherical_to_cartesian(self.pixel_grid_polar)
         self.n_total_modules = self.pixel_grid_cart.shape[0]
         self.data_modules = modules
+        self.module_shape = self.pixel_grid_cart.shape[1:-1]
         ## mask as if all of 16 modules would be used
         self.mask_complete = self.generate()
         self.mask_true_modules = self.calc_used_modules(self.mask_complete)
@@ -109,7 +110,7 @@ class Asic(RegionOfInterest):
 
 class All(RegionOfInterest):
     def generate(self):
-        mask = np.ones(self.n_total_modules,dtype = bool)
+        mask = np.ones((self.n_total_modules,)+self.module_shape,dtype = bool)
         return mask
 
 

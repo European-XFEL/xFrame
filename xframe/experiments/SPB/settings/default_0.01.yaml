@@ -55,7 +55,7 @@ filters:
     class:
       _value: NormalizationFilter
     ROIs:
-      _value: [normalization_region]
+      _value: [all]
     
 ROIs:
   all:

@@ -157,7 +157,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
     
     def load_geometry(self,name,**kwargs):
         modules = range(16)
-        geom_path = super().get_path('geometry')
+        geom_path = super().get_path(name)
         file_type = os.path.splitext(geom_path)[1] 
         #log.info('geom_cryst_path = {}'.format(file_type))
         if os.path.isfile(geom_path):
@@ -399,9 +399,17 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         frame_ids = np.arange(n_frames)        
         log.info('Generating VDS layouts.')
         mp_mode = Multiprocessing.MPMode_Queue(assemble_outputs = False)
-        results = comm_module.request_mp_evaluation(self._vds_worker,mp_mode,input_arrays=[flist,m_ids],const_inputs=[frame_slices,frame_ids,lookup_array,general_data,data_mode],split_together = True,n_processes = n_processes)
+        results_tmp = comm_module.request_mp_evaluation(self._vds_worker,mp_mode,input_arrays=[flist,m_ids],const_inputs=[frame_slices,frame_ids,lookup_array,general_data,data_mode],split_together = True,n_processes = n_processes)
         #log.info('len(m_ids) = {}'.format(len(m_ids)))
-        results = tuple( elem for result in results.values() for elem in result)
+        
+        #The following loop corrects for some artefact in the MP mode where sometimes a list is placed around outputs
+        results = []
+        for r in results_tmp.values():
+            if isinstance(r,(list,tuple)):
+                results +=  r
+            else:
+                results.append(r)
+        results = tuple(results)
         
         result_module_ids = np.array([r['module'] for r in results])
         log.info('Populating VDS layouts and saving VDS files.')

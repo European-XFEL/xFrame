@@ -9,7 +9,7 @@ authors = [
 ]
 
 classifiers = [
-	"Intended Audience :: Science/Research",
+    "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
     "Programming Language :: Python :: 3",
@@ -20,8 +20,8 @@ dependencies = [
     "numpy",
     "ruamel.yaml",
     "scipy",
-	"click",
-	"psutil",
+    "click",
+    "psutil",
 ]
 requires-python = ">=3.8"
 
@@ -39,7 +39,7 @@ fxs = [
     "opencv-python",
     "pygsl",
     "psutil",
-	"flt",
+    "flt",
 ]
 all = [
     "pysofft",    
@@ -50,7 +50,7 @@ all = [
     "opencv-python",
     "pygsl",
     "psutil",
-	"flt",
+    "flt",
     "SharedArray"
 ]
 

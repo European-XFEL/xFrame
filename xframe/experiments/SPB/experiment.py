@@ -352,7 +352,7 @@ class ExperimentWorker(ExperimentWorkerInterface):
         
         self.roi_manager.used_modules = np.asarray(modules)
         #log.info('modules = {}'.format(modules))
-        nroi = self.roi_manager.rois['normalization_region']
+        #nroi = self.roi_manager.rois['normalization_region']
         #log.info('normalization mask ={} complete mask = {}'.format(nroi.mask.shape,nroi.mask_complete.shape))
         
         filter_sequence = self.load_filters()

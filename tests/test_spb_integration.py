@@ -126,13 +126,107 @@ def has_access_to_gpfs():
 
 @pytest.mark.skipif(has_access_to_gpfs(),reason="Need access to exfel GPFS")
 def test_get_data(set_temp_home):
-    pass
+    xframe.select_experiment('SPB','tutorial')
+    xframe.import_selected_experiment()
+    exp = xframe.experiment
+    run = 162
+    selection = exp.DataSelection(run,n_frames=2000)
+    data_generator = exp.get_data(selection)
+
+    for chunk in data_generator:
+        print(chunk.keys())
+        del(chunk)
+
 @pytest.mark.skipif(has_access_to_gpfs(),reason="Need access to exfel GPFS")
 def test_filters(set_temp_home):
-    pass
+    xframe.select_experiment('SPB','tutorial')
+    opt = {
+        "filter_sequence": ["norm","lit_pixels"],
+        "filters":{
+            "lit_pixels":{
+                "class": "LitPixels",
+                "lit_threshold": 1e5,
+                "limits": [0.04,None]
+            },
+            "norm":{
+                "class": "NormalizationFilter"
+            }               
+        }
+    }
+    xframe.settings.experiment.update(opt)    
+    xframe.import_selected_experiment()
+    exp = xframe.experiment
+    run = 162
+    selection = exp.DataSelection(run,n_frames=2000)
+    data_generator = exp.get_data(selection)
+
+    for chunk in data_generator:
+        print(chunk.keys())
+        # the assert valu is specific to run 162 of exp /gpfs/exfel/exp/SPB/202202/p003046/
+        assert chunk['data'].mean()<100,'Normalization did not work'
+        del(chunk)
+        
 @pytest.mark.skipif(has_access_to_gpfs(),reason="Need access to exfel GPFS")
 def test_rois(set_temp_home):
-    pass
+    opt = {
+        "filter_sequence": ["norm","lit_pixels"],
+        "filters":{
+            "lit_pixels":{
+                "class": "LitPixels",
+                "lit_threshold": 1e5,
+                "limits": [0.04,None]
+            },
+            "norm":{
+                "class": "NormalizationFilter",
+                "ROIs": ['rect1','donut','asic070']
+            }               
+        },
+        "ROIs":{
+            'rect1':{
+                'class':'Rectangle',
+                'parameters':{
+                    'center': [0.3,0.02],
+                    'x_len': 0.2,
+                    'y_len': 0.2
+                }
+            },
+            'donut':{
+                'class':'Annulus',
+                'parameters':{
+                    'center': [0,0],
+                    'inner_radius': 0.07,
+                    'outer_radius': 0.12
+                }
+            },
+            'asic070':{
+                'class': "Asic",
+                'parameters':{
+                    'asics': [[0,7,0]]
+                }
+            }            
+        }
+    }
+    xframe.settings.experiment.update(opt)    
+    xframe.import_selected_experiment()
+    exp = xframe.experiment
+    run = 162
+    selection = exp.DataSelection(run,n_frames=2000)
+    data_generator = exp.get_data(selection)
+
+    for chunk in data_generator:
+        print(chunk.keys())
+        # the assert valu is specific to run 162 of exp /gpfs/exfel/exp/SPB/202202/p003046/
+        del(chunk)
+        
 @pytest.mark.skipif(has_access_to_gpfs(),reason="Need access to exfel GPFS")
 def test_geometry(set_temp_home):
-    pass
+    xframe.select_experiment('SPB','tutorial')
+    xframe.import_selected_experiment()
+    exp = xframe.experiment
+    geom = exp.get_geometry
+    grid = exp.get_pixel_grid_reciprocal
+    agipd = exp.detector
+    agipd.base = (0,0,100)
+    assert (grid != exp.get_pixel_grid_reciprocal()).all(), 'pixel grid was not updated.'
+    module0 = agipd.modules[0].detection_plane
+    
