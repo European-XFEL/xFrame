@@ -123,6 +123,7 @@ def check_list_content(_list,template):
 
 def has_access_to_gpfs():
     return not os.path.exists(xfel_path)
+
 @pytest.mark.skipif(has_access_to_gpfs(),reason="Need access to exfel GPFS")
 def test_get_data(set_temp_home):
     pass

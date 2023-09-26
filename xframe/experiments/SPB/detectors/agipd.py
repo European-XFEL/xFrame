@@ -1,4 +1,5 @@
 import logging
+import os
 import traceback
 import numpy as np
 
@@ -83,15 +84,13 @@ class AGIPD(DetectorInterface):
         self.framed_pixel_centers[moduleId]=modules[moduleId].framed_pixel_centers
                     
     def loadGeometryFile(self):
-        try:
+        geom_path = self.database.get_path("geometry")
+        if os.path.exists(geom_path):
             modulePlains=self.database.load('geometry')
             listOfQuadrants=self.quadrants.flatten()
             for module in self.modules:
                 module.detection_plane = modulePlains[module.id]
             self.assemblePixelGrid()
-        except Exception as e:
-            log.error(f'Failed to load geometry file with error:\n{e}')
-            log.error(traceback.format_exc())
                 
     def get_geometry(self):
         return self.pixel_grid        
