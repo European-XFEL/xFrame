@@ -19,7 +19,7 @@ nav:
         - GPU Access: framework/gpu_access.md
   - Experiments (preliminary):
       - experiments/index.md
-      - SPB (at EuXFEL): experiments/spb.md
+      - SPB at EuXFEL: experiments/spb.md
 
 theme:
   name: material
