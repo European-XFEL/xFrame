@@ -28,7 +28,7 @@ load_pump_diod_data:
   _value: False
     
 filter_sequence:
-  _value: [normalization] #adu
+  _value: [] #adu
 
 filters:
   gain:

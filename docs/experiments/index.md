@@ -11,7 +11,7 @@ For accessing data from the SPB experiment at European XFEL see [SPB at EuXFEL](
 	Conceptually an *experiment* together with its settings file should contain all information necessary to create scattering patterns on a grid in reciprocal space for a given real experimental setup.  
 	Such data includes, e.g.:
 
-	- X-ray wavelength, detector geometry, distance between sample and detector, detector mask, backround to subtract,  normalization range, ...
+	- X-ray wavelength, detector geometry, distance between sample and detector, detector mask, background to subtract,  normalization range, ...
 
 	A new *experiment* can be created as follows.  
 

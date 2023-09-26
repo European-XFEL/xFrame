@@ -543,7 +543,7 @@ class Filter1D(Filter):
 
 class LitPixels(Filter1D):
     def __init__(self,opt : dict):
-        opt['metrics'] = [self.metric]
+        opt['metrics'] = [self.lit_fraction]
         super().__init__(opt)
         self.lit_threshold = self.opt['lit_threshold'] 
         limits = self.opt['limits']

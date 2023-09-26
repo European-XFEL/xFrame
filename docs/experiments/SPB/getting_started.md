@@ -9,7 +9,7 @@
 
 !!! warning "Assumes xFrame is running on a Maxwell node" 
 ## Install 
-If you have not installed *xFrame* yet and only want to use it to acces SPB data do the following.
+If you have not installed *xFrame* yet and only want to use it to access SPB data do the following.
 	
 1. Create a conda environment using the commands
 ```
@@ -51,7 +51,7 @@ bad_cells:
 
 sample_distance: 285 # in mm
 detector_origin: [0,0,217] # In laboratory coordinates [mm]
-x_ray_energy: 8000 # In ev
+x_ray_energy: 8000 # In eV
 
 IO:
   folders:
@@ -105,6 +105,101 @@ Filters allow you to calculate a bad frames/paterns mask or modify each pattern 
 
 If you want to filter you data by number of lit pixels you can add the following to your settings file 
 ```yaml linenums="1"
+filter_sequence: [lit_pixels]
+filters:
+  lit_pixels:
+    class: LitPixels
+    lit_trheshold: 1 # Pixel value above which it is considered to bit lit
+    limits:
+      command: [0.1,None] # Lower and upper limit for lit fractions 0.1 = 10%	
 ```
-## Region of interest
-To get access to 
+A mask specifying the patterns which passed the filter can be accessed via the attribute `chunk['filtered_frames_mask']`.
+
+Lets say you want to normalize each pattern before the lit pixel filter is applied, this can be done as follows.
+```yaml linenums="1"
+filter_sequence: [norm,lit_pixels]
+filters:
+  lit_pixels:
+    class: LitPixels
+    lit_trheshold: 1 # Pixel value above which it is considered to bit lit
+    limits:
+      command: [0.1,None] # Lower and upper limit for lit fractions 0.1 = 10%
+  norm:
+    class: NormalizationFilter #Normalization by mean value	
+```
+### Regions of interest
+In case you only want to use certain regions within each pattern to compute the filters one can specify regions of interest for each filter by adding an ROIs option as follows
+
+```yaml linenums="1"
+filter_sequence: [norm,lit_pixels]
+filters:
+  lit_pixels:
+    class: LitPixels
+    lit_trheshold: 1 # Pixel value above which it is considered to bit lit
+    limits:
+      command: [0.1,None] # Lower and upper limit for lit fractions 0.1 = 10%
+  norm:
+    class: NormalizationFilter #Normalization by mean value
+	ROIs: [all]
+```
+If more than one names are given the corresponding regions or interest are combined.
+ROI's can be assigned in the settings file e.g. as follows
+```yaml linenums="1"
+ROIs:
+  rect1:
+    class: Rectangle
+	parameters:
+	  center: [0.3,0.02]
+	  x_len: 0.2
+	  y_len: 0.2
+  donut:
+    class: Annulus
+	parameters:
+	  center: [0,0]
+	  inner_radius: 0.07
+	  outer_radius: 0.12
+  asic070:
+    class: Asic
+	parameters:
+	  asics: [[0,7,0]] # each entry consists of module_id,asic_id_x [0,..,7],asic_id_y[0,1] 
+```
+This specifies the ROIs `rect1`,`donut` and `asic070`.
+All length values are specified in reciprocal space i.e. in $[\text{Å}^{-1}]$.
+
+## Geometry
+Crystfel geometry files (.geom) can be specified in the settings via
+
+```yaml linenums="1"
+IO:
+  files:
+    geometry:
+	  name: 'your_file.geom'
+	  folder: 'geometry'
+```
+By default the geometry points to
+```
+HOME_PATH/data/SPB/geometry/
+```
+where `HOME PATH` is *xFrames* home directory.
+You can also interactively change the detector position by using `xframe.experiment.detector`.
+
+```py linenums="1"
+import xframe
+xframe.select_experiment('SPB','tutorial')
+xframe.import_selected_experiment()
+
+agipd = xframe.experiment.detector
+print(f'Detector origin {agipd.origin}[mm])
+agipd.pixel_grid
+```
+The pixel_grid is automatically updated if `xframe.origin` is changed.  
+You can also access the individual module plains by
+```py linenums="1"
+module0 = agipd.modules[0]
+print(f'Module 0 origin = {module0.base} [mm]')
+print(f'Module 0 x direction = {module0.x_direction} [mm]')
+print(f'Module 0 y direction = {module0.x_direction} [mm]')
+module0.base+=np.array([2,0,0]) #shift by 2mm in x direction
+agipd.assemblePixelGrid()
+```
+The call to `agipd.assemblePixelGrid` is necessary since the class currently can not auto detect changes to its modules. 
