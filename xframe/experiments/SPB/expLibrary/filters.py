@@ -545,14 +545,13 @@ class LitPixels(Filter1D):
     def __init__(self,opt : dict):
         opt['metrics'] = [self.metric]
         super().__init__(opt)
-        self.lit_threshold = self.opt['lit_threshold']
-
-        
+        self.lit_threshold = self.opt['lit_threshold'] 
         limits = self.opt['limits']
         if not isinstance(limits[0],(list,tuple)):
             limits = [limits]
         self.limits = limits
-    def metric(self,data,n_pixels,*args,**kwargs):
+        
+    def lit_fraction(self,data,n_pixels,*args,**kwargs):
         lit_pixel_fraction = np.sum(data>self.lit_threshold)/n_pixels
         return lit_pixel_fraction
         
@@ -567,7 +566,7 @@ class LitPixels(Filter1D):
             #metric_values[:,m_id] = np.mean(data, axis = tuple(range(1,len(data.shape))), where = mask)
             for f_id in range(len(data)):
                 f_mask = mask[f_id]
-                n_pixels = np.prod(f_mask.shape)
+                n_pixels = np.sum(f_mask)
                 f_dat=data[f_id][f_mask]
                 if len(f_dat) > 0:
                     metric_values[f_id,m_id] = metric(f_dat,n_pixels)
