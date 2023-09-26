@@ -448,7 +448,7 @@ class ADUFilter2D(Filter):
         if isinstance(limits[0],(float,int)):
             lower_mask = data >= limits[0]
         if isinstance(limits[1],(float,int)):
-            upper_mask = data <= limits[1]
+            upper_mask = data <= limits[0]
         adu_mask = lower_mask & upper_mask
         new_mask = mask & adu_mask
         calib_chunk['mask'][:] = new_mask
@@ -545,34 +545,33 @@ class LitPixels(Filter1D):
     def __init__(self,opt : dict):
         opt['metrics'] = [self.metric]
         super().__init__(opt)
-        self.lit_threshold = self.opt['threshold']
+        self.lit_threshold = self.opt['lit_threshold']
 
-        limit = self.opt['fraction_limit']
-        self.limit = float(limit)
+        
+        limits = self.opt['limits']
+        if not isinstance(limits[0],(list,tuple)):
+            limits = [limits]
+        self.limits = limits
     def metric(self,data,n_pixels,*args,**kwargs):
         lit_pixel_fraction = np.sum(data>self.lit_threshold)/n_pixels
         return lit_pixel_fraction
-    def calc_lit_pixel_franctions(self,data,mask,*args,**kwargs):
-        metric_values=np.zeros(len(data),dtype=float)
+        
+    
+    def calc_metric_values(self,data,mask,*args,**kwargs):
+        metrics= self.metrics
+        metric_values=np.zeros((len(data),len(metrics)))
         #log.info('data shape = {}'.format(data.shape))
         #log.info('mean data = {} '.format(np.mean(data, axis = tuple(range(1,len(data.shape))), where = mask)))
-        #metric_values[:,m_id] = np.mean(data, axis = tuple(range(1,len(data.shape))), where = mask)
-        for f_id in range(len(data)):
-            f_mask = mask[f_id]
-            n_pixels = np.sum(f_mask)
-            f_dat=data[f_id][f_mask]
-            if len(f_dat) > 0:
-                metric_values[f_id] = self.metric(f_dat,n_pixels)
-            else:
-                metric_values[f_id,m_id] = 0
+        for m_id in range(len(metrics)):
+            metric=metrics[m_id]
+            #metric_values[:,m_id] = np.mean(data, axis = tuple(range(1,len(data.shape))), where = mask)
+            for f_id in range(len(data)):
+                f_mask = mask[f_id]
+                n_pixels = np.prod(f_mask.shape)
+                f_dat=data[f_id][f_mask]
+                if len(f_dat) > 0:
+                    metric_values[f_id,m_id] = metric(f_dat,n_pixels)
+                else:
+                    metric_values[f_id,m_id] = 0
         #log.info('metric values = {} '.format(metric_values))
-        return  metric_values
-    
-    def _apply(self,calib_chunk,masks):
-        data = calib_chunk['data']#[good_frames]
-        mask = calib_chunk['mask']#[good_frames]
-        fractions = self.calc_lit_pixel_franctions(data,mask)
-
-        filtered_mask = fractions<self.limit
-        #log.info('{} of {} filtered'.format(np.sum(filtered_mask),len(filtered_mask)))
-        return calib_chunk,filtered_mask,np.full(len(data),False)
+        return  [metric_values]
