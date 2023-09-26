@@ -13,14 +13,17 @@ nav:
     - framework/index.md
     - Getting Started: framework/getting_started.md
     - Details:
-        - Settings: framework/settings.md
-        - Data Access: framework/data_access.md
-        - Multiprocessing: framework/multiprocessing.md
-        - GPU Access: framework/gpu_access.md
+      - Settings: framework/settings.md
+      - Data Access: framework/data_access.md
+      - Multiprocessing: framework/multiprocessing.md
+      - GPU Access: framework/gpu_access.md
   - Experiments (preliminary):
-      - experiments/index.md
-      - SPB at EuXFEL: experiments/spb.md
-
+    - experiments/index.md
+    - SPB at EuXFEL:
+        - Getting Started: experiments/SPB/getting_started.md
+        - Data Selection: experiments/SPB/data_selection.md
+        - Filters: experiments/SPB/filters.md
+        - Regions of Interest (ROIs): experiments/SPB/roi.md 
 theme:
   name: material
   logo: images/xFrame_logo_bw.svg

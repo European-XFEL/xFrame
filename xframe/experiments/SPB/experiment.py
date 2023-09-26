@@ -32,6 +32,12 @@ class DataSelection(DictNamespace):
                  run : int,
                  frame_range=slice(None),cells=slice(None),cells_mode='relative',pulses=slice(None),pulses_mode='relative',trains=slice(None),trains_mode='relative',modules = np.arange(16,dtype=int),n_frames=20000,good_cells=np.arange(1,202),in_multiples_of=False):
         super().__init__()
+        frame_range = self.apply_int_format(frame_range)
+        cells = self.apply_int_format(cells)
+        pulses = self.apply_int_format(pulses)
+        trains = self.apply_int_format(trains)
+        modules = self.apply_int_format(modules)
+        good_cells = self.apply_int_format(good_cells)
         self['run'] = int(run)
         self['frame_range']=frame_range
         
@@ -44,6 +50,16 @@ class DataSelection(DictNamespace):
         self['n_frames'] = int(n_frames)
         self['good_cells'] = good_cells
         self['in_multiples_of'] = in_multiples_of
+    def apply_int_format(self,val):
+        if isinstance(val,np.ndarray):
+            val = val.astype(int)
+        elif isinstance(val,(list,tuple)):
+            val = np.array(val,dtype=int)
+        elif isinstance(val,slice):
+            pass
+        else:
+            raise AssertionError('Selection specifyer is not a slice or list,tuple,array of integers.')
+        return val
 
 class ExperimentWorker(ExperimentWorkerInterface):
     DataSelection = DataSelection
