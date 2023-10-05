@@ -936,7 +936,7 @@ class Alignment():
             self.results['rotation_metrics'].append(mean_C)
             #log.info('mean C shape = {},max = {}, min = {}'.format(mean_C.shape,np.max(mean_C),np.min(mean_C)))
             argmax = np.unravel_index(np.argmax(mean_C),C_shape)
-            euler_angles = angle_grid[argmax[1],argmax[0],argmax[2]]
+            euler_angles = angle_grid[argmax[0],argmax[1],argmax[2]]
             euler_angles[0] = 2*pi - euler_angles[0]
             euler_angles[2] = 2*pi - euler_angles[2]
             self.results['rotation_angles'].append(euler_angles)

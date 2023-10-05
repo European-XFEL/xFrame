@@ -89,3 +89,7 @@ class GSLPlugin(GSLInterface):
     def clebsch_gordan_2(J,j1, j2, m1, m2):
         M=m1+m2
         return (-1)**(np.abs(j2-j1-M))*np.sqrt(2*J+1)*sf.coupling_3j(2*j1, 2*j2, 2*J, 2*m1, 2*m2, -2*M)
+
+    @staticmethod
+    def bessel_Inu(nu,x):
+        return sf.bessel_Inu(nu,x)

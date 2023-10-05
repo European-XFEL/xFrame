@@ -7,6 +7,8 @@ import logging
 import inspect
 import scipy.special as specialFunctions
 from scipy.special import eval_jacobi
+#from scipy.special import iv as modified_bessel
+from scipy.special import loggamma
 from scipy.special import hyp2f1
 from scipy.special import roots_legendre
 from scipy.special import comb as binomial
@@ -1515,3 +1517,265 @@ def back_substitution(cn,ppm):
         cn = (cn[...,:-1]-bl[...,i,None]*pm[...,:-1,-1])
         pm = pm[...,:-1,:-1]
     return bl
+
+
+############################
+## Distributions on SO(3) ##
+class CharView:
+    """
+    Helper class that allows to acces a characteristic function $M_{l,n,k}$ by its indices l,n,k.
+    i.e. charview[l,n,k] returns  $M_{l,n,k}$. It is also possible to use slice notation i.e.
+    charview[:,0,:] returns a view into $M_{l,n,k}$ corresponding to all values with n=0. 
+
+    Attributes
+    ----------
+    bw : int
+    Bandwidth
+    array : np.ndarray, ((4*bw**4-bw)/3,), complex
+    characteristic function array    
+    ls : np.ndarray, (bw,), int64
+    l indices 0,...,bw
+    ns : np.ndarray, (2*bw+1), int64
+    n indices  0,...,bw,-bw+1,...,-1
+    ks : np.ndarray, (2*bw+1), int64
+    k indices  0,...,bw,-bw+1,...,-1
+    _lnks: np.ndarray, (3,(4*bw**4-bw)/3), int64
+    l,n,k value grid
+    _lookups : np.ndarray, ((4*bw**4-bw)/3,), int64
+    array ids associated to each entry of _lnks     
+    """
+    def __init__(self,char_array,lookups,lnks,):
+        self.array = char_array
+        self._lookups = lookups
+        self._lnks = lnks
+        self.ls = np.sort(np.unique(lnks[0]))
+        bw = len(self.ls)
+        self.ns = np.roll(np.sort(np.unique(lnks[1])),bw)
+        self.ks = np.roll(np.sort(np.unique(lnks[2])),bw)
+    def _get_mask(self,items):
+        if not isinstance(items,tuple):
+            items = (items,)
+        assert len(items)<=3
+        selection_ids=[ids[sel] for sel,ids in zip(items,[self.ls,self.ns,self.ks])]
+        masks = [np.isin(lnk,sids) for sids,lnk in zip(selection_ids,self._lnks)]
+        mask = np.prod(masks,axis = 0,dtype=bool)
+        return mask
+    def __getitem__(self, items):
+        mask = self._get_mask(items)
+        return self.array[mask]
+    def __setitem__(self,items,value):
+        m = self._get_mask(items)
+        self.array[m] = value
+
+class CharFuncSO3(np.ndarray):
+    """
+    A class to represent Charactersitic functions $M_{lnk}$ of distributions $\rho(\alpha,\beta,\gamma)$ on SO(3).
+    $$M_{lnk} = \int_{SO(3)} \rho(\alpha,\beta,\gamma) D^l_{nk}(\alpha,\beta,\gamma) sin(\beta)\,d\alpha d\beta d\gamma$$
+    where $D^l_{nk}(\alpha,\beta,\gamma)$ are Wigner-D matrices.
+
+    Acts as a normal numpy array with additional attributes
+    
+    Attributes
+    ----------
+    bw : int
+    Bandwidth of the distribution.
+    soft : Soft
+    Fourier transform instance on SO(3)
+    Methods
+    lnk : CharView
+    allows to acces $M_{lnk}$ by its indices l,n,k
+    distrib : np.ndarray, (2*bw,)*3, complex
+    property that calculates the SO3 distribution by inverse fourier transform of the current characteristic function.
+    """
+    def __new__(cls,bw : int,char_func=None,density=None):
+        _soft = Soft(bw)
+        _density_shape = (2*bw)*3
+        char = _soft.get_empty_coeff()
+        char[0]=1
+        if char_func is not None:
+            assert char_func.shape == char.shape, f'specified characteristic function has wrong shape, expected {char.shape} given shape {char_func.shape}'
+            char = char_func
+        elif density is not None:
+            assert density.shape == _density_shape, f'specified density has wrong shape, expected {_density_shape} given shape {density.shape}'
+            char[:]=soft.forward_cmplx(density)
+
+        char = char.view(cls)
+
+        char._soft = _soft
+        char._density_shape=_density_shape
+        
+        ls = np.arange(bw)
+        ns = np.arange(-bw+1,bw)
+        ks = np.arange(-bw+1,bw)
+        lnks = np.zeros((3,len(char)),dtype=int)
+        i=0
+        for l in ls:
+            nk_ids = np.roll(np.arange(-l,l+1),l+1)
+            for n in nk_ids:
+                for k in nk_ids:
+                    lnks[0,i]=l
+                    lnks[1,i]=n
+                    lnks[2,i]=k
+                    i+=1
+        del(i)
+        lookups = np.zeros(lnks.shape[1],dtype=int)
+        for _id,(l,n,k) in enumerate(zip(*lnks)):
+            lookups[_id]=_soft._soft.so3CoefLoc(n,k,l,bw)
+        char.lnk = CharView(char,lookups,lnks)
+        char.so3_const = np.sqrt(8*np.pi**2) # sqrt of SO(3) volume.
+        char.so3_grid = _soft.grid
+        return char
+    @property
+    def distrib(self):
+        return self._soft.inverse_cmplx(self).reshape(self.so3_grid.shape[:-1])/self.so3_const
+    @property
+    def integrate_distib(self):
+        distrib = self._soft.inverse_cmplx(self).reshape(self.so3_grid.shape[:-1])/self.so3_const
+        return self._soft.integrate_over_so3(distrib)
+    @property
+    def mean_value(distribution):
+        pass
+    @property
+    def normalize(self):
+        so3_coeff =  self._soft.inverse_cmplx(self).reshape(self.so3_grid.shape[:-1])
+        new_coeff =  self._soft.forward_cmplx(so3_coeff.flatten())
+        scale = new_coeff[0].real*np.sqrt(2)
+        so3_coeff*=scale
+        self[:] = self._soft.forward_cmplx(so3_coeff.flatten())
+        
+    
+        
+class CharFuncFactory:
+    """
+    Factory that can create various characteristic functions of probability distribitions on SO(3)
+    
+    ...
+
+    Methods
+    -------
+    uniform(bw):
+        creates char function of uniform distribution
+    """
+    #General
+    @staticmethod
+    def uniform(bw = 16):
+        '''
+        Creates uniform characteristif function
+        $$ M_{lnk} = \delta_{l,0}\delta_{n,0}\delta_{k,0} $$
+        '''
+        u = CharFuncSO3(bw)
+        u[0]= 1#/np.sqrt(2) #1/(np.sqrt(2)*2*np.pi)
+        u[1:]=0
+        return u
+
+    @staticmethod
+    def delta(bw = 16,angle_ids=(0,0,0)):
+        '''
+        Creates characteristic function for the deltadistribution 
+        $$ M_{lnk} = D^l_{nk}(\alpha,\beta,\gamma) $$        
+        '''        
+        delta = CharFuncSO3(bw)
+        D = delta._soft.wigners
+        delta[:]=D.abg[ange_ids[0],ange_ids[1],ange_ids[2]]
+        return delta
+    
+
+    #1D distribution to SO(3) distribution via Bernstein functions
+    @staticmethod
+    def gaussian(bw = 16, sigma=1,center_rotation=None):
+        gauss = CharFuncSO3(bw)
+        coeffs = gauss._soft.lnks
+        if center_rotation is None:
+            for _id,(l,n,k) in enumerate(coeffs):
+                if n == k:
+                    gauss[_id]=np.exp(-sigma**2*l*(l+1)/2)
+                else:
+                    gauss[_id]=0
+        else:
+            D = gauss._soft.wigners
+            gauss[:]=D.abg[center_rotation[0],center_rotation[1],center_rotation[2]]
+            for _id,(l,n,k) in enumerate(coeffs):
+                gauss[_id]*=np.exp(-sigma**2*l*(l+1)/2)
+        return gauss
+
+    @staticmethod
+    def cauchy(bw = 16, gamma=1,center_rotation=None):
+        cauchy = CharFuncSO3(bw)
+        coeffs = cauchy._soft.lnks
+        if center_rotation is None:
+            for _id,(l,n,k) in enumerate(coeffs):
+                if n == k:
+                    cauchy[_id]=np.exp(-gamma*np.sqrt(l*(l+1)))
+                else:
+                    cauchy[_id]=0
+        else:
+            D = cauchy._soft.wigners
+            cauchy[:]=D.abg[center_rotation[0],center_rotation[1],center_rotation[2]]
+            for _id,(l,n,k) in enumerate(coeffs):
+                cauchy[_id]*=np.exp(-gamma*np.sqrt(l*(l+1)))
+        return cauchy
+
+    @staticmethod
+    def laplace(bw = 16, b=1,center_rotation=None):
+        laplace = CharFuncSO3(bw)
+        coeffs = laplace._soft.lnks
+        if center_rotation is None:
+            for _id,(l,n,k) in enumerate(coeffs):
+                if n == k:
+                    laplace[_id]=1/(1+b**2*l*(l+1))
+                else:
+                    laplace[_id]=0
+        else:
+            D = laplace._soft.wigners
+            laplace[:]=D.abg[center_rotation[0],center_rotation[1],center_rotation[2]]
+            for _id,(l,n,k) in enumerate(coeffs):
+                laplace[_id]/=(1+b**2*l*(l+1))
+        return laplace
+
+    @staticmethod
+    def voigt(bw = 16, sigma=1,gamma=1,center_rotation=None):
+        voigt = CharFuncSO3(bw)
+        coeffs = voigt._soft.lnks
+        if center_rotation is None:
+            for _id,(l,n,k) in enumerate(coeffs):
+                if n == k:
+                    voigt[_id]=np.exp(-gamma*np.sqrt(l*(l+1))-sigma**2*l*(l+1)/2)
+                else:
+                    voigt[_id]=0
+        else:
+            D = voigt._soft.wigners
+            voigt[:]=D.abg[center_rotation[0],center_rotation[1],center_rotation[2]]
+            for _id,(l,n,k) in enumerate(coeffs):
+                voigt[_id]*=np.exp(-gamma*np.sqrt(l*(l+1))-sigma**2*l*(l+1)/2)
+        return voigt    
+            
+
+    #Spherical Distributions
+    @staticmethod
+    def cos2n(bw=16,n=1):
+        nn=n
+        cos2n = CharFuncSO3(bw)
+        Kcos = 2*nn+1
+        coeffs = cos2n._soft.lnks
+        for _id,(l,n,k) in enumerate(coeffs):
+            nonzero_value =  (l%2==0) and (n==0) and (k==0) and (l<=2*nn)
+            if nonzero_value:
+                cos2n[_id]=Kcos*np.exp((l+1)*np.log(2)+loggamma(2*nn+1)-loggamma(2*nn+l+3)+loggamma(nn+l//2+3/2)-loggamma(nn-l//2+1))
+                #print(f'at l ={l} val = {cos2n[_id]}')
+            else:
+                cos2n[_id]=0
+        return cos2n
+
+    @staticmethod
+    def mises_fisher(bw=16,kappa=1):
+        mf = CharFuncSO3(bw)
+        Kmf = kappa/np.sinh(kappa)
+        coeffs = mf._soft.lnks
+        for _id,(l,n,k) in enumerate(coeffs):
+            nonzero_value = (n==0) and (k==0)
+            if nonzero_value:
+                mf[_id]= Kmf*(-1)**(l)*np.sqrt(2*np.pi/kappa)*gsl.bessel_Inu(l+1/2,kappa)
+            else:
+                mf[_id]=0
+        return mf
+                    
