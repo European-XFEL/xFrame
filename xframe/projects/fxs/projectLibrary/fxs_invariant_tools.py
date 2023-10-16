@@ -345,7 +345,7 @@ def interpolate(cc,mask,phis):
         #log.info('data shape {} mask shape {}'.format(d.shape,m.shape))
         unmasked_d = d[m]
         if len(unmasked_d)!=0:
-            d[~m] = interp1d(phis[m],d[m])(phis[~m])
+            d[~m] = interp1d(phis[m],d[m],fill_value='extrapolate')(phis[~m])
     cci = cci.reshape(shape)
     mask = mask.reshape(shape)
     return cci
@@ -437,7 +437,7 @@ def ccd_to_deg2_invariant_3d(cc,xray_wavelength,data_grid,orders,cc_mask,mode='b
     :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
     '''
     
-    extraction_modes = {'lstsq':ccd_to_deg2_invariant_3d_least_squares,'legendre':ccd_to_deg2_invariant_3d_legendre,'back_substitution':ccd_to_deg2_invariant_3d_back_substitution,'back_substitution_psd':ccd_to_deg2_invariant_3d_back_substitution_psd,'back_substitution_qqsym':ccd_to_deg2_invariant_3d_back_substitution_qqsym,'back_substitution_memory_hungry':ccd_to_deg2_invariant_3d_back_substitution_memory_hungry}
+    extraction_modes = {'lstsq':ccd_to_deg2_invariant_3d_least_squares,'legendre':ccd_to_deg2_invariant_3d_legendre,'back_substitution':ccd_to_deg2_invariant_3d_back_substitution,'back_substitution_real':ccd_to_deg2_invariant_3d_back_substitution_real,'back_substitution_psd':ccd_to_deg2_invariant_3d_back_substitution_psd,'back_substitution_qqsym':ccd_to_deg2_invariant_3d_back_substitution_qqsym,'back_substitution_memory_hungry':ccd_to_deg2_invariant_3d_back_substitution_memory_hungry}
 
     log.info(f'orders = {orders}')
     b_coeff = np.zeros(cc_mask.shape[:2]+(orders.max()+1,),dtype = complex)
@@ -643,6 +643,74 @@ def ccd_to_deg2_invariant_3d_back_substitution(cc,xray_wavelength,data_grid,orde
     #log.info('stop')
     log.info(f"b coeff shape = {b_coeff.shape}")
     return b_coeff,qq_mask
+def ccd_to_deg2_invariant_3d_back_substitution_real(cc,xray_wavelength,data_grid,orders,cc_mask):
+    '''
+    Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta).
+    Uses 
+    $ Cn = \sum_{l=|n|}^\infty B_l(q_1,q_2) \overline{P}^{|n|}_l(q_1) \overline{P}^{|n|}_l(q_2) $
+    to extract B_l from given fourier coefficients of the averaged cross_correlation Cn by inverting the upper triangular matrix:
+    $\overline{P}^{|n|}_l(q_1) \overline{P}^{|n|}_l(q_2) $
+    where \overline{P}^{|n|}_l are the associated Legendre Polynomials that are used in the spherical harmonic coefficients.
+    
+    Only works for q1,q2 pairs for which the crosscorrelation is not masked at any angular value.
+
+    :param cc: cross-correlation data
+    :type complex ndarray: shape $= (n_q(q),n_q(qq),n_\Delta)$
+    :param xray_wavelength: wavelength at which the cross-correlations where calculated.
+    :type float: unit eV
+    :param data_grid: qs and $\Delta$'s at whih cc is calculated. (assumes uniform grid, i.e. for each q value there are cc coefficients for all $\Delta$'s)
+    :type lyist((ndarray,ndarray)): shape $(n_q,n_\Delta)$
+    :param orders: $l$'s for which to calculate the invariants $B_l$
+    :type int ndarray: shape $= (n_orders)$
+    :return: $B_l$ coeff.
+    :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
+    '''
+    # Get Pl arguments 
+    qs = data_grid['qs']
+    thetas = ewald_sphere_theta_pi(xray_wavelength,qs)
+    l_max = orders.max()
+
+    if not cc_mask.all():
+        log.info(f'nmasked = {cc_mask.sum()} of {np.prod(cc_mask.shape)}')
+        log.info('interpolating masked cross_correlation areas.')
+        cc,cc_mask,phis = modify_cross_correlation(cc,cc_mask,data_grid['phis'],orders.max(),interpolate_masked=True)
+    qq_mask=cc_mask.prod(axis = -1).astype(bool)
+
+    # Check if there are any odd orders to compute
+    odd_orders_present = (orders%2).any()
+    if odd_orders_present:
+        l_stride = 1
+    else:
+        l_stride = 2
+        #orders = orders//2
+    log.info(f'l_stride = {l_stride}')
+    # Calculate triangular PP matrices and harmoncic coefficents CCn of the cross-correlation
+    #log.info('start')
+    #qq_matrices = ccd_associated_legendre_matrices(thetas,l_max,l_max)[:,:,::l_stride,::l_stride]
+    ccn = np.zeros((len(qs),len(qs),len(orders)),dtype = complex)
+    ccn[qq_mask,:] = mLib.circularHarmonicTransform_real_forward(cc[qq_mask,:])[...,:l_max+1:l_stride]
+
+    #lazy back substitution
+    bl = np.zeros(ccn.shape,dtype=complex)
+    # reversed orders shoud be decreasing L,L-1,... or L,L-2,...
+    reversed_orders=orders[::-1]
+    for l in reversed_orders:
+        last_triangular_matrix_column = ccd_associated_legendre_matrices_single_l(thetas,l,l)[...,::l_stride]
+        bl[...,l//l_stride]= ccn[...,-1]/last_triangular_matrix_column[...,-1]
+        ccn = ccn[...,:-1]-bl[...,l//l_stride,None]*last_triangular_matrix_column[...,:-1]
+    b_coeff = bl
+    #b_coeff = back_substitution(ccn,qq_matrices)
+    #log.info('stop')
+
+    #b_coeff = np.zeros(ccn.shape,dtype = complex)
+    #q_ids = np.arange(len(qs))
+    #b_coeff =  Multiprocessing.comm_module.request_mp_evaluation(bl_3d_back_substitution_worker,
+    #                                                                   input_arrays=[q_ids,q_ids],
+    #                                                                   const_inputs=[cc,thetas,qq_mask,l_max,l_stride],
+    #                                                                   call_with_multiple_arguments=True)
+    #log.info('stop')
+    log.info(f"b coeff shape = {b_coeff.shape}")
+    return b_coeff.real,qq_mask
 def ccd_to_deg2_invariant_3d_back_substitution_qqsym(cc,xray_wavelength,data_grid,orders,cc_mask):
     '''
     Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta).

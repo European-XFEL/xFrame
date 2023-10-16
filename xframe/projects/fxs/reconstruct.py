@@ -847,6 +847,8 @@ class MTIP:
                                 #log.info(f'support_enforced_list = {enforce_initial_support_list}')
                                 apply_ft_stabilization = not enforced_support_in_last_iterations
                 #log.info(f'apply_ft_stabilization = {apply_ft_stabilization}')
+                #if process_name[:2]=="ER":
+                #    xprint(f'apply_ft_stabilization = {apply_ft_stabilization}')
                 return apply_ft_stabilization
                             
                     

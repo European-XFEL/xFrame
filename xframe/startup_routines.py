@@ -271,7 +271,7 @@ def import_selected_project(update_worker=True):
     settings = xframe.settings
     database = xframe.database
     controller = xframe.controller    
-    
+    database.project.update_folders_and_files(**settings.project.IO.dict())
     if update_worker:
         settings.raw_project = database.default.format_settings(settings.project)
         
@@ -300,7 +300,8 @@ def import_selected_experiment(update_worker=True):
     if isinstance(xframe._experiment_module_name,str):
         settings = xframe.settings
         database = xframe.database
-        controller = xframe.controller    
+        controller = xframe.controller
+        database.experiment.update_folders_and_files(**settings.experiment.IO.dict())
         
         if update_worker:
             settings.raw_experiment = database.default.format_settings(settings.experiment)
@@ -345,6 +346,7 @@ def select_and_run(project='project', project_worker='project_worker',project_se
     xframe.lib.python.measureTime(xframe.controller.run)(oneshot=oneshot)
 
 def run(update_worker = False,oneshot=False):
+    
     import_selected_project(update_worker=update_worker)
     import_selected_experiment(update_worker=update_worker)
     xframe.controller.run(oneshot=oneshot)

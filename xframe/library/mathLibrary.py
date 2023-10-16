@@ -1391,9 +1391,13 @@ def combine_variances_ND(_vars,means,counts,axis=0):
 
 ### connected area ###
 #Simple algorithm to find te area of equal values in a 2d array/image
-def _get_connected_area_periodic(image,point,step,value,shape,connected_points,visited_mask):
+def _get_connected_area_periodic(image,point,step,value,shape,connected_points,visited_mask,periodic_axes=(0,1)):
     #print(point)
     #print(im[point])
+    periods = [2*shape[0]+step[0],2*shape[1]+step[1]]
+    # if period is bigger than shape+step the algorithm behaves as if there is no periodicity.
+    for i in periodic_axes:
+        periods[i]=shape[i]
     if visited_mask[point]:
         return connected_points
     if image[point]==value:
@@ -1402,52 +1406,37 @@ def _get_connected_area_periodic(image,point,step,value,shape,connected_points,v
         
         orth_step = ((step[0]+1)%2,(step[1]+1)%2)
         next_steps = (step,orth_step,(-orth_step[0],-orth_step[1]))
-        next_points = (((point[0]+s[0])%shape[0],(point[1]+s[1])%shape[1]) for s in next_steps)
-        for p,s in zip(next_points,next_steps):
-            _get_connected_area_periodic(image,p,s,value,shape,connected_points,visited_mask)
-    return connected_points
-
-def _get_connected_area(image,point,step,value,shape,connected_points,visited_mask):
-    #print(point)
-    #print(im[point])   
-    if visited_mask[point]:
-        return connected_points
-
-    if image[point]==value:
-        connected_points+=[point]
-        visited_mask[point]=True
-        
-        orth_step = ((step[0]+1)%2,(step[1]+1)%2)
-        next_steps = (step,orth_step,(-orth_step[0],-orth_step[1]))
-        next_points = ((point[0]+s[0],point[1]+s[1]) for s in next_steps)
+        #print(f'next steps = {next_steps}')
+        #print(f'{tuple((((point[0]+s[0]),periods[0]),((point[1]+s[1]),periods[1])) for s in next_steps)}')
+        next_points = ((int((point[0]+s[0])%periods[0]),int((point[1]+s[1])%periods[1])) for s in next_steps)
         for p,s in zip(next_points,next_steps):
             if (p[0]>=0 and p[0]<shape[0] and p[1]>=0 and p[1]<shape[1]):
-                _get_connected_area(image,p,s,value,shape,connected_points,visited_mask)
+                _get_connected_area_periodic(image,p,s,value,shape,connected_points,visited_mask,periodic_axes=periodic_axes)
     return connected_points
 
-def find_connected_component(image,start,periodic = False,return_mask = False):
+def find_connected_component(image,start,periodic_axes = tuple(),return_mask = False):
     start=tuple(start)
     value = image[start]
     shape = image.shape
     next_steps= np.array(((1,0),(-1,0),(0,1),(0,-1)))
+    periods = [np.inf,np.inf]
+    for i in periodic_axes:
+        periods[i]=shape[i]
     
-    if periodic:
-        find_connected_points = _get_connected_area_periodic
-        next_points = (next_steps+np.array(start)[None,:])%np.array(shape)[None,:]
-    else:
-        find_connected_points = _get_connected_area
-        next_points = next_steps+np.array(start)[None,:]
-        negative_mask = np.sum(next_points<0,axis = -1).astype(bool)
-        to_high_mask = np.sum(next_points>=np.array(shape)[None,:],axis = -1).astype(bool)
-        point_mask = ~(negative_mask | to_high_mask)
-        next_points = next_points[point_mask]
-        next_steps = next_steps[point_mask]
-    
+    #if len(periodic_axes)>0:
+    find_connected_points = _get_connected_area_periodic
+    next_points = ((next_steps+np.array(start)[None,:])%np.array(periods)[None,:]).astype(int)
+    negative_mask = np.sum(next_points<0,axis = -1).astype(bool)
+    to_high_mask = np.sum(next_points>=np.array(shape)[None,:],axis = -1).astype(bool)
+    point_mask = ~(negative_mask | to_high_mask)
+    next_points = next_points[point_mask]
+    next_steps = next_steps[point_mask]
+        
     
     visited_mask = np.zeros(shape,dtype = bool)
     connected_points=[tuple(start)]
     for point, step in zip(next_points,next_steps):
-        find_connected_points(image,tuple(point),step,value,shape,connected_points,visited_mask)
+        _get_connected_area_periodic(image,tuple(point),step,value,shape,connected_points,visited_mask,periodic_axes=periodic_axes)
     if return_mask:
         mask = np.zeros_like(visited_mask)
         mask[tuple(np.stack(connected_points,axis = 1))]=True

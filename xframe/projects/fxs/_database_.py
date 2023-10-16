@@ -497,8 +497,10 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         out_dict={}
         if 'intra' in data:
             cc=data['intra']['ccf_2p_q1q2'].real
-        else:
+        elif 'ccf_q1q2_2p' in data:
             cc=data['ccf_q1q2_2p'].real
+        else:
+            cc=data['ccf_2p_q1q2'].real
         if cc.shape[0] < cc.shape[1]:            
             qs=data['q2']#/(2*np.pi)
             step_size = int(np.round(cc.shape[1]/cc.shape[0]))
@@ -539,7 +541,13 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         #            stepLength={'q':q[2]-q[1],'phi':phi[2]-phi[1]}
         #            domains={'q':[q[0],q[-1]],'phi':[0,2*np.pi+stepLength['phi']]}
         out_dict['average_intensity'] = SampledFunction(NestedArray(qs[:,None],1),a_int,coord_sys='cartesian')
-        out_dict['xray_wavelength']=data.get('xray_wavelength',1.23984) # in angström
+        if 'xray_wavelength' in data:
+            out_dict['xray_wavelength']=data['xray_wavelength']
+        elif 'lambda' in data:
+            out_dict['xray_wavelength']=data['lambda']
+        else:
+            log.warning("No xray wavelength was provided in CCD file, assuming 1.23984 A (10keV) and continue.")
+            out_dict['xray_wavelength'] = 1.23984
         if out_dict['pi_in_q']:            
             thetas = ewald_sphere_theta_pi(out_dict['xray_wavelength'],qs)
         else:
@@ -564,6 +572,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         return data
 
     def load_invariants(self,name,**kwargs):
+        print(self.get_path("invariants",path_modifiers=kwargs['path_modifiers']))
         data = self.load_direct(name,**kwargs)
         if isinstance(data['data_projection_matrices'],np.ndarray):
             matrices = data['data_projection_matrices']

@@ -380,7 +380,8 @@ class DataReader():
         
         # update the mask if necessary
         if self.intensity_pixel_threshold[0]:    # mask pixels with intensities outside of the specified thresholds
-                mask[(image<self.intensity_pixel_threshold[1]) | (image>self.intensity_pixel_threshold[2])]=0            
+            mask[image>self.intensity_pixel_threshold[2]] = 0  
+            image[image<self.intensity_pixel_threshold[1]] = 0
         if self.mask_binary_inp==True:
             np.multiply(mask, self.mask_binary, out=mask)
         
