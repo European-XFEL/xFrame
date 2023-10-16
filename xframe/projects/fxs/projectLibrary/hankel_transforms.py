@@ -835,32 +835,32 @@ def generate_polar_ht_gpu(w,used_orders):
         """
 
     kernel_dict_forward={
-            'kernel': kernel_str,
-            'name': 'forward_hankel',
-            'functions': [{
-                'name': 'apply_weights',
-                'dtypes' : [complex,complex,complex,np.int64,np.int64],
-                'shapes' : [(nq,nm),forward_weights.shape,(nq,nm),None,None],
-                'arg_roles' : ['output','const_input','input','const_input','const_input'],
-                'const_inputs' : [None,forward_weights,None,np.int64(nq),np.int64(nm)],
-                'global_range' : (nq,nm),
-                'local_range' : None
-            }]
-        }
-    
+        'kernel': kernel_str,
+        'name': 'forward_hankel',
+        'functions': ({
+            'name': 'apply_weights',
+            'dtypes' : (complex,complex,complex,np.int64,np.int64),
+            'shapes' : ((nq,nm),forward_weights.shape,(nq,nm),None,None),
+            'arg_roles' : ('output','const_input','input','const_input','const_input'),
+            'const_inputs' : (None,forward_weights,None,np.int64(nq),np.int64(nm)),
+            'global_range' : (nq,nm),
+            'local_range' : None
+        },)
+    }
+        
     kernel_dict_inverse={
-            'kernel': kernel_str,
-            'name': 'inverse_hankel',
-            'functions': [{
-                'name': 'apply_weights',
-                'dtypes' : [complex,complex,complex,np.int64,np.int64],
-                'shapes' : [(nq,nm),inverse_weights.shape,(nq,nm),None,None],
-                'arg_roles' : ['output','const_input','input','const_input','const_input'],
-                'const_inputs' : [None,inverse_weights,None,np.int64(nq),np.int64(nm)],
-                'global_range' : (nq,nm),
-                'local_range' : None
-            }]
-        }
+        'kernel': kernel_str,
+        'name': 'inverse_hankel',
+        'functions': ({
+            'name': 'apply_weights',
+            'dtypes' : (complex,complex,complex,np.int64,np.int64),
+            'shapes' : ((nq,nm),inverse_weights.shape,(nq,nm),None,None),
+            'arg_roles' : ('output','const_input','input','const_input','const_input'),
+            'const_inputs' : (None,inverse_weights,None,np.int64(nq),np.int64(nm)),
+            'global_range' : (nq,nm),
+            'local_range' : None
+        },)
+    }
 
     forward_gpu_process =  Multiprocessing.openCL_plugin.ClProcess(kernel_dict_forward)
     inverse_gpu_process =  Multiprocessing.openCL_plugin.ClProcess(kernel_dict_inverse)

@@ -76,9 +76,9 @@ class SingleProcessCommunictionAnalysis(ComInterfaceAnalysis):
         Multiprocessing.wait_for_cpu_event(cpu_id)
         Multiprocessing.clear_cpu_event(cpu_id)        
 
-    def add_gpu_process(self,gpu_process):
+    def add_gpu_process(self,gpu_process,local_outputs=None):
         control_worker = self.control_worker.select_control_worker()
-        handle = self.control_worker.gpu_manager.request_gpu_handle_client(control_worker.name,gpu_process)
+        handle = self.control_worker.gpu_manager.request_gpu_handle_client(control_worker.name,gpu_process,local_outputs=local_outputs)
         return handle.run
     def restart_control_worker(self):
         self.control_worker.restart_working()

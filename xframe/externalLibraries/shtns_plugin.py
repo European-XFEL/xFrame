@@ -8,12 +8,173 @@ import shtns
 
 log=logging.getLogger('root')
 
+def shape_change_decorator(item_shape,out_shape=tuple()):
+    def decorator(func):
+        def wrapper(ndarray,*args,**kwargs):
+            input_shape = ndarray.shape
+            ndarray = ndarray.reshape(-1,*item_shape)
+
+            results = func(ndarray)
+
+            if input_shape==item_shape:
+                return results[0]
+            else:
+                new_shape = input_shape[:-len(item_shape)]+out_shape
+                results = results.reshape(new_shape)
+            return results
+        return wrapper
+    return decorator            
+
+def complex_l_slice(l):
+    return slice(l**2,(l+1)**2)
+def get_lm_id(l,m):
+    return l*(l+1)+m
+def get_m_ids(m,l0s):
+    return l0s[abs(m):]+m
+
+
+
+
+class ShCoeff(np.ndarray):
+    def __new__(cls,array,ls,ms,mode='complex'):
+        coeff = array.view(cls)
+        coeff.ls = ls
+        coeff.ms = ms
+        coeff.lm=ShCoeffView(coeff,ls,ms)
+        return coeff
+    def copy(self):
+        return ShCoeff(np.array(self),self.ls,self.ms)
+        
+class ShCoeffView:
+    def __init__(self,coeff:ShCoeff,ls,ms,mode='complex'):
+        self.coeff = coeff
+        self.ls = coeff.ls
+        self.ms = coeff.ms
+        self.l0s = coeff.ls*(coeff.ls+1)
+        self.n_coeff = coeff.shape[-1]
+        self.bw = len(ls)
+    def get_item_mask(self,items):
+        l_mask = self
+    def get_l_mask(self,l_sel):
+        selected_ls = self.ls[l_sel]
+        mask = np.zeros(self.n_coeff,dtype=bool)
+        for l in selected_ls:
+            mask[complex_l_slice(l)]=True
+        return mask
+    def get_m_mask(self,m_sel):
+        selected_ms = self.ms[m_sel]
+        mask = np.zeros(self.n_coeff,dtype=bool)
+        for m in selected_ms:
+            mask[get_m_ids(m,self.l0s)]=True
+        return mask
+    
+    def __getitem__(self,items):
+        if not isinstance(items,tuple):
+            return self.coeff[...,complex_l_slice(items)]
+        elif len(items)==1:
+            if isinstance(items[0],int):
+                return self.coeff[...,complex_l_slice(items[0])]
+            else:
+                return self.coeff[...,self.get_l_mask(items[0])]                
+        else:
+            if (items[0]==slice(None)) and isinstance(items[1],int):
+                return self.coeff[...,get_m_ids(items[1],self.l0s)]
+            elif (isinstance(items[0],int)) and  (isinstance(items[1],int)):
+                    return self.coeff[...,get_lm_id(*items)]
+            else:
+                l_mask = self.get_l_mask(items[0])
+                m_mask = self.get_m_mask(items[1])               
+                mask = l_mask & m_mask
+                return self.coeff[...,mask]
+    def __setitem__(self,items,value):
+        self.__getitem__(items)[:] = value
+        
+class ShSmall:
+    def __init__(self,band_width,anti_aliazing_degree = 2,n_phi = 0,n_theta=0):
+        sh = shtns.sht(band_width-1)#,norm = shtns.sht_schmidt)        
+        self._sh = sh
+        self.band_width = band_width
+        self.anti_aliazing_degree = anti_aliazing_degree        
+        self.n_coeff = (band_width)**2
+
+        thetas,phis=self._generate_grid(n_phi=n_phi,n_theta=n_theta)
+        #log.info(" sh created  grids n_phi= {},n_theta={}".format(len(phis),len(thetas)))
+        self.thetas=thetas
+        self.phis=phis
+        self.n_thetas = len(thetas)
+        self.n_phis = len(phis)
+        self.angular_shape=(self.n_thetas,self.n_phis)
+        self.ls=np.arange(band_width,dtype=int)
+        self.ms=np.arange(-band_width+1,band_width,dtype=int)
+
+        self.forward_cmplx = self._generate_forward_cmplx()
+        self.inverse_cmplx =  self._generate_inverse_cmplx()
+    def _generate_grid(self,n_phi=False,n_theta=False):
+        sh=self._sh
+        size_dict = self.n_angular_step_from_max_order()
+        #log.info('n_theta = {}, n_phi = {}'.format(n_theta,n_phi))
+        if (not isinstance(n_theta,int)) or isinstance(n_theta,bool):
+            n_theta=size_dict['n_theta']
+        if (not isinstance(n_phi,int)) or isinstance(n_phi,bool):
+            n_phi = size_dict['n_phi']
+            
+        #log.info(f'nlat = {n_theta} nphi = {n_phi}')
+        
+        sh.set_grid(polar_opt=0,flags=shtns.sht_gauss) #extra call needed otherwise there are sometimes errors in shtns grid generation
+        n_theta,n_phi = sh.set_grid(nlat = n_theta,nphi=n_phi,polar_opt=0,flags=shtns.sht_gauss)            
+        phis=2*np.pi*np.arange(n_phi)/(n_phi*sh.mres)
+        thetas=np.arccos(sh.cos_theta)
+
+        return thetas,phis
+    
+    def n_angular_step_from_max_order(self):
+        max_order = self.band_width-1
+        size_dict={}
+        N = self.anti_aliazing_degree
+        n_phi = 2**(int(np.log2((N+1)*max_order)) + 1)
+        n_theta = n_phi//2
+        size_dict['n_phi'] = n_phi
+        size_dict['n_theta'] = n_theta
+        return size_dict
+    def _generate_forward_cmplx(self):
+        analys_cplx = self._sh.analys_cplx
+        ls = self.ls
+        ms = self.ms
+        def forward_cmplx_inner(data):            
+            return np.array(tuple(analys_cplx(r_shell) for r_shell in data))
+        cmplx_inner = shape_change_decorator(self.angular_shape,out_shape=(self.n_coeff,))(forward_cmplx_inner)
+        def forward_cmplx(data):
+            return ShCoeff(cmplx_inner(data),ls,ms)
+        return forward_cmplx
+    def _generate_inverse_cmplx(self):
+        synth_cplx = self._sh.synth_cplx
+        ls = self.ls
+        ms = self.ms
+        def inverse_cmplx_inner(data):            
+            return  np.array(tuple(synth_cplx(coeff) for coeff in data))
+        inverse_cmplx = shape_change_decorator((self.n_coeff,),out_shape=self.angular_shape)(inverse_cmplx_inner)
+        return inverse_cmplx
+    def get_empty_coeff(pre_shape=None):
+        if not isinstance(pre_shape,tuple):
+            data = np.zeros(self.angular_shape,dtype=complex)
+            return ShCoff(data,self.ls,self.ms)
+        else:
+            data = np.zeros(pre_shape+self.angular_shape,dtype=complex)
+            return ShCoff(data,self.ls,self.ms)
+    @property
+    def grid(self):
+        return GridFactory.construct_grid('uniform',(self.thetas,self.phis))
+
+
+
+
 class sh(SphericalHarmonicTransformInterface):
     # want to use r,theta,phi type of data
     # l indexed coeff are f_{l,:} = coeff[l] 0<=l<=L_max of size: 2*l+1
     #   were coeff[l] cotains f_{l,m} starting with -l<=m<=l
     # m indexed coeff are f_{:,m} = coeff[m] -L_max<=m<=L_max of size: L_max-abs(m)
-     
+    ShSmall = ShSmall
+    ShCoeff = ShCoeff
     
     def __init__(self,l_max,mode_flag='complex',output_order='l',anti_aliazing_degree = 2,n_phi = False,n_theta=False):
         #log.info('\n \n harmonic transform l_max = {} \n \n'.format(l_max)

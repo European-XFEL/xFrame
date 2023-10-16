@@ -83,7 +83,7 @@ class OpenClPlugin(OpenClInterface):
             self.input_ids = [ i for i in range(self.n_args) if self.arg_roles[i]=='input']
             self.n_inputs = len(self.input_dtypes)
             self.output_dtypes = [self.dtypes[arg_id] for arg_id in range(self.n_args) if self.arg_roles[arg_id] == 'output']
-            self.output_shapes = [self.shapes[arg_id] for arg_id in range(self.n_args) if self.arg_roles[arg_id] == 'output']
+            self.output_shapes = [self.shapes[arg_id] for arg_id in range(self.n_args) if self.arg_roles[arg_id] == 'output']            
             self.output_ids = [ i for i in range(self.n_args) if self.arg_roles[i]=='output']
             self.n_outputs = len(self.output_dtypes)
             self.scalar_dtypes = [self.dtypes[i] if self.shapes[i]==None else None for i in range(self.n_args)]
