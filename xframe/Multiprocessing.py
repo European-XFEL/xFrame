@@ -1030,11 +1030,11 @@ class GpuProcessHandle:
     def generate_shared_memeory_output_name(self,input_id,python_process_id):
         #return self.gpu_process.name+'-hash_{}'.format(self.gpu_process.hash)+'_output_'+str(input_id)+'_process_'+str(python_process_id)
         return self.gpu_process.name+'_output_'+str(input_id)+'_process_'+str(python_process_id)                                             
-    def create_client_function(self,put_to_queue):
+    def create_client_function(self,put_to_queue,local_outputs=None):
         event = get_gpu_event(self.python_process_id)        
         wait_for_done_event=event.wait
         reset_event_flag=event.clear
-        input_arrays = tuple(_input.bind(unregister=True).array for _input in self.inputs)
+        input_arrays = tuple(_input .bind(unregister=True).array for _input in self.inputs)
         output_arrays = tuple(_output.bind(unregister=True).array for _output in self.outputs)
         copyto = np.copyto
         copy = np.array
@@ -1043,42 +1043,17 @@ class GpuProcessHandle:
         _hash = self.gpu_process.hash
 
         request_arg=['eval_gpu_process',self.python_process_id,_hash]
-        #log.info('input arrays = {}'.format(len(input_arrays)))
-        #log.info('output arrays = {}'.format(len(output_arrays)))
         if len(output_arrays)==1:
             output_array=output_arrays[0]
-            if len(input_arrays)==1:
-                input_array= input_arrays[0]
-                def f(arg):
-                    #log.info('yay')
-                    #log.info('trying to copy to shared memory')
-                    #log.info('input array shape = {} shared memory shape = {}'.format(arg.shape,input_array.shape))
-                    #log.info('input array shape = {} shared memory shape = {}'.format(arg.dtype,input_array.dtype))
-                    #log.info('input array = {}'.format(input_array[:]))
-                    #input_array[:] =
-                    #log.info(arg)                    
-                    copyto(input_array,arg)
-                    #log.info('trying to send eval request to controller')
-                    #log.info('requesting calculation from Process {}'.format(self.python_process_id))
-                    put_to_queue(request_arg)
-                    #log.info('Waiting for controller to finish')
-                    wait_for_done_event()
-                    #log.info('Client {} got done event.'.format(self.python_process_id))
-                    #log.info('Unsetting event flag.')
-                    reset_event_flag()
-                    #log.info('Client {} reset event flag.'.format(self.python_process_id))
-                    
-                    #log.info('copy output array and return')
+            if not isinstance(local_outputs,tuple):
+                def copy_output():
                     return copy(output_array)
             else:
-                def f(*args):
-                    for i in input_range:                        
-                        copyto(input_arrays[i],args[i])
-                    put_to_queue(request_arg)
-                    wait_for_done_event()
-                    reset_event_flag()
-                    return copy(output_array)                
-        else:
+                local_output=local_outputs[0]
+                def copy_output():
+                    local_output[:]=output_array
+                    return local_output
+                
             if len(input_arrays)==1:
                 input_array= input_arrays[0]
                 def f(arg):
@@ -1086,7 +1061,7 @@ class GpuProcessHandle:
                     put_to_queue(request_arg)
                     wait_for_done_event()
                     reset_event_flag()
-                    return tuple(copy(output_arrays[o]) for o in output_range)
+                    return copy_output()
             else:
                 def f(*args):
                     for i in input_range:                        
@@ -1094,7 +1069,33 @@ class GpuProcessHandle:
                     put_to_queue(request_arg)
                     wait_for_done_event()
                     reset_event_flag()
+                    return copy_output()
+        else:
+            if not isinstance(local_outputs,tuple):
+                def copy_outputs():
                     return tuple(copy(output_arrays[o]) for o in output_range)
+            else:
+                def copy_outputs():
+                    for o in output_range:
+                        local_outputs[o][:]=output_arrays[o]
+                    return local_outputs
+                
+            if len(input_arrays)==1:
+                input_array= input_arrays[0]
+                def f(arg):
+                    copyto(input_array,arg)
+                    put_to_queue(request_arg)
+                    wait_for_done_event()
+                    reset_event_flag()
+                    return copy_outputs()
+            else:
+                def f(*args):
+                    for i in input_range:                        
+                        copyto(input_arrays[i],args[i])
+                    put_to_queue(request_arg)
+                    wait_for_done_event()
+                    reset_event_flag()
+                    return copy_outputs()
         self.run = f
         return self
 
@@ -1159,7 +1160,7 @@ class GpuProcessManager:
         self.process_request = self.generate_process_request()
         self.client_handles = {} # collects handles in individual client processes        
         
-    def request_gpu_handle_client(self,target_name,gpu_process):
+    def request_gpu_handle_client(self,target_name,gpu_process,local_outputs=None):
 
         # Check if client handle exists
         _hash = gpu_process.hash
@@ -1187,12 +1188,12 @@ class GpuProcessManager:
             #log.info('Gpu process creation is done = {}'.format(gpu_creation_done))
         
             client_handle = GpuProcessHandle(gpu_process,python_process_id)
-            client_handle.create_client_function(target_queue.put)
+            client_handle.create_client_function(target_queue.put,local_outputs=local_outputs)
             self.register_client_function(client_handle)
         elif not client_handle_exists:
             #xprint("generating client handle")
             client_handle = GpuProcessHandle(gpu_process,python_process_id)
-            client_handle.create_client_function(target_queue.put)
+            client_handle.create_client_function(target_queue.put,local_outputs=local_outputs)
             self.register_client_function(client_handle)
         
         #log.info('Return client handle for gpu process')

@@ -10,6 +10,8 @@ from scipy.special import eval_jacobi
 #from scipy.special import iv as modified_bessel
 from scipy.special import loggamma
 from scipy.special import hyp2f1
+from scipy.special import erf as error_function
+from scipy.special import erfi as error_function_imag
 from scipy.special import roots_legendre
 from scipy.special import comb as binomial
 from scipy.linalg import polar as polar_decomp
@@ -34,6 +36,8 @@ Soft = SoftDependency
 leg_trf = DiscreteLegendreTransformDependency
 nj = False
 PeakDetector = PeakDetectorDependency
+
+from xframe.library.math_transforms import get_harmonic_transform,HankelTransformWeights,HankelTransform,SphericalFourierTransform
 
 
 class plane3D:    
@@ -1295,11 +1299,6 @@ class RadialIntegrator():
     def L2_norm(self,values,axis=-1):
         return self.integrate(values*values.conj(),axis = axis)        
     
-class Cacheaware_numpy:
-    @staticmethod
-    def conjugate(x,*args,block_size=None,out=None,**kwargs):
-        if out == None:
-            out = np.empty(x)
             
 
 ################
@@ -1387,6 +1386,9 @@ def combine_variances_ND(_vars,means,counts,axis=0):
         combined_mean = next_combined_mean
         combined_counts = denom
     return combined_variance,combined_mean,combined_counts
+
+
+### Hankel Transform ###
 
 
 ### connected area ###
@@ -1533,23 +1535,22 @@ class CharView:
     _lookups : np.ndarray, ((4*bw**4-bw)/3,), int64
     array ids associated to each entry of _lnks     
     """
-    def __init__(self,char_array,lookups,lnks,):
+    def __init__(self,char_array,lnks):
         self.array = char_array
-        self._lookups = lookups
         self._lnks = lnks
-        self.ls = np.sort(np.unique(lnks[0]))
+        self.ls = np.sort(np.unique(lnks[:,0]))
         bw = len(self.ls)
-        self.ns = np.roll(np.sort(np.unique(lnks[1])),bw)
-        self.ks = np.roll(np.sort(np.unique(lnks[2])),bw)
+        self.ns = np.roll(np.sort(np.unique(lnks[:,1])),bw)
+        self.ks = np.roll(np.sort(np.unique(lnks[:,2])),bw)
     def _get_mask(self,items):
         if not isinstance(items,tuple):
             items = (items,)
         assert len(items)<=3
         selection_ids=[ids[sel] for sel,ids in zip(items,[self.ls,self.ns,self.ks])]
-        masks = [np.isin(lnk,sids) for sids,lnk in zip(selection_ids,self._lnks)]
+        masks = [np.isin(lnk,sids) for sids,lnk in zip(selection_ids,self._lnks.T)]
         mask = np.prod(masks,axis = 0,dtype=bool)
         return mask
-    def __getitem__(self, items):
+    def __getitem__(self, items):        
         mask = self._get_mask(items)
         return self.array[mask]
     def __setitem__(self,items,value):
@@ -1593,24 +1594,8 @@ class CharFuncSO3(np.ndarray):
         char._soft = _soft
         char._density_shape=_density_shape
         
-        ls = np.arange(bw)
-        ns = np.arange(-bw+1,bw)
-        ks = np.arange(-bw+1,bw)
-        lnks = np.zeros((3,len(char)),dtype=int)
-        i=0
-        for l in ls:
-            nk_ids = np.roll(np.arange(-l,l+1),l+1)
-            for n in nk_ids:
-                for k in nk_ids:
-                    lnks[0,i]=l
-                    lnks[1,i]=n
-                    lnks[2,i]=k
-                    i+=1
-        del(i)
-        lookups = np.zeros(lnks.shape[1],dtype=int)
-        for _id,(l,n,k) in enumerate(zip(*lnks)):
-            lookups[_id]=_soft._soft.so3CoefLoc(n,k,l,bw)
-        char.lnk = CharView(char,lookups,lnks)
+        lnks = _soft.lnks
+        char.lnk = CharView(char,lnks)
         char.so3_const = np.sqrt(8*np.pi**2) # sqrt of SO(3) volume.
         char.so3_grid = _soft.grid
         return char
@@ -1621,9 +1606,77 @@ class CharFuncSO3(np.ndarray):
     def integrate_distib(self):
         distrib = self._soft.inverse_cmplx(self).reshape(self.so3_grid.shape[:-1])/self.so3_const
         return self._soft.integrate_over_so3(distrib)
-    @property
-    def mean_value(distribution):
-        pass
+
+    def mean(self,so3_function):
+        '''
+        Computes the average of a scalar/ndarray valued function on SO3 using the current probability distribution.
+        Expects the function values to be given in the shape shape (M1,...,Mn,2*bw,2*bw,2*bw) and (2*bw,2*bw,2*bw) for scalar functions.
+        Where bw is the bandwidth of the this probability distribution i.e. self._soft.bw and M1,...,Mn are the value array dimensions)
+        '''
+        bw=self._soft.bw
+        shape = so3_function.shape        
+        so3_function = so3_function.reshape(-1,2*bw,2*bw,2*bw)
+        
+        mean = np.zeros(so3_function.shape[0],dtype=complex)
+        for _id in range(len(mean)):
+            dconj_lnk = self._soft.forward_cmplx(so3_function[_id].conj())
+            mean[_id] = np.sum(dconj_lnk*self)
+        if len(shape)>3:
+            mean=mean.reshape(shape[:-3])
+        else:
+            mean=mean[0]            
+        return mean/self.so3_const
+
+    def mean_density(self,density):
+        '''Expects the density to be of shape (...,Nr,Ntheta,Nphi) where the last three dimensions correspond to the spherical coordinates and ... can be any shape'''
+        bw = self._soft.bw
+        shape = density.shape
+        density = density.reshape(-1,shape[-3],shape[-2],shape[-1])
+        Nr,Ntheta,Nphi = shape[-3:]
+        sh = get_spherical_harmonic_transform_obj(bw-1,'complex',n_phi=Nphi,n_theta=Ntheta)
+        sh_coeff = np.zeros((density.shape[0],Nr,bw**2),dtype=complex)
+        for _id in range(len(density)):
+            sh_coeff[_id] = sh._forward_direct(density[_id])
+        mean_sh_coeff = self.mean_spherical_coeff(sh_coeff)
+        mean_density=np.zeros(density.shape,dtype=complex)
+        for _id in range(len(density)):
+            mean_density[_id] = sh._inverse_direct(mean_sh_coeff[_id])
+
+        if len(shape)>3:
+            mean_density = mean_density.reshape(shape)
+        else:
+            mean_density = mean_density[0]
+        return mean_density
+        
+
+    def mean_spherical_coeff(self,spherical_harmonic_coeff):
+        '''
+        Expects input coeff to be stored in a 1d array with the l,m's coefficient beeing at location $ l(l+1)+m $.
+        '''
+        bw = self._soft.bw        
+        shape = spherical_harmonic_coeff.shape
+        spherical_harmonic_coeff = spherical_harmonic_coeff.reshape(-1,bw**2)
+
+        n_coeffs = spherical_harmonic_coeff.shape[0]
+        mean_coeff = np.zeros((n_coeffs,bw**2),dtype=complex)
+        for _id in range(n_coeffs):
+            coeff = spherical_harmonic_coeff[_id]            
+            for l in range(bw):
+                l_start = l*(l+1)-l
+                l_stop = l*(l+1)+l+1
+                Ml_mat = self.lnk[l].reshape(2*l+1,2*l+1).T
+                #np.roll is needed to convert -l,...,l format of spherical coeff to 0,..l,-l,...-1 in order to match the convention in Ml_mat that comes from ffts.
+                mean_coeff_part = Ml_mat@np.roll(coeff[l_start:l_stop],l+1)
+                #mean_coeff_part = Ml_mat@coeff[l_start:l_stop]
+                mean_coeff[_id,l_start:l_stop] = np.roll(mean_coeff_part,-(l+1))
+            
+        if len(shape)>1:
+            mean_coeff = mean_coeff.reshape(shape)
+        else:
+            mean_coeff = mean_coeff[0]
+        return mean_coeff
+        
+        
     @property
     def normalize(self):
         so3_coeff =  self._soft.inverse_cmplx(self).reshape(self.so3_grid.shape[:-1])
@@ -1658,14 +1711,21 @@ class CharFuncFactory:
         return u
 
     @staticmethod
-    def delta(bw = 16,angle_ids=(0,0,0)):
+    def delta(bw = 16,angle_ids=None):
         '''
         Creates characteristic function for the deltadistribution 
         $$ M_{lnk} = D^l_{nk}(\alpha,\beta,\gamma) $$        
         '''        
         delta = CharFuncSO3(bw)
-        D = delta._soft.wigners
-        delta[:]=D.abg[ange_ids[0],ange_ids[1],ange_ids[2]]
+        if angle_ids is not None:            
+            D = delta._soft.wigners
+            delta[:]=D.abg[angle_ids[0],angle_ids[1],angle_ids[2]]
+        else:
+            lnks = delta._soft.lnks
+            delta[:]=0
+            for _id,(l,n,k) in enumerate(lnks):
+                if n==k:
+                    delta[_id]=1
         return delta
     
 
@@ -1744,13 +1804,14 @@ class CharFuncFactory:
     def cos2n(bw=16,n=1):
         nn=n
         cos2n = CharFuncSO3(bw)
-        Kcos = 2*nn+1
+        Kcos = (2*nn+1)
         coeffs = cos2n._soft.lnks
         for _id,(l,n,k) in enumerate(coeffs):
             nonzero_value =  (l%2==0) and (n==0) and (k==0) and (l<=2*nn)
             if nonzero_value:
-                cos2n[_id]=Kcos*np.exp((l+1)*np.log(2)+loggamma(2*nn+1)-loggamma(2*nn+l+3)+loggamma(nn+l//2+3/2)-loggamma(nn-l//2+1))
-                #print(f'at l ={l} val = {cos2n[_id]}')
+                #The following two equations are equivalent
+                #cos2n[_id]=Kcos*np.sqrt(np.pi)*np.exp(loggamma(2*nn+1)-(2*nn+1)*np.log(2)-loggamma(nn-l//2+1)-loggamma(nn+l//2+3/2))
+                cos2n[_id]=Kcos*np.exp(loggamma(2*nn+1)+loggamma(nn+l//2+1)+l*np.log(2)-loggamma(nn-l//2+1)-loggamma(2*nn+l+2))
             else:
                 cos2n[_id]=0
         return cos2n
@@ -1758,13 +1819,22 @@ class CharFuncFactory:
     @staticmethod
     def mises_fisher(bw=16,kappa=1):
         mf = CharFuncSO3(bw)
-        Kmf = kappa/np.sinh(kappa)
+        Kmf = kappa/(2*np.sinh(kappa))
         coeffs = mf._soft.lnks
         for _id,(l,n,k) in enumerate(coeffs):
             nonzero_value = (n==0) and (k==0)
             if nonzero_value:
-                mf[_id]= Kmf*(-1)**(l)*np.sqrt(2*np.pi/kappa)*gsl.bessel_Inu(l+1/2,kappa)
+                mf[_id]= Kmf*np.sqrt(2*np.pi/kappa)*gsl.bessel_Inu(l+1/2,kappa)
             else:
                 mf[_id]=0
         return mf
-                    
+    @staticmethod
+    def watson(bw=16,kappa=1):
+        watson = CharFuncSO3(bw)
+        so3_grid = watson.so3_grid
+        Kw=2/(np.sqrt(np.pi/kappa)*error_function_imag(np.sqrt(kappa))) #/(1.j*np.sqrt(kappa)*error_function(1.j*np.sqrt(kappa)))
+        distribution = Kw*np.exp(kappa*np.cos(so3_grid[...,1])**2).astype(complex)
+        watson[:] = watson._soft.forward_cmplx(distribution/watson.so3_const)
+        return watson
+
+
