@@ -5,7 +5,7 @@ import logging
 
 
 from xframe.library.pythonLibrary import DictNamespace
-from xframe.library.pythonLibrary import create_threshold_projection
+from xframe.library.pythonLibrary import create_threshold_projection,xprint
 from xframe.library.physicsLibrary import spherical_formfactor
 from xframe.library.gridLibrary import NestedArray,GridFactory
 from xframe.library.gridLibrary import ReGrider,SampledFunction
@@ -667,10 +667,13 @@ class ReciprocalProjection:
             elif dim == 3:
                 self.average_intensity.regrid(r_pt,options={'apply_over_axis':0,'fill_value': 0.0,'interpolation':interpolation_type})
                 data_projection_matrices=self.data_projection_matrices
+                #xprint(f'data proj nans = {[np.isnan(p).any() for p in data_projection_matrices]}')
                 projection_matrices = tuple(ReGrider.regrid(data_projection_matrices[o_id],data_r_pt,'cartesian',r_pt,'cartesian',options={'apply_over_axis':1,'fill_value': 0.0,'interpolation':interpolation_type}) for o_id in order_ids)
+                #xprint(f'proj nans = {[np.isnan(p).any() for p in projection_matrices]}')
                 if isinstance(self.data_low_resolution_intensity_coefficients,np.ndarray):
                     data_low_res = self.data_low_resolution_intensity_coefficients
                     low_res = tuple(ReGrider.regrid(data_low_res[o_id],data_r_pt,'cartesian',r_pt,'cartesian',options={'apply_over_axis':1,'fill_value': 0.0,'interpolation':interpolation_type}) for o_id in np.arange(len(data_low_res)))
+                #xprint(f'low res contains nans = {[np.isnan(p).any() for p in low_res]}')
                     
         #log.info('regrided projection matrices shape = {}'.format(projection_matrices[-1].shape))
         return projection_matrices,low_res
@@ -710,7 +713,8 @@ class ReciprocalProjection:
         # internally orthonarmalized spherical harmonics are used but data is ussually supplied for schmidt seminormalized spherical harmonics
         if dim == 3:
             for pm in proj_matrices:
-                pm[:]*=2  
+                pm[:]*=2
+        #xprint(f'proj nans after modification = {[np.isnan(p).any() for p in proj_matrices]}')
         return proj_matrices
 
 
@@ -762,6 +766,7 @@ class ReciprocalProjection:
                 #log.info('len harmonic coeff = {}'.format(len(intensity_harmonic_coefficients)))
                 for unknown,PD,oid in zip(unknowns,PDs,order_ids):
                     I = intensity_harmonic_coefficients[oid]
+                    #xprint(f'PD contains Nans : {np.isnan(PD).any()}')
                     matmul(*svd(PD @ I,full_matrices=False)[::2],out = unknown)  # PD @ Intensity is  B^\dagger A in a Procrustres Problem min|A-BR|
                 #log.info('unknowns shape ={}'.format(unknowns[-1].shape))
                 return unknowns

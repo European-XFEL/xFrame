@@ -1,6 +1,11 @@
 structure_name:
   _value: 'default'
 
+max_order:
+  _value: 'max'
+  _possible_values: ['max','from_reconstructions',int]
+  _description: 'Maximal harmonic order to be considered in the alignment process. This will affect Harmonic transforms, FoourierTransforms and the number of SO3 grid points."max" corresponds in 3D to the number of Theta grid points -1 and in 2D to half the number of angular (phi) grid points.'
+
 multi_process:
   use:
     _value: True
@@ -36,6 +41,17 @@ l2_error_limit:
   _value: 0.05
 
 find_rotation:
+  use_weighted_mean_of_correlation:
+    _value: False
+  align_in_reciprocal_space:
+    _value: False
+  density_limits:
+    limits:
+      _value:
+        command: '[None,None]'
+    fill_values:
+      _value:
+        command: '[None,None]'
   r_limit_ids:
     _value:
       command: 'np.arange(40)'

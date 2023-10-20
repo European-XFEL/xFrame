@@ -123,6 +123,22 @@ class ProjectWorker(ProjectWorkerInterface):
     def run_2d(self,reconstructions,masks,r_opt,errors,start_ids,reference_arg,reconstructions_keys,n_reconstructions,projection_matrices,reconstruction_ids_per_file):
         opt = self.opt
         xprint('setting up alignment operators.')
+        
+        r_n_phi = r_opt['grid']['n_phi']
+        max_possible_order = r_n_phi//2
+        max_order = opt['max_order']
+        if max_order == 'max':
+            max_order = r_n_phi//2
+        elif max_order == 'from_reconstructions':
+            max_order = r_opt['grid']['max_order']
+        elif isinstance(max_order,int):
+            if abs(max_order)<=r_n_phi//2: 
+                max_order = abs(max_order)
+            else:
+                log.warning(f'Specified maximal order to be used in Alignment: l_max={abs(max_order)} is to big for given grid with n_phi = {r_n_phi}. Setting n_max = {r_n_phi//2}!')
+                max_order = r_n_theta//2
+        opt['max_order'] = max_order
+        
         #log.info('reference arg = {}'.format(reference_arg))
         align_opt = {'opt':opt,'r_opt':r_opt}
         alignment = Alignment(self.process_factory,self.db,align_opt)
@@ -360,6 +376,21 @@ class ProjectWorker(ProjectWorkerInterface):
         opt = self.opt        
         #log.info('reference arg = {}'.format(reference_arg))
         xprint('setting up alignment operators.')
+        r_n_theta = r_opt['grid']['n_theta']
+        max_possible_order = r_n_theta-1
+        max_order = opt['max_order']
+        if max_order == 'max':
+            max_order = r_n_theta-1
+        elif max_order == 'from_reconstructions':
+            max_order = r_opt['grid']['max_order']
+        elif isinstance(max_order,int):
+            if abs(max_order)<r_n_theta: 
+                max_order = abs(max_order)
+            else:
+                log.warning(f'Specified maximal order to be used in Alignment: l_max={abs(max_order)} is to big for given grid with n_theta = {r_n_theta}. Setting l_max = {r_n_theta-1}!')
+                max_order = r_n_theta-1
+        opt['max_order'] = max_order
+        
         align_opt = {'opt':opt,'r_opt':r_opt}
         alignment = Alignment(self.process_factory,self.db,align_opt)
         ft_grids = alignment.ft_grids
@@ -452,7 +483,9 @@ class ProjectWorker(ProjectWorkerInterface):
             average_scaling_factors_per_file[file_id] = np.mean(scaling_factors[r_ids])
 
         reference_reconstruction = reconstructions.pop(reference_arg)
+        reconstructions = [reference_reconstruction,*reconstructions]
         reference_mask = masks.pop(reference_arg)
+        masks = [reference_mask,*masks]
         #log.info("opt pinv =  {}".format(opt.get("pointinvert_reference",False)))
         #log.info("opt =  {}".format(opt))
         if opt.get("pointinvert_reference",False):
@@ -474,11 +507,11 @@ class ProjectWorker(ProjectWorkerInterface):
         xprint('rotationaly aligning reconstructions to reference.')
         outs = []
         valid_errors = []
-        densities = [reference_reconstruction]
+        densities = []
         rotation_metrics = []
         rotation_angles = []
-        valid_alignments= [reference_reconstruction]
-        valid_alignment_ids = [0]
+        valid_alignments= []
+        valid_alignment_ids = []
         alignment_error_limit = settings.project.alignment_error_limit        
         if opt['multi_process']['use']:
             n_processes = opt['multi_process']['n_processes']
@@ -522,7 +555,9 @@ class ProjectWorker(ProjectWorkerInterface):
                     valid_alignment_ids.append(r_id)
             errors = [out['errors'][-1] for out in outs]
 
-        xprint('done.\n')        
+        xprint('done.\n')
+        valid_alignments[0]=reference_reconstruction
+        valid_errors[0]=0
         sorted_errors = np.argsort(valid_errors)
         aligned_reconstr = [valid_alignments[i] for i in sorted_errors]
         if len(aligned_reconstr)>=n_reconstructions:
@@ -538,8 +573,8 @@ class ProjectWorker(ProjectWorkerInterface):
         aligned_ft_reconstr_ftd = [fft(r[0]) for r in aligned_reconstr]
         intensity_from_ft_density = np.mean([(r[1]*r[1].conj()).real for r in aligned_reconstr], axis = 0)
         intensity_from_density= np.mean([(r*r.conj()).real for r in aligned_ft_reconstr_ftd], axis = 0)
-        input_reconstructions = [reference_reconstruction,*reconstructions]
-        input_masks = [reference_mask,*masks]
+        input_reconstructions = [reconstructions[i] for i in sorted_errors][:n_reconstructions]
+        input_masks = [masks[i] for i in sorted_errors][:n_reconstructions]
         #log.info("{}, {}".format(len(input_reconstructions),len(input_masks)))
 
         centered_average = alignment.shift_to_center(*average)
@@ -620,6 +655,7 @@ class ProjectWorker(ProjectWorkerInterface):
                 str(i+1): rotation_angles[i] for i in range(len(rotation_angles))         
             },
             'so3_grid': alignment.soft_grid,
+            'alignment_errors':np.asarray(errors),
         }
         self.post_processing(result,alignment.ft_grids,r_opt)
         result = 0
@@ -729,7 +765,10 @@ class ProjectWorker(ProjectWorkerInterface):
 class Alignment():
     def __init__(self,process_factory,db,opt):
         self.opt = opt['opt'] # alignment options
+        self.max_order = self.opt['max_order']
         self.r_opt = opt['r_opt'] # options of the reconstructions
+        #self.r_opt['grid']['max_order']=63
+        #print(f'max alignment order = {self.max_order}')
         if self.r_opt['GPU'].get('use',False):
             if settings.general.n_control_workers ==0:
                 settings.general.n_control_workers = self.r_opt['GPU'].get("n_gpu_workers",4)
@@ -742,7 +781,7 @@ class Alignment():
         self.results = {}
         # Load the library that takes carre of rotations
         if self.dimension ==3:
-            self.soft = get_soft_obj(self.r_opt['grid']['max_order']+1)
+            self.soft = get_soft_obj(self.max_order+1)
             self.soft_grid = self.soft.make_SO3_grid()
         self.sht = 'not set' #spherical harmonic transform object will be set by generate_operators
         # The next function call generates all necessary operators and adds them
@@ -779,7 +818,8 @@ class Alignment():
         find_center = generate_calc_center(self.ft_grids.realGrid)
         shift = generate_shift_by_operator(self.ft_grids.reciprocalGrid)
         negative_shift = generate_shift_by_operator(self.ft_grids.reciprocalGrid,opposite_direction = True)
-        self.process_factory.addOperators({'find_center':find_center,'shift':shift,'negative_shift':negative_shift})
+        limit_density_values = self.generate_limit_density_values()
+        self.process_factory.addOperators({'find_center':find_center,'shift':shift,'negative_shift':negative_shift,'limit_density_values':limit_density_values})
         if self.dimension ==3:
             rotate = self.generate_rotate()
             self.process_factory.addOperators({'rotate':rotate})
@@ -790,7 +830,7 @@ class Alignment():
         db = database.project
         dimensions = grid_pair.realGrid[:].shape[-1]
         ft_type = ft_opt['type']
-        max_order=self.r_opt['grid']['max_order']
+        max_order=self.max_order #self.r_opt['grid']['max_order']
         harmonic_orders = np.arange(max_order+1)
         n_orders=len(harmonic_orders)
         reciprocity_coefficient = _get_reciprocity_coefficient(ft_opt)
@@ -815,7 +855,7 @@ class Alignment():
         dimensions = grid_pair.realGrid[:].shape[-1]
         ft_type = ft_opt.type
         data_type = ft_opt.data_type
-        max_order=self.r_opt['grid']['max_order']
+        max_order=self.max_order #self.r_opt['grid']['max_order']
         harmonic_orders = np.arange(max_order+1)
         n_orders=len(harmonic_orders)
 
@@ -848,6 +888,7 @@ class Alignment():
             'dimensions':self.dimension,
             **r_opt['grid']
         }
+        ht_opt['max_order']=self.max_order
         # Create harmonic transforms (needs to happen before grid selection since harmonic transform plugin can choose the angular part of the grid.)
         #log.info('create harmonic transforms.')
         cht=HarmonicTransform('complex',ht_opt)
@@ -865,7 +906,7 @@ class Alignment():
         transform_op={'fourier_transform':ft_forward,'inverse_fourier_transform':ft_inverse,'harmonic_transform':ht_forward,'inverse_harmonic_transform':ht_inverse,'complex_harmonic_transform':cht_forward,'complex_inverse_harmonic_transform':cht_inverse}
         # fourier transforms on SO(3)
         if self.dimension == 3:
-            l_max= np.max(r_opt['grid']['max_order'])
+            l_max= self.max_order #np.max(r_opt['grid']['max_order'])
             soft = mLib.get_soft_obj(l_max)
             harmonic_transpose_lm_to_ml, harmonic_transpose_ml_to_lm = self.generate_harmonic_transposes(cht)
             transform_op.update({'soft':soft.forward_cmplx,'inverse_soft':soft.inverse_cmplx,'lm_to_ml':harmonic_transpose_lm_to_ml,'ml_to_lm':harmonic_transpose_ml_to_lm})
@@ -918,12 +959,41 @@ class Alignment():
             self.results['shifts'] = shift_list
         return save_shift
             
-    
+    def generate_limit_density_values(self):
+        limits = self.opt.find_rotation.density_limits.limits
+        fill_values = self.opt.find_rotation.density_limits.fill_values
+        if isinstance(limits[0],bool) or (not isinstance(limits[0],(int,float))):
+            limits[0]=None
+        if isinstance(limits[1],bool) or (not isinstance(limits[1],(int,float))):
+            limits[1]=None
+        if isinstance(fill_values[0],bool) or (not isinstance(fill_values[0],(int,float))):
+            fill_values[0]=limits[0]
+        if isinstance(fill_values[1],bool) or (not isinstance(fill_values[1],(int,float))):
+            fill_values[1]=limits[1]
+        #xprint(f'limits = {limits}, fill =  {fill_values}')
+        array = np.array
+        def limit_density_values(density):
+            new_d = array(density)
+            if limits[0] is not None:
+                if limits[1] is not None:                    
+                    new_d[new_d<limits[0]]=fill_values[0]
+                    new_d[new_d>limits[1]]=fill_values[1]
+                else:
+                    new_d[new_d<limits[0]]=fill_values[0]                    
+            elif limits[1] is not None:
+                new_d[new_d>limits[1]]=fill_values[1]
+            return new_d
+        return limit_density_values
+                    
     def generate_find_rotation(self):
         bw = self.soft.bw
         C_shape = (2*bw,)*3
         pi = np.pi
-        calc_mean_C = self.soft.calc_mean_C
+        weighted = self.opt.find_rotation.use_weighted_mean_of_correlation
+        if weighted:
+            calc_mean_C = self.soft.calc_mean_C_weighted
+        else:
+            calc_mean_C = self.soft.calc_mean_C
         lm_split_ids = self.harm_lm_split_ids
         angle_grid = self.soft_grid
         r_limit_ids = self.opt['find_rotation'].get('r_limit_ids', [0,self.ft_grids.realGrid.shape[0]])
@@ -962,9 +1032,11 @@ class Alignment():
         # signal : the density to be aligned to the reference
         # reference : the reference density, reference_intensity
         rotate_signal_sketch =[
-            ['complex_harmonic_transform','complex_harmonic_transform','complex_harmonic_transform'],
-            [np.array([0,1,1,2],dtype=np.int64),['find_rotation','id','id']],
-            [np.array([1,0,2,0],dtype=np.int64),['rotate','rotate']],
+            ['id','id','id'],
+            [(0,1,1,2),['id','limit_density_values','id','id']],
+            ['complex_harmonic_transform','complex_harmonic_transform','complex_harmonic_transform','complex_harmonic_transform'],
+            [(0,1,2,3),['find_rotation','id','id']],
+            [(1,0,2,0),['rotate','rotate']],
             ['complex_inverse_harmonic_transform','complex_inverse_harmonic_transform'],
         ]
         
@@ -1051,6 +1123,7 @@ class Alignment():
         shift = self.process_factory.get_operator('shift')
         ft = self.process_factory.get_operator('fourier_transform')
         ift = self.process_factory.get_operator('inverse_fourier_transform')
+        align_in_reciprocal_space = self.opt.find_rotation.align_in_reciprocal_space
         self.results['shifts']=[np.array([0,0,0])]
             
         def alignment_loop(reference, signal):
@@ -1064,7 +1137,10 @@ class Alignment():
                 ref_norm = 1
             errors = []
             for i in range(max_iterations):
-                sig,ft_sig = align(ref,sig,ft_sig)
+                if align_in_reciprocal_space:            
+                    ft_sig,sig = align(ref,ft_sig,sig)
+                else:
+                    sig,ft_sig = align(ref,sig,ft_sig)
                 
                 #calc error
                 diff = ref.real - sig.real
@@ -1109,3 +1185,4 @@ class Alignment():
             return_dict['diff_inverted_norm']=diff_inverted
             return return_dict
         return alignment_routine
+    

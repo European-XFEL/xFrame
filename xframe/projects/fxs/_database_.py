@@ -154,7 +154,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                     elif dimension == 3:
                         grid_type = 'spherical'                        
                     #vtk_saver([real_density],real_grid,real_vtk_path, dset_names = ['density'],grid_type='spherical')
-                    real_vtk_path=self.get_path('real_vtk',path_modifiers={'time':time_str,'run':run,'reconstruction':'aligned_'+key})
+                    real_vtk_path=self.get_path('real_vtk',path_modifiers={**path_modifiers,'reconstruction':'aligned_'+key})
                     #log.info(real_vtk_path)
                     self.save(real_vtk_path,[real_density.real],grid = real_grid,dset_names=['density'],grid_type=grid_type)
                     reciprocal_vtk_path=self.get_path('reciprocal_vtk',path_modifiers={**path_modifiers,'reconstruction':'aligned_'+key})
@@ -215,8 +215,12 @@ class ProjectDB(DefaultDB,DatabaseInterface):
     def _save_settings(self,path,project_name='settings',exp_name='exp_settings'):
         project_settings, experiment_settings = settings.get_settings_to_save()
         if isinstance(xframe.project_worker,ProjectWorkerInterface):
+            if not isinstance(project_settings,dict):
+                project_settings = project_settings.dict()
             self.save(pjoin(path,project_name+'.yaml'),project_settings,convert=True)
         if isinstance(xframe.experiment,ExperimentWorkerInterface):
+            if not isinstance(experiment_settings,dict):
+                experiment_settings = experiment_settings.dict()
             self.save(pjoin(path,exp_name+'.yaml'),experiment_settings,convert=True)
         #log.info(f'settings raw = \n {settings.raw_analysis} \n')
     

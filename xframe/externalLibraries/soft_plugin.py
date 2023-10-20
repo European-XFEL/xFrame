@@ -202,6 +202,19 @@ class Soft(SoftInterface):
         r_split_upper=r_split_ids[1]
         mean_C = calc_mean_C_array(self.bw,f_coeff,g_coeff,r_split_lower,r_split_upper,ml_split_ids,self._wigners_transposed,True)
         return mean_C
+    def calc_mean_C_weighted(self,f_coeff,g_coeff,r_split_ids,ml_split_ids):
+        '''
+        Same as calc_mean_C but multiplies each correlation array with its maximum before averaging to emphasize shells with good alignment.
+        '''
+        r_split_lower=r_split_ids[0]
+        r_split_upper=r_split_ids[1]
+        try:
+            from pysofft.soft import calc_weighted_mean_C_array as method
+        except ImportError:
+            log.warning('Installed pysofft version does not support weighted mean correlation method, defaulting to unweighted routine.')
+            method=calc_mean_C_array
+        mean_C = method(self.bw,f_coeff,g_coeff,r_split_lower,r_split_upper,ml_split_ids,self._wigners_transposed,True)
+        return mean_C
 
     
     #testing 

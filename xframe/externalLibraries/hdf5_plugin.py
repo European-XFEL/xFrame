@@ -3,7 +3,7 @@ import numpy as np
 import logging
 import traceback
 from xframe.library.gridLibrary import NestedArray
-from xframe.library.pythonLibrary import FTGridPair
+from xframe.library.pythonLibrary import FTGridPair,xprint
 from xframe.library.pythonLibrary import DictNamespace
 from xframe.database.interfaces import HDF5Interface
 log=logging.getLogger('root')
@@ -36,14 +36,14 @@ class HDF5_DB(HDF5Interface):
             raise FileNotFoundError('Path Error, Abort loading "{}".'.format(path))
             
     @staticmethod
-    def load(path,as_h5_object=False,**kwargs):
+    def load(path,as_h5_object=False,write_mode='r',**kwargs):
         try:
             if isinstance(path,str):
                 if not as_h5_object:
                     with h5.File(path, 'r') as h5file:
                         data=HDF5_DB.recursively_load_dict_from_group(h5file, '/')
                 else:
-                    data = h5.File(path, 'r')
+                    data = h5.File(path, write_mode)
             else:
                 raise FileNotFoundError('Path Error, Abort loading "{}".'.format(path))
         except Exception as e:
@@ -90,6 +90,7 @@ class HDF5_DB(HDF5Interface):
         ans = {}
         custom_load_routines=HDF5_DB.load_custom_types
         for key, item in h5_file[path].items():
+            #xprint(key)
             item_type = item.attrs.get('type',False)
             if isinstance(item, h5._hl.dataset.Dataset):
                 if item_type == 'str':

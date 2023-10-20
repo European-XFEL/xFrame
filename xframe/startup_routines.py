@@ -1,4 +1,4 @@
-import importlib
+#import importlib
 import os
 import sys
 import datetime
@@ -273,7 +273,7 @@ def import_selected_project(update_worker=True):
     controller = xframe.controller    
     database.project.update_folders_and_files(**settings.project.IO.dict())
     if update_worker:
-        settings.raw_project = database.default.format_settings(settings.project)
+        settings.raw_project = database.default.format_settings(settings.project.dict())
         
     module_name=xframe._project_worker_module_name
     worker_module_imported = module_name in sys.modules
@@ -304,7 +304,7 @@ def import_selected_experiment(update_worker=True):
         database.experiment.update_folders_and_files(**settings.experiment.IO.dict())
         
         if update_worker:
-            settings.raw_experiment = database.default.format_settings(settings.experiment)
+            settings.raw_experiment = database.default.format_settings(settings.experiment.dict())
     
         module_name = xframe._experiment_module_name
         module_imported = module_name in sys.modules
