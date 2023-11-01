@@ -127,6 +127,78 @@ class HankelTransformWeights:
         #log.info('weights shape = {}'.format(forward_weights.shape))
         return {'forward':forward_weights,'inverse':inverse_weights}
 
+    ### Direct Chebyshev, bad approximation dont use this ###
+    @staticmethod
+    def chebyshev_nodes(n_points,start=-1,end=1):
+        N = n_points
+        a = start
+        b = end
+        return (a+b)/2 + (a-b)/2 * np.cos((np.arange(N,dtype=float)+0.5)*np.pi/N)
+    @classmethod
+    def chebyshev(cls,n_points,angular_bandwidth,dimensions,reciprocity_coefficient,n_processes_for_weight_generation,**kwargs):
+        if dimensions==3:
+            orders = np.arange(angular_bandwidth)
+        elif dimensions ==2:
+            orders = np.arange(angular_bandwidth+1)
+        worker_by_dimensions= {2:cls.chebyshev_polar_worker,3:cls.chebyshev_spherical_worker}
+        worker = worker_by_dimensions[dimensions]
+        weights = Multiprocessing.comm_module.request_mp_evaluation(worker,input_arrays=[orders],const_inputs=[n_points,reciprocity_coefficient],call_with_multiple_arguments=True,n_processes=n_processes_for_weight_generation)
+        return weights
+    @classmethod
+    def chebyshev_polar_worker(cls,orders,n_points,reciprocity_coefficient,**kwargs):
+        '''
+        Generates polar chebyshev rule weights.
+        '''
+        N = n_points
+        ps = cls.chebyshev_nodes(N,start=0)
+        ks = ps.copy()
+        ls = orders
+        Jmpk = bessel_jnu(np.repeat(np.repeat(ms[:,None,None],N,axis=1),N,axis=2),ks[None,:]*ps[:,None]*reciprocity_coefficient*N)
+        weights = ps[None,:,None]**np.sqrt(1-ps)[None,:,None]*Jmpk*np.pi/2
+        return weights
+    @classmethod
+    def chebyshev_spherical_worker(cls,orders,n_points,reciprocity_coefficient,**kwargs):
+        '''
+        Generates spherical chebyshev rule weights.
+        '''
+        N = n_points
+        ps = cls.chebyshev_nodes(N,start=0)
+        ks = ps.copy()
+        ls = orders
+        jmpk = bessel_spherical_jnu(np.repeat(np.repeat(ls[:,None,None],N,axis=1),N,axis=2),ks[None,:]*ps[:,None]*reciprocity_coefficient*N)
+        weights = ps[None,:,None]**2*np.sin((np.arange(N)+0.5)*np.pi/N)[None,:,None]*jmpk*np.pi/2
+        return weights
+    @classmethod
+    def assemble_chebyshev(cls,weights,bandwidth,r_max,reciprocity_coefficient,dimensions=3):
+        '''
+        Generates weights for the forward and inverse transform by multiplieing with the propper constants.
+        And changes the Array order of the weights from (order,summation_radial_corrdinate,new_radial_coordinate) to 
+        (summation_radial_coordinate,new_radial_coordinate,order)
+        '''
+        n_radial_points = weights.shape[-1]
+        q_max=polar_spherical_dft_reciprocity_relation_radial_cutoffs(r_max,n_radial_points,reciprocity_coefficient = reciprocity_coefficient)
+        #q_max=polar_spherical_dft_reciprocity_relation_radial_cutoffs_new(r_max,n_radial_points,scale = pi_in_q)
+        #xprint(f'alignment dimensions = {dimensions}')
+        if dimensions == 2:
+            orders = np.arange(bandwidth+1)
+            all_orders = np.concatenate((orders,-orders[-2:0:-1]))
+            #log.info(all_orders)
+            forward_prefactor = (-1.j)**(all_orders[None,None,:])*(r_max/n_radial_points)**2#*np.sqrt(2)
+            inverse_prefactor = (1.j)**(all_orders[None,None,:])*(q_max/n_radial_points)**2#*np.sqrt(2)
+            # weights for negative orders are given by $w_{-mpk}=(-1)^m $w_{mpk}$ due to $J_{-m}(x)=(-1)^m J_m(x)$.
+            #log.info('wights.shape={},orders = {}'.format(weights.shape,orders))
+            weights = np.concatenate((weights,(-1)**orders[-2:0:-1,None,None]*weights[-2:0:-1]),axis = 0)
+        elif dimensions == 3:
+            orders = np.arange(bandwidth)
+            forward_prefactor = (-1.j)**(orders[None,None,:])*(r_max)**3*np.sqrt(2/np.pi)/n_radial_points
+            inverse_prefactor = (1.j)**(orders[None,None,:])*(q_max)**3*np.sqrt(2/np.pi)/n_radial_points
+            
+        weights=np.moveaxis(weights,0,2)
+        forward_weights=weights*forward_prefactor
+        inverse_weights=weights*inverse_prefactor
+        #log.info('weights shape = {}'.format(forward_weights.shape))
+        return {'forward':forward_weights,'inverse':inverse_weights}
+
 
     ### Direct Trapezoidal ###
     @classmethod
@@ -151,7 +223,7 @@ class HankelTransformWeights:
 
     
 class HankelTransform:
-    ht_modes = ['trapz','zernike_trapz','sincos_trapz','midpoint','zernike_midpoint','sincos_midpoint']
+    ht_modes = ['trapz','zernike_trapz','sincos_trapz','midpoint','zernike_midpoint','sincos_midpoint','chebyshev']
     def __init__(self,n_points=64,angular_bandwidth=32,r_max=1,mode='midpoint',dimensions = 3, weights = None, reciprocity_coefficient = np.pi, use_gpu = True, n_processes_for_weight_generation = None,other={}):
         self.mode = mode
         self.dimensions = dimensions
@@ -221,7 +293,7 @@ class HankelTransform:
     
     def _generate_spherical_ht(self):        
         fw= np.swapaxes(self.assembled_weights['forward'],0,1)
-        iw= np.swapaxes(self.assembled_weights['inverse'],0,1)
+        iw= np.swapaxes(self.assembled_weights['inverse'],0,1) 
         l_orders = np.arange(self.bandwidth)
         l_max = self.bandwidth-1
         #m_orders=np.concatenate((np.arange(l_max+1,dtype = int),-np.arange(l_max,0,-1,dtype = int)))
@@ -234,7 +306,7 @@ class HankelTransform:
                 for l in l_orders:
                     matmul(fw[:,:,l],harmonic_coeff.lm[l][1:],out = forward_coeff.lm[l])
                 return forward_coeff
-            def iht(reciprocal_coeff):
+            def iht(harmonic_coeff):
                 for l in l_orders:
                     matmul(iw[:,:,l],harmonic_coeff.lm[l][1:],out = inverse_coeff.lm[l])
                 return inverse_coeff               
@@ -513,6 +585,8 @@ class HankelTransform:
             rs = np.arange(self.n_points)*self.r_max/(self.n_points-1)
         elif 'midpoint' in self.mode:
             rs = (np.arange(self.n_points)+0.5)*self.r_max/self.n_points
+        elif 'chebyshev' in self.mode:
+            rs = HankelTransformWeights.chebyshev_nodes(self.n_points,start=0)*self.r_max
         return rs
     @property
     def reziprocal_radial_points(self):
@@ -521,6 +595,8 @@ class HankelTransform:
             qs = np.arange(self.n_points)*q_max/(self.n_points-1)
         elif 'midpoint' in self.mode:
             qs = (np.arange(self.n_points)+0.5)*q_max/self.n_points
+        elif 'chebyshev' in self.mode:
+            qs = HankelTransformWeights.chebyshev_nodes(self.n_points,start=0)*q_max
         return qs
 
 def polar_spherical_dft_reciprocity_relation_radial_cutoffs(cutoff:float,n_points:int,reciprocity_coefficient=np.pi):
@@ -591,4 +667,104 @@ class SphericalFourierTransform:
             thetas = self.harm.thetas
             grid = np.stack(np.meshgrid(rs,thetas,phis,indexing='ij'),3)
         return grid
+        
+
+
+class ZernikeTransform:
+    '''class implementing Zernike Series expansion.'''
+    def __init__(self,bandwidth=32,order=0,n_points=128,max_r=1,dimension=3,grid='uniform',bw_to_sampling_factor=4):
+        from xframe.library.mathLibrary import eval_ND_zernike_polynomials
+        step = max_r/n_points
+        self.s = np.arange(order,bandwidth,2)
+
+        if grid=='chebyshev':
+            R = max_r
+            N = n_points
+            ks = np.arange(1,N+1)
+            phis = np.pi/2-(ks-0.5)*np.pi/(2*N)
+            self.points = p = (R/2*(1+np.cos((ks-1/2)/N*np.pi)))[::-1]
+            #self.points = p = R*np.cos(phis)
+            self.weight = np.pi/N #*np.sqrt(R*p-(p*R)**2)#*2
+            #self.weight = np.pi/(N*2) #*np.sqrt(R*p-(p*R)**2)#*2
+            self.izernike_values = eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,self.points,dimension)[order]
+            self.zernike_values = self.izernike_values*np.sqrt(1-p**2)[None,:]#np.sqrt(R*p-(p*R)**2)[None,:]
+            #self.zernike_values = self.izernike_values*np.sqrt(R*p-(p*R)**2)[None,:]
+            
+            
+            zernike_points_per_step = int(bandwidth*bw_to_sampling_factor/n_points)+1
+            zN = N*zernike_points_per_step
+            zks = np.arange(1,zN+1)
+            zernike_points = zp = (R/2*(1+np.cos((zks-1/2)/zN*np.pi)))[::-1]
+            zweights = 1/zernike_points_per_step*np.sqrt(R*zp-(zp*R)**2)
+            zernike_values=np.zeros((len(self.s),n_points),dtype=float)
+            izernike_values=np.zeros((len(self.s),n_points),dtype=float)
+            for i in range(zernike_points_per_step):
+                vals = eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,zernike_points[i::zernike_points_per_step],dimension)[order]
+                zernike_values+=vals*zweights[i::zernike_points_per_step]
+                izernike_values+=vals/zernike_points_per_step#*zweights[i::zernike_points_per_step]                
+            #self.zernike_values = zernike_values
+            #self.izernike_values = izernike_values
+        elif grid == 'cheby2':
+            R = max_r
+            N = n_points
+            cks = np.cos((np.arange(N)+0.5)*np.pi/(2*N))
+            self.points = cks
+            self.weight = np.pi/(2*N)
+            self.izernike_values = eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,cks,dimension)[order]
+            self.zernike_values = self.izernike_values*np.sqrt(1-cks**2)
+        elif grid == 'cheby3':
+            R = max_r
+            N = n_points
+            sks = np.sin((np.arange(N)+0.5)*np.pi/(2*N))
+            self.points = sks
+            self.weight = np.pi/(2*N)
+            self.izernike_values = eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,sks,dimension)[order]
+            self.zernike_values = self.izernike_values*np.sqrt(1-sks**2)
+        elif grid == 'cheby4':
+            R = max_r
+            N = n_points
+            sks = np.sin((np.arange(N)+0.5)*np.pi/(2*N))
+            self.points = sks
+            self.weight = np.pi/(2*N)
+            self.izernike_values = eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,sks,dimension)[order]
+            self.zernike_values = self.izernike_values*np.sqrt(1-sks**2)
+
+            zernike_points_per_step = int(bandwidth*bw_to_sampling_factor/n_points)
+            print(f'n_points = {n_points}, zernike_points_per_step = {zernike_points_per_step}')
+            zN = N*zernike_points_per_step
+            zks = np.arange(1,zN)                 
+            zernike_points = zp =  np.sin((np.arange(zN)+0.5)*np.pi/(2*zN))
+            zweights = np.sqrt(1-zp**2)/(zernike_points_per_step)
+            zernike_values=np.zeros((len(self.s),n_points),dtype=float)
+            izernike_values=np.zeros((len(self.s),n_points),dtype=float)
+            for i in range(zernike_points_per_step):
+                vals = eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,zernike_points[i::zernike_points_per_step],dimension)[order]
+                zernike_values+=vals*zweights[i::zernike_points_per_step]
+                izernike_values+=vals/zernike_points_per_step#*zweights[i::zernike_points_per_step]
+            self.izernike_values = izernike_values
+            self.zernike_values = zernike_values
+        else:
+            self.points = (np.arange(n_points)+0.5)*step
+            zernike_points_per_step = int(bandwidth*bw_to_sampling_factor/n_points)+1
+            zernike_points = (np.arange(n_points*zernike_points_per_step)+0.5)*(step/zernike_points_per_step)
+            self.weight= step
+            zernike_values=np.zeros((len(self.s),n_points),dtype=float)
+            for i in range(zernike_points_per_step):
+                zernike_values+=eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,zernike_points[i::zernike_points_per_step],dimension)[order]/zernike_points_per_step
+                
+            self.zernike_values = zernike_values
+            self.izernike_values = zernike_values
+            
+#        self.zernike_values = eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,self.points,dimension)[order]
+
+        self.bandwidth = bandwidth
+        self.order = order
+        self.dimension=dimension
+        self.n_points = n_points
+        self.C=np.sqrt(2*self.s+dimension)
+    def forward(self,f):
+        fs = (self.zernike_values*self.C[:,None]*self.points[None,:]**(self.dimension-1)*self.weight) @ f
+        return fs
+    def inverse(self,fs):
+        return np.sum(self.izernike_values*self.C[:,None]*fs[:,None],axis=0)
         

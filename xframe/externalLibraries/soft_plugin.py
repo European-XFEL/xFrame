@@ -166,8 +166,7 @@ class Soft(SoftInterface):
     def wigners(self):
         if not isinstance(self._wigners_big,WignerD):
             self._wigners_big = WignerD(self._soft,self.wigners_small,self.grid,self.bw)
-        return self._wigners_big
-    
+        return self._wigners_big    
 
     #################################################
     # computes the rotated harmonic coefficients
@@ -184,7 +183,24 @@ class Soft(SoftInterface):
         log.info('coeff.shape before rotation = {}'.format(coeff.shape))
         rotated_coeff = rotate_coeff(self.bw, coeff,split_ids, euler_angles)
         return rotated_coeff
-
+    def forward_coeff(self,coeff):
+        ''' SOFT applied on spherical harmonic coefficient.
+        Assumes that coeff = f_{l,m} is represented whose last axis is of size bw**2 with fl beeing at position l*(l+1)+m.'''
+        soft_coeff = self.get_empty_coeff
+         #    coeff_pos = 0
+        for l in range(bw):
+            wigNorm = np.sqrt(8.*np.pi/(2.*l+1.))
+            f_l = coeff[l**2,(l+1)**2]
+            m0_pos=l # position of the m = 0 component in arrays with components -l,...,l
+            for m1 in range(-l,l+1):
+                f_lm1 = f_l[m0_pos + m1] #should give f_{l-m1}           
+                for m2 in range(-l,l+1):
+                    # and save it in the so3 coefficient array */                
+                    index = so3CoefLoc(m1,m2,l,bw)
+                    coeff[index] = wigNorm * f_lm1
+        return coeff
+            
+    
     
     #######################################
     # let f,g be two square integrable functions on the 2 sphere 
