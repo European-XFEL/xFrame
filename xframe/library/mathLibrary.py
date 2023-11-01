@@ -1414,9 +1414,11 @@ def _get_connected_area_periodic(image,point,step,value,shape,connected_points,v
         for p,s in zip(next_points,next_steps):
             if (p[0]>=0 and p[0]<shape[0] and p[1]>=0 and p[1]<shape[1]):
                 _get_connected_area_periodic(image,p,s,value,shape,connected_points,visited_mask,periodic_axes=periodic_axes)
+    #visited_mask[point]=True
     return connected_points
 
 def find_connected_component(image,start,periodic_axes = tuple(),return_mask = False):
+    sys.setrecursionlimit(np.prod(image.shape))
     start=tuple(start)
     value = image[start]
     shape = image.shape
@@ -1439,6 +1441,7 @@ def find_connected_component(image,start,periodic_axes = tuple(),return_mask = F
     connected_points=[tuple(start)]
     for point, step in zip(next_points,next_steps):
         _get_connected_area_periodic(image,tuple(point),step,value,shape,connected_points,visited_mask,periodic_axes=periodic_axes)
+    sys.setrecursionlimit(999)
     if return_mask:
         mask = np.zeros_like(visited_mask)
         mask[tuple(np.stack(connected_points,axis = 1))]=True

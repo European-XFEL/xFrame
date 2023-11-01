@@ -154,13 +154,13 @@ class ShSmall:
             return  np.array(tuple(synth_cplx(coeff) for coeff in data))
         inverse_cmplx = shape_change_decorator((self.n_coeff,),out_shape=self.angular_shape)(inverse_cmplx_inner)
         return inverse_cmplx
-    def get_empty_coeff(pre_shape=None):
+    def get_empty_coeff(self,pre_shape=None):
         if not isinstance(pre_shape,tuple):
             data = np.zeros(self.angular_shape,dtype=complex)
-            return ShCoff(data,self.ls,self.ms)
+            return ShCoeff(data,self.ls,self.ms)
         else:
             data = np.zeros(pre_shape+self.angular_shape,dtype=complex)
-            return ShCoff(data,self.ls,self.ms)
+            return ShCoeff(data,self.ls,self.ms)
     @property
     def grid(self):
         return GridFactory.construct_grid('uniform',(self.thetas,self.phis))

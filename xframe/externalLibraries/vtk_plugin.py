@@ -5,6 +5,7 @@ from vtk.util import numpy_support as vtn
 from xframe.library.gridLibrary import GridFactory
 from xframe.library.gridLibrary import NestedArray
 from xframe.database.interfaces import VTKInterface
+from xframe.library.pythonLibrary import xprint
 log=logging.getLogger('root')
 
 class vtkSaver(VTKInterface):
@@ -41,9 +42,10 @@ class vtkSaver(VTKInterface):
                     break
             assert ~isinstance(writer,bool),'grid_type {} not known. Known grid_types are {}'.format(grid_type,vtkSaver.writer_dict.keys())
 
-            
+            #xprint(file_path)
             writer.SetFileName(file_path)
             writer.Update()
+            #xprint('saved')
         except AssertionError as e:
             log.error(e)
             
@@ -122,12 +124,11 @@ class vtkSaver(VTKInterface):
             new_data[:,0,-1] = data[:,0]
             datasets[n]=new_data
         if not (isinstance(grid,np.ndarray) or isinstance(grid,NestedArray)):
-            n_r,n_phi = datasets[0].shape
-            n_theta = 1
+            #xprint(f'dataset shape = {datasets[0].shape}')
+            n_r,_,n_phi = datasets[0].shape
             rs = np.arange(n_r)*1/n_r
             phis = np.arange(n_phi-1)*np.pi*2/(n_phi-1)
-            thetas = np.array([np.pi/2])
-            grid = GridFactory.construct_grid('uniform',[rs,thetas,phis])
+            grid = GridFactory.construct_grid('uniform',[rs,phis])
         phis = np.zeros(len(grid[0,:,1])+1,grid[0,:,1].dtype)
         phis[:-1]=grid[0,:,1]
         phis[-1] = 0 # periodic point
@@ -167,6 +168,7 @@ class vtkSaver(VTKInterface):
                 vtk_density.SetName("{}_{}".format(dset_names[n],n))
             else:
                 vtk_density.SetName("data_{}".format(n))
+        #xprint(vtk_grid)
         return vtk_grid
         
     @staticmethod

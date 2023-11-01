@@ -839,10 +839,12 @@ class Alignment():
         n_radial_points = len(rs)
     
         name_postfix='N'+str(n_radial_points)+'mO'+str(max_order)+'nO'+str(n_orders)+'rc'+str(reciprocity_coefficient)
+        #xprint(f'generating fourier transform postfox = {name_postfix}')
         try:
             weights_dict = db.load('ft_weights',path_modifiers={'postfix':name_postfix,'type':ft_type+'_'+str(dimensions)+'D'})
         except FileNotFoundError as e:
             weights_dict = generate_weightDict(max_order, n_radial_points,reciprocity_coefficient=reciprocity_coefficient,dimensions=dimensions,mode=ft_type)
+            db.save('ft_weights',weights_dict,path_modifiers={'postfix':name_postfix,'type':ft_type+'_'+str(dimensions)+'D'})
         
         
         use_gpu = self.r_opt['GPU']['use']

@@ -145,6 +145,10 @@ IO:
           _value: True
         plot_resolution_metrics:
           _value: True
+        plot_average_bl:
+          _value: False
+        plot_average_cn:
+          _value: False
     real_vtk:
       name:
         _value: 'real_{reconstruction}.vts'

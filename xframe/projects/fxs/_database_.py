@@ -27,6 +27,9 @@ from .projectLibrary.classes import FTGridPair
 from .projectLibrary.classes import SampledFunction
 from .projectLibrary.fxs_invariant_tools import ccd_associated_legendre_matrices_single_m
 from .projectLibrary.fxs_invariant_tools import deg2_invariant_to_cn_3d
+from .projectLibrary.fxs_invariant_tools import intensity_to_deg2_invariant
+from .projectLibrary.fxs_invariant_tools import deg2_invariant_to_cc_2d
+from .projectLibrary.fxs_invariant_tools import deg2_invariant_to_cc_3d
 from .projectLibrary.fxs_invariant_tools import harmonic_coeff_to_deg2_invariants
 from .projectLibrary.misk import _get_reciprocity_coefficient
 from .projectLibrary.harmonic_transforms import HarmonicTransform
@@ -212,6 +215,18 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                 traceback.print_exc()
                 log.error('Failed to generate resolution metric plots.')
 
+        if options['plot_average_bl']:
+            I = data['average']['intensity_from_densities']
+            I2 = data['average']['intensity_from_ft_densities'] 
+            bl = intensity_to_deg2_invariant(I)
+            ft_bl = intensity_to_deg2_invariant(I2)
+            self._save_first_invariants(bl,qs,run_path,options,name='average_')
+            self._save_first_invariants(ft_bl,qs,run_path,options,name='average_ft_')
+        if options['plot_average_cn']:
+            if not options['plot_average_bl']:
+                I = data['average']['intensity_from_densities'] 
+                bl = intensity_to_deg2_invariant(I)
+                pass
     def _save_settings(self,path,project_name='settings',exp_name='exp_settings'):
         project_settings, experiment_settings = settings.get_settings_to_save()
         if isinstance(xframe.project_worker,ProjectWorkerInterface):
