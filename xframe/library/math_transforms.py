@@ -2,8 +2,9 @@ import numpy as np
 import traceback
 import logging
 from scipy.special import jv as bessel_jnu
+from scipy.special import loggamma
 from scipy.special import spherical_jn as bessel_spherical_jnu
-
+from scipy.special import eval_gegenbauer
 from xframe import Multiprocessing
 from xframe import settings
 from xframe.library.pythonLibrary import xprint
@@ -59,6 +60,27 @@ def get_harmonic_transform(bandwidth:int,dimensions=3,options={}):
         
 
 class HankelTransformWeights:
+    @staticmethod
+    def _read_n_points(n_points):
+        if isinstance(n_points,(list,tuple)):
+            Nr,Nq = n_points
+        else:
+            Nr = Nq = n_points
+        return (Nr,Nq)
+    @staticmethod
+    def _read_weights(weights):
+        if isinstance(weights,(list,tuple)):
+            weights_forward,weights_inverse = weights
+        else:
+            weights_forward = weights_inverse = weights
+        return (weights_forward,weights_inverse)
+    @staticmethod
+    def _apply_prefactors_and_reshape_weights(weights,prefactors):
+        w_forward=np.moveaxis(weights[0],0,2)
+        w_inverse=np.moveaxis(weights[1],0,2)
+        forward_weights=w_forward*prefactors[0]
+        inverse_weights=w_inverse*prefactors[1]
+        return (forward_weights,inverse_weights)
     ### Direct Midpoint ###
     @classmethod
     def midpoint(cls,n_points,angular_bandwidth,dimensions,reciprocity_coefficient,n_processes_for_weight_generation,**kwargs):
@@ -69,32 +91,37 @@ class HankelTransformWeights:
         worker_by_dimensions= {2:cls.midpoint_polar_worker,3:cls.midpoint_spherical_worker}
         worker = worker_by_dimensions[dimensions]
         weights = Multiprocessing.comm_module.request_mp_evaluation(worker,input_arrays=[orders],const_inputs=[n_points,reciprocity_coefficient],call_with_multiple_arguments=True,n_processes=n_processes_for_weight_generation)
+
+        #if dimensions == 3:
+        weights = weights[0]        
         return weights
     @classmethod
     def midpoint_polar_worker(cls,orders,n_points,reciprocity_coefficient,**kwargs):
         '''
         Generates polar midpoint rule weights.
         '''
-        N = n_points
-        ps=np.arange(N)+1/2
-        ks=np.arange(N)+1/2
+        Nr,Nq = cls._read_n_points(n_points)
+        ps=np.arange(Nr)+1/2
+        ks=np.arange(Nq)+1/2
         ms = orders
-        Jmpk = bessel_jnu(np.repeat(np.repeat(ms[:,None,None],N,axis=1),N,axis=2),ks[None,:]*ps[:,None]*reciprocity_coefficient/N)
-        weights = ps[None,:,None]*Jmpk
-        return weights
+        Jmpk = bessel_jnu(np.repeat(np.repeat(ms[:,None,None],Nr,axis=1),Nq,axis=2),ks[None,:]*ps[:,None]*reciprocity_coefficient/Nr)        
+        weights_forward = ps[None,:,None]*Jmpk
+        weights_inverse = ks[None,:,None]*np.swapaxes(Jmpk,-1,-2)
+        return (weights_forward,weights_inverse)
 
     @classmethod
     def midpoint_spherical_worker(cls,orders,n_points,reciprocity_coefficient,**kwargs):
         '''
         Generates spherical midpoint rule weights.
         '''
-        N = n_points
-        ps=np.arange(N)+1/2
-        ks=np.arange(N)+1/2
+        Nr,Nq = cls._read_n_points(n_points)
+        ps=np.arange(Nr)+1/2
+        ks=np.arange(Nq)+1/2
         ls = orders
-        jmpk = bessel_spherical_jnu(np.repeat(np.repeat(ls[:,None,None],N,axis=1),N,axis=2),ks[None,:]*ps[:,None]*reciprocity_coefficient/N)
-        weights = ps[None,:,None]**2*jmpk
-        return weights
+        jmpk = bessel_spherical_jnu(np.repeat(np.repeat(ls[:,None,None],Nr,axis=1),Nq,axis=2),ks[None,:]*ps[:,None]*reciprocity_coefficient/Nr)
+        weights_forward = ps[None,:,None]**2*jmpk
+        weights_inverse = ks[None,:,None]**2*np.swapaxes(jmpk,-1,-2)
+        return (weights_forward,weights_inverse)
 
     @classmethod
     def assemble_midpoint(cls,weights,bandwidth,r_max,reciprocity_coefficient,dimensions=3):
@@ -103,29 +130,33 @@ class HankelTransformWeights:
         And changes the Array order of the weights from (order,summation_radial_corrdinate,new_radial_coordinate) to 
         (summation_radial_coordinate,new_radial_coordinate,order)
         '''
-        n_radial_points = weights.shape[-1]
-        q_max=polar_spherical_dft_reciprocity_relation_radial_cutoffs(r_max,n_radial_points,reciprocity_coefficient = reciprocity_coefficient)
+        w_forward,w_inverse= cls._read_weights(weights)
+        Nr,Nq = w_forward.shape[1:]        
+        q_max=polar_spherical_dft_reciprocity_relation_radial_cutoffs(r_max,Nq,reciprocity_coefficient = reciprocity_coefficient)
         #q_max=polar_spherical_dft_reciprocity_relation_radial_cutoffs_new(r_max,n_radial_points,scale = pi_in_q)
         #xprint(f'alignment dimensions = {dimensions}')
         if dimensions == 2:
             orders = np.arange(bandwidth+1)
             all_orders = np.concatenate((orders,-orders[-2:0:-1]))
             #log.info(all_orders)
-            forward_prefactor = (-1.j)**(all_orders[None,None,:])*(r_max/n_radial_points)**2#*np.sqrt(2)
-            inverse_prefactor = (1.j)**(all_orders[None,None,:])*(q_max/n_radial_points)**2#*np.sqrt(2)
+            forward_prefactor = (-1.j)**(all_orders[None,None,:])*(r_max/Nr)**2#*np.sqrt(2)
+            inverse_prefactor = (1.j)**(all_orders[None,None,:])*(q_max/Nq)**2#*np.sqrt(2)
             # weights for negative orders are given by $w_{-mpk}=(-1)^m $w_{mpk}$ due to $J_{-m}(x)=(-1)^m J_m(x)$.
             #log.info('wights.shape={},orders = {}'.format(weights.shape,orders))
-            weights = np.concatenate((weights,(-1)**orders[-2:0:-1,None,None]*weights[-2:0:-1]),axis = 0)
+            w_forward = np.concatenate((w_forward,(-1)**orders[-2:0:-1,None,None]*w_forward[-2:0:-1]),axis = 0)
+            w_inverse = np.concatenate((w_inverse,(-1)**orders[-2:0:-1,None,None]*w_inverse[-2:0:-1]),axis = 0)
         elif dimensions == 3:
+            #print(f'Nr = Nq = {n_radial_points} r_max = {r_max} q_max = {q_max}')
             orders = np.arange(bandwidth)
-            forward_prefactor = (-1.j)**(orders[None,None,:])*(r_max/n_radial_points)**3*np.sqrt(2/np.pi)
-            inverse_prefactor = (1.j)**(orders[None,None,:])*(q_max/n_radial_points)**3*np.sqrt(2/np.pi)
+            forward_prefactor = (-1.j)**(orders[None,None,:])*(r_max/Nr)**3*np.sqrt(2/np.pi)
+            inverse_prefactor = (1.j)**(orders[None,None,:])*(q_max/Nq)**3*np.sqrt(2/np.pi)
             
-        weights=np.moveaxis(weights,0,2)
-        forward_weights=weights*forward_prefactor
-        inverse_weights=weights*inverse_prefactor
+        forward_weights,inverse_weights = cls._apply_prefactors_and_reshape_weights((w_forward,w_inverse),(forward_prefactor,inverse_prefactor))
         #log.info('weights shape = {}'.format(forward_weights.shape))
-        return {'forward':forward_weights,'inverse':inverse_weights}
+        real_points = (np.arange(Nr)+0.5)*r_max/Nr
+        reciprocal_points = (np.arange(Nq)+0.5)*q_max/Nq
+        #print(f'R = {real_points.max()}')
+        return {'forward':forward_weights,'inverse':inverse_weights,'real_points':real_points,'reciprocal_points':reciprocal_points}
 
     ### Direct Chebyshev, bad approximation dont use this ###
     @staticmethod
@@ -149,25 +180,27 @@ class HankelTransformWeights:
         '''
         Generates polar chebyshev rule weights.
         '''
-        N = n_points
-        ps = cls.chebyshev_nodes(N,start=0)
-        ks = ps.copy()
+        Nr,Nq = cls._read_n_points(n_points)
+        ps = cls.chebyshev_nodes(Nr,start=0)
+        ks = cls.chebyshev_nodes(Nq,start=0)
         ls = orders
-        Jmpk = bessel_jnu(np.repeat(np.repeat(ms[:,None,None],N,axis=1),N,axis=2),ks[None,:]*ps[:,None]*reciprocity_coefficient*N)
-        weights = ps[None,:,None]**np.sqrt(1-ps)[None,:,None]*Jmpk*np.pi/2
-        return weights
+        Jmpk = bessel_jnu(np.repeat(np.repeat(ms[:,None,None],Nr,axis=1),Nq,axis=2),ks[None,:]*ps[:,None]*reciprocity_coefficient*Nq)
+        weights_forward = ps[None,:,None]**2*np.sin((np.arange(Nr)+0.5)*np.pi/Nr)[None,:,None]*Jmpk*np.pi/2
+        weights_inverse = ks[None,:,None]**2*np.sin((np.arange(Nq)+0.5)*np.pi/Nq)[None,:,None]*np.swapaxes(Jmpk,-1,-2)*np.pi/2
+        return (weights_forward,weights_inverse)
     @classmethod
     def chebyshev_spherical_worker(cls,orders,n_points,reciprocity_coefficient,**kwargs):
         '''
         Generates spherical chebyshev rule weights.
         '''
-        N = n_points
-        ps = cls.chebyshev_nodes(N,start=0)
-        ks = ps.copy()
+        Nr,Nq = cls._read_n_points(n_points)
+        ps = cls.chebyshev_nodes(Nr,start=0)
+        ks = cls.chebyshev_nodes(Nq,start=0)
         ls = orders
-        jmpk = bessel_spherical_jnu(np.repeat(np.repeat(ls[:,None,None],N,axis=1),N,axis=2),ks[None,:]*ps[:,None]*reciprocity_coefficient*N)
-        weights = ps[None,:,None]**2*np.sin((np.arange(N)+0.5)*np.pi/N)[None,:,None]*jmpk*np.pi/2
-        return weights
+        jmpk = bessel_spherical_jnu(np.repeat(np.repeat(ls[:,None,None],Nr,axis=1),Nq,axis=2),ks[None,:]*ps[:,None]*reciprocity_coefficient*Nq)
+        weights_forward = ps[None,:,None]**2*np.sin((np.arange(Nr)+0.5)*np.pi/Nr)[None,:,None]*jmpk*np.pi/2
+        weights_inverse = ks[None,:,None]**2*np.sin((np.arange(Nq)+0.5)*np.pi/Nq)[None,:,None]*np.swapaxes(jmpk,-1,-2)*np.pi/2
+        return (weights_forward,weights_inverse)
     @classmethod
     def assemble_chebyshev(cls,weights,bandwidth,r_max,reciprocity_coefficient,dimensions=3):
         '''
@@ -175,29 +208,29 @@ class HankelTransformWeights:
         And changes the Array order of the weights from (order,summation_radial_corrdinate,new_radial_coordinate) to 
         (summation_radial_coordinate,new_radial_coordinate,order)
         '''
-        n_radial_points = weights.shape[-1]
-        q_max=polar_spherical_dft_reciprocity_relation_radial_cutoffs(r_max,n_radial_points,reciprocity_coefficient = reciprocity_coefficient)
+        w_forward,w_inverse= cls._read_weights(weights)
+        Nr,Nq = w_forward.shape[1:]
+        q_max=polar_spherical_dft_reciprocity_relation_radial_cutoffs(r_max,Nq,reciprocity_coefficient = reciprocity_coefficient)
         #q_max=polar_spherical_dft_reciprocity_relation_radial_cutoffs_new(r_max,n_radial_points,scale = pi_in_q)
         #xprint(f'alignment dimensions = {dimensions}')
         if dimensions == 2:
             orders = np.arange(bandwidth+1)
             all_orders = np.concatenate((orders,-orders[-2:0:-1]))
             #log.info(all_orders)
-            forward_prefactor = (-1.j)**(all_orders[None,None,:])*(r_max/n_radial_points)**2#*np.sqrt(2)
-            inverse_prefactor = (1.j)**(all_orders[None,None,:])*(q_max/n_radial_points)**2#*np.sqrt(2)
-            # weights for negative orders are given by $w_{-mpk}=(-1)^m $w_{mpk}$ due to $J_{-m}(x)=(-1)^m J_m(x)$.
-            #log.info('wights.shape={},orders = {}'.format(weights.shape,orders))
-            weights = np.concatenate((weights,(-1)**orders[-2:0:-1,None,None]*weights[-2:0:-1]),axis = 0)
+            forward_prefactor = (-1.j)**(all_orders[None,None,:])*r_max**2/Nr
+            inverse_prefactor = (1.j)**(all_orders[None,None,:])*q_max**2/Nq
+            w_forward = np.concatenate((w_forward,(-1)**orders[-2:0:-1,None,None]*w_forward[-2:0:-1]),axis = 0)
+            w_inverse = np.concatenate((w_inverse,(-1)**orders[-2:0:-1,None,None]*w_inverse[-2:0:-1]),axis = 0)
         elif dimensions == 3:
             orders = np.arange(bandwidth)
-            forward_prefactor = (-1.j)**(orders[None,None,:])*(r_max)**3*np.sqrt(2/np.pi)/n_radial_points
-            inverse_prefactor = (1.j)**(orders[None,None,:])*(q_max)**3*np.sqrt(2/np.pi)/n_radial_points
+            forward_prefactor = (-1.j)**(orders[None,None,:])*(r_max)**3*np.sqrt(2/np.pi)/Nr
+            inverse_prefactor = (1.j)**(orders[None,None,:])*(q_max)**3*np.sqrt(2/np.pi)/Nq
             
-        weights=np.moveaxis(weights,0,2)
-        forward_weights=weights*forward_prefactor
-        inverse_weights=weights*inverse_prefactor
+        forward_weights,inverse_weights = cls._apply_prefactors_and_reshape_weights((w_forward,w_inverse),(forward_prefactor,inverse_prefactor))
+        real_points = chebyshev_nodes(Nr,start=0,end=r_max)        
+        reciprocal_points = chebyshev_nodes(Nq,start=0,end=q_max)
         #log.info('weights shape = {}'.format(forward_weights.shape))
-        return {'forward':forward_weights,'inverse':inverse_weights}
+        return {'forward':forward_weights,'inverse':inverse_weights,'real_points':real_points,'reciprocal_points':reciprocal_points}
 
 
     ### Direct Trapezoidal ###
@@ -223,11 +256,11 @@ class HankelTransformWeights:
 
     
 class HankelTransform:
-    ht_modes = ['trapz','zernike_trapz','sincos_trapz','midpoint','zernike_midpoint','sincos_midpoint','chebyshev']
+    ht_modes = ['trapz','zernike_trapz','sincos_trapz','midpoint','zernike_midpoint','sincos_midpoint']
     def __init__(self,n_points=64,angular_bandwidth=32,r_max=1,mode='midpoint',dimensions = 3, weights = None, reciprocity_coefficient = np.pi, use_gpu = True, n_processes_for_weight_generation = None,other={}):
         self.mode = mode
         self.dimensions = dimensions
-        self.n_points = n_points
+        self.Nr,self.Nq = HankelTransformWeights._read_n_points(n_points)
         self.bandwidth = angular_bandwidth
         self.use_gpu=use_gpu
         self.reciprocity_coefficient = reciprocity_coefficient
@@ -235,19 +268,23 @@ class HankelTransform:
         if use_gpu:
             settings.general.n_control_workers = 1
             Multiprocessing.comm_module.restart_control_worker()
-        if not isinstance(weights,np.ndarray):            
+        if not isinstance(weights,(np.ndarray,list,tuple)):            
             weight_generator = getattr(HankelTransformWeights,mode)
             weights = weight_generator(n_points,angular_bandwidth,dimensions,reciprocity_coefficient,n_processes_for_weight_generation,**other)
         self.assembled_weights = getattr(HankelTransformWeights,'assemble_'+mode)(weights,self.bandwidth,r_max,self.reciprocity_coefficient,dimensions=self.dimensions)
+        self.grids = {'real':self.assembled_weights.pop('real_points'),'reciprocal':self.assembled_weights.pop('reciprocal_points')}
         self._forward_coeff,self._inverse_coeff = self._generate_coeff_arrays()
         self.forward_cmplx,self.inverse_cmplx = self._generate_ht()
 
     def from_weight_dict(self,weights_dict,r_max=1,use_gpu=True):
         w = weights_dict
         weights = w['weights']
-        n_points = weights.shape[1]
-        bandwidth = self.weights.shape[-1]
-        self.__init__(n_points=n_points,angular_bandwidth=bandwidth,r_max=r_max,mode = w['mode'],dimensions=w['dimensions'],weights=weights,reciprocity_coefficient=w['reciprocity_coefficient'],use_gpu=use_gpu)
+        n_points = w['n_points']
+        bandwidth = w['bandwidth']
+        dimensions = w['dimensions']
+        mode = w['mode']
+        reciprocity_coefficient = w['reciprocity_coefficient']
+        self.__init__(n_points=n_points,angular_bandwidth=bandwidth,r_max=r_max,mode = mode,dimensions=dimensions,weights=weights,reciprocity_coefficient=reciprocity_coefficient,use_gpu=use_gpu)
         return self
     
     def _generate_coeff_arrays(self):
@@ -258,18 +295,20 @@ class HankelTransform:
         return coeffs
     def _generate_spherical_coeff_arrays(self):
         from xframe.library.mathLibrary import shtns
-        coeff_shape = (self.n_points,self.bandwidth**2)
-        forward_array = np.zeros(coeff_shape,dtype=complex)
-        inverse_array = np.zeros(coeff_shape,dtype=complex)
+        coeff_shape_f = (self.Nq,self.bandwidth**2)
+        coeff_shape_i = (self.Nr,self.bandwidth**2)
+        forward_array = np.zeros(coeff_shape_f,dtype=complex)
+        inverse_array = np.zeros(coeff_shape_i,dtype=complex)
         ls = np.arange(self.bandwidth)
         ms = np.concatenate((-ls,ls[1:]))
         forward_coeff = shtns.ShCoeff(forward_array,ls,ms)
         inverse_coeff = shtns.ShCoeff(inverse_array,ls,ms)
         return forward_coeff,inverse_coeff
     def _generate_polar_coeff_arrays(self):
-        coeff_shape = (self.n_points,2*self.bandwidth)
-        forward_array = np.zeros(coeff_shape,dtype=complex)
-        inverse_array = np.zeros(coeff_shape,dtype=complex)
+        coeff_shape_f = (self.Nq,2*self.bandwidth)
+        coeff_shape_i = (self.Nr,2*self.bandwidth)
+        forward_array = np.zeros(coeff_shape_f,dtype=complex)
+        inverse_array = np.zeros(coeff_shape_i,dtype=complex)
         return forward_array,inverse_array
 
     def _generate_ht(self):
@@ -291,7 +330,9 @@ class HankelTransform:
         return zht,izht
         
     
-    def _generate_spherical_ht(self):        
+    def _generate_spherical_ht(self):
+        from xframe.library.mathLibrary import shtns
+        ShCoeff = shtns.ShCoeff
         fw= np.swapaxes(self.assembled_weights['forward'],0,1)
         iw= np.swapaxes(self.assembled_weights['inverse'],0,1) 
         l_orders = np.arange(self.bandwidth)
@@ -302,7 +343,7 @@ class HankelTransform:
         inverse_coeff = self._inverse_coeff
         if 'trapz' in self.mode:
             def ht(harmonic_coeff):
-                #return tuple(np.sum(forward_weights[:,:,np.abs(m):]*harmonic_coeff[m][1:,None,:l_max - np.abs(m)+1],axis=0) for m in m_orders)                
+                #return tuple(np.sum(forward_weights[:,:,np.abs(m):]*harmonic_coeff[m][1:,None,:l_max - np.abs(m)+1],axis=0) for m in m_orders)
                 for l in l_orders:
                     matmul(fw[:,:,l],harmonic_coeff.lm[l][1:],out = forward_coeff.lm[l])
                 return forward_coeff
@@ -312,6 +353,9 @@ class HankelTransform:
                 return inverse_coeff               
         else:
             def ht(harmonic_coeff):
+                #print(f'in shape = {harmonic_coeff.shape}')
+                #print(f'fw shape = {fw.shape}')
+                #print(f'fw shape = {fw.shape}')
                 for l in l_orders:
                     matmul(fw[:,:,l],harmonic_coeff.lm[l],out = forward_coeff.lm[l])
                 return forward_coeff        
@@ -327,7 +371,8 @@ class HankelTransform:
         l_orders = np.arange(self.bandwidth)
         n_radial_points = forward_weights.shape[1]    
         l_max=l_orders.max()    
-        nq = n_radial_points
+        nq = self.Nq
+        nr = self.Nr
         nl = len(l_orders)
         nlm = self.bandwidth**2
         if 'trapz' in self.mode:
@@ -399,9 +444,9 @@ class HankelTransform:
                 'functions': ({
                     'name': 'apply_weights',
                     'dtypes' : (complex,complex,complex,np.int64,np.int64,np.int64),
-                    'shapes' : ((nq,nlm),forward_weights.shape,(nq,nlm),None,None,None),
+                    'shapes' : ((nq,nlm),forward_weights.shape,(nr,nlm),None,None,None),
                     'arg_roles' : ('output','const_input','input','const_input','const_input','const_input'),
-                    'const_inputs' : (None,forward_weights,None,np.int64(nq),np.int64(nlm),np.int64(nl)),
+                    'const_inputs' : (None,forward_weights,None,np.int64(nr),np.int64(nlm),np.int64(nl)),
                     'global_range' : (nq,nlm),
                     'local_range' : None,                    
                 },)
@@ -413,10 +458,10 @@ class HankelTransform:
                 'functions': ({
                     'name': 'apply_weights',
                     'dtypes' : (complex,complex,complex,np.int64,np.int64,np.int64),
-                    'shapes' : ((nq,nlm),inverse_weights.shape,(nq,nlm),None,None,None),
+                    'shapes' : ((nr,nlm),inverse_weights.shape,(nq,nlm),None,None,None),
                     'arg_roles' : ('output','const_input','input','const_input','const_input','const_input'),
                     'const_inputs' : (None,inverse_weights,None,np.int64(nq),np.int64(nlm),np.int64(nl)),
-                    'global_range' : (nq,nlm), 
+                    'global_range' : (nr,nlm), 
                     'local_range' : None
                 },)
             }
@@ -435,8 +480,8 @@ class HankelTransform:
         '''
         Generates polar hankel transform using Zernike weights. $HT_m(f_m) = \sum_k f_m(k)*w_kpm$ for $m\geq 0$.
         '''
-        fw= np.swapaxes(self.assembled_weights['forward'],0,1)
-        iw= np.swapaxes(self.assembled_weights['inverse'],0,1)
+        fw= self.assembled_weights['forward']
+        iw= self.assembled_weights['inverse']
         l_orders = np.arange(self.bandwidth)
         l_max = self.bandwidth-1
         #n_orders=np.concatenate((np.arange(l_max+1,dtype = int),-np.arange(l_max,0,-1,dtype = int)))
@@ -451,23 +496,28 @@ class HankelTransform:
                 #log.info('harmxoonic shape = {}'.format(harmonic_coeff.shape))
                 #log.info('out forward = {}'.format(out_forward.shape))
                 #reciprocal_harmonic_coeff = np.sum(forward_weights*harmonic_coeff[1:,None,:],axis = 0,out=out_forward)
-                out_forward[:]=fw@harmonic_coeff[1:]
+                np.sum(fw*harmonic_coeff[1:,None,:],axis=0,out=out_forward)
                 return out_forward
             def iht(harmonic_coeff):
-                out_inverse[:]=iw@harmonic_coeff[1:]
+                np.sum(iw*harmonic_coeff[1:,None,:],axis=0,out = out_inverse) #iw@harmonic_coeff[1:]
                 #harmonic_coeff = np.sum(inverse_weights*reciprocal_coeff[1:,None,:],axis = 0,out=out_inverse)
                 #harmonic_coeff[:,unused_order_mask]=0
                 return out_inverse
         else:
             def ht(harmonic_coeff):
-                out_forward[:]=fw@harmonic_coeff
+                print(f'{harmonic_coeff.shape}')
+                print(f'{fw.shape}')
+                print(f'{out_forward.shape}')
+                #out_forward[:]=fw@harmonic_coeff
+                np.sum(fw*harmonic_coeff[:,None,:],axis=0,out=out_forward)
                 #log.info('harmonic shape = {}'.format(harmonic_coeff.shape))
                 #log.info('out forward = {}'.format(out_forward.shape))
                 #reciprocal_harmonic_coeff = np.sum(forward_weights*harmonic_coeff[:,None,:],axis = 0,out=out_forward)
                 #reciprocal_harmonic_coeff[:,unused_order_mask]=0
                 return out_forward
-            def iht(reciprocal_coeff):
-                out_inverse[:]=iw@harmonic_coeff
+            def iht(harmonic_coeff):
+                #out_inverse[:]=iw@harmonic_coeff
+                np.sum(iw*harmonic_coeff[:,None,:],axis=0,out = out_inverse)
                 #harmonic_coeff = np.sum(inverse_weights*reciprocal_coeff[:,None,:],axis = 0,out=out_inverse)
                 #harmonic_coeff[:,unused_order_mask]=0
                 return out_inverse
@@ -580,24 +630,11 @@ class HankelTransform:
 
 
     @property
-    def real_radial_points(self):
-        if 'trapz' in self.mode:
-            rs = np.arange(self.n_points)*self.r_max/(self.n_points-1)
-        elif 'midpoint' in self.mode:
-            rs = (np.arange(self.n_points)+0.5)*self.r_max/self.n_points
-        elif 'chebyshev' in self.mode:
-            rs = HankelTransformWeights.chebyshev_nodes(self.n_points,start=0)*self.r_max
-        return rs
+    def real_radial_points(self):        
+        return self.grid['real']
     @property
     def reziprocal_radial_points(self):
-        q_max = polar_spherical_dft_reciprocity_relation_radial_cutoffs(self.r_max,self.n_points,reciprocity_coefficient = self.reciprocity_coefficient)
-        if 'trapz' in self.mode:
-            qs = np.arange(self.n_points)*q_max/(self.n_points-1)
-        elif 'midpoint' in self.mode:
-            qs = (np.arange(self.n_points)+0.5)*q_max/self.n_points
-        elif 'chebyshev' in self.mode:
-            qs = HankelTransformWeights.chebyshev_nodes(self.n_points,start=0)*q_max
-        return qs
+        return self.grid['reciprocal']
 
 def polar_spherical_dft_reciprocity_relation_radial_cutoffs(cutoff:float,n_points:int,reciprocity_coefficient=np.pi):
     '''
@@ -616,12 +653,13 @@ class SphericalFourierTransform:
     def _init_end(self):
         self.dimensions=self.ht.dimensions
         self.forward_cmplx,self.inverse_cmplx = self._generate_transforms()
-    def from_weight_dict(self,weights_dict,r_max=1,use_gpu=True):
+    def from_weight_dict(self,weights_dict,r_max=1,use_gpu=True,other={}):
         w = weights_dict
         weights = w['weights']
-        n_points = weights.shape[1]
-        bandwidth = self.weights.shape[-1]
-        self.__init__(n_readial_points=n_points,angular_bandwidth=bandwidth,r_max=r_max,mode = w['mode'],dimensions=w['dimensions'],weights=weights,reciprocity_coefficient=w['reciprocity_coefficient'],use_gpu=use_gpu,other={})
+        n_points = w['n_points']
+        bandwidth = w['bandwidth']
+        reciprocity_coefficient = w['reciprocity_coefficient']
+        self.__init__(n_radial_points=n_points,angular_bandwidth=bandwidth,r_max=r_max,mode = w['mode'],dimensions=w['dimensions'],weights=weights,reciprocity_coefficient=reciprocity_coefficient,use_gpu=use_gpu,other=other)
         return self
 
     def from_transforms(self,hankel_transform,harmonic_transform):
@@ -667,8 +705,6 @@ class SphericalFourierTransform:
             thetas = self.harm.thetas
             grid = np.stack(np.meshgrid(rs,thetas,phis,indexing='ij'),3)
         return grid
-        
-
 
 class ZernikeTransform:
     '''class implementing Zernike Series expansion.'''
@@ -676,7 +712,6 @@ class ZernikeTransform:
         from xframe.library.mathLibrary import eval_ND_zernike_polynomials
         step = max_r/n_points
         self.s = np.arange(order,bandwidth,2)
-
         if grid=='chebyshev':
             R = max_r
             N = n_points
@@ -767,4 +802,91 @@ class ZernikeTransform:
         return fs
     def inverse(self,fs):
         return np.sum(self.izernike_values*self.C[:,None]*fs[:,None],axis=0)
+
+#######################
+## Experimental Area ##
+## 
+class GegenbauerTransform:
+    def __init__(self,bandwidth,n_points,alpha,domain=(-1,1),mode = 'uniform'):
+        self.bandwidth=bandwidth
+        assert alpha>0, 'Gegenbauer Polynomials only exist for alpha > 0'
+        start,stop = domain        
+        self.ns = np.arange(bandwidth)
+        self.alpha=alpha
+        self.C_n_alpha_1 = np.exp(loggamma(2*alpha+self.ns)-(loggamma(2*alpha)+loggamma(self.ns+1)))
+        self.transform_weights = 0
+        if mode == 'uniform':
+            self.gegenbauer_points = (np.arange(n_points)+0.5)*2/n_points-1
+            self.integration_normalization=2/n_points
+        elif mode == 'chebyshev':
+            self.gegenbauer_points = np.cos((np.arange(n_points)+0.5)*np.pi/n_points)
+            self.integration_normalization = np.pi/n_points
+        self.normalization=np.pi*2**(1-2*self.alpha)*np.exp(loggamma(self.ns+2*self.alpha)-(2*loggamma(self.alpha)+loggamma(self.ns+1)))/(self.ns+self.alpha)
+        self.func_points = start + (stop-start)*(1+self.gegenbauer_points)/2
+        self.weights = (1-self.gegenbauer_points**2)**(self.alpha)
+        self.gegenbauer_array = eval_gegenbauer(self.ns[:,None],self.alpha,self.gegenbauer_points[None,:])/np.sqrt(self.normalization[:,None])
+
+    def forward(self,f):
+        return (self.gegenbauer_array@(f*self.weights))*self.integration_normalization
+    def inverse(self,F):
+        return F@self.gegenbauer_array
+
+class FreudGibbsTransform:
+    '''
+    doi: https://doi.org/10.1016/j.acha.2004.12.007
+    '''
+    def __init__(self,bandwidth,n_points,domain=(-1,1),epsilon=1e-23):
+        self.bandwidth = bandwidth
+        self.n_points = n_points
+        self.N = n_points/2
+        self.epsilon = epsilon
+        self.poly_points = (np.arange(n_points)+0.5)*2/n_points-1
+        start,stop=domain
+        self.func_points = start + (stop-start)*(1+self.poly_points)/2
+        self.weights = self._freud_gibbs_weights(self.N,epsilon,self.func_points,domain=domain)
+        self.poly_values = self.generate_polynomial_values()
+    @staticmethod
+    def _recurrence_relation_even(pn,pn1,beta,points):
+        return points*pn - beta*pn1
+    @staticmethod
+    def _integrate(f,g,weights):
+        return np.sum(f*g*weights)
+    @staticmethod
+    def _freud_weights(c,n,points):
+        return np.exp(-c*points**(2*n))
+    def _freud_gibbs_weights(self,N,epsilon,points,domain=(-1,1)):
+        n = int(np.sqrt(N*(domain[1]-domain[0])/2)-2*np.sqrt(2)+0.5)
+        c = -np.log(epsilon)
+        return self._freud_weights(c,n,points)        
+    def _calc_beta(self,pn,pn1,weights):
+        return self._integrate(pn,pn,weights)/self._integrate(pn1,pn1,weights)
+    def generate_polynomial_values(self):
+        M=self.bandwidth
+        integrate=self._integrate
+        calc_beta =self._calc_beta
+        recurrence=self._recurrence_relation_even
+        weights = self.weights
+        points = self.poly_points
+        polys = np.zeros((M+1,self.n_points),float)
+        betas = np.zeros((M+1,self.n_points),float)
+        normalizations = np.zeros(M+1,float)
+        polys[0]=np.full(self.n_points,1)
+        normalizations[0]=integrate(polys[0],polys[0],weights)
+        #polys[0]/=np.sqrt(normalizations[0])
+        polys[1]=self._recurrence_relation_even(polys[0],np.full(self.n_points,1),0,points)
+        normalizations[1]= integrate(polys[1],polys[1],weights)
+        #polys[1]/=np.sqrt(normalizations[1])
+        for k in range(1,M):
+            beta = calc_beta(polys[k],polys[k-1],weights)
+            polys[k+1] = recurrence(polys[k],polys[k-1],beta,points)
+            normalizations[k+1] = integrate(polys[k+1],polys[k+1],weights)
+            #polys[k+1]/= np.sqrt(normalizations[k+1])
+        polys/=np.sqrt(normalizations)[:,None]
+        return polys
+    
+    def forward(self,f):
+        return np.sum(self.poly_values*f[None,:]*self.weights[None,:],axis = -1)
+    def inverse(self,F):
+        return np.sum(self.poly_values*F[:,None],axis=0)
+        
         

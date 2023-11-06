@@ -3,6 +3,7 @@ import traceback
 import logging
 log = logging.getLogger("root")
 from xframe.library.interfaces import SoftInterface
+from scipy.special import sph_harm as spherical_harmonic
 import pysofft
 from pysofft.make_wiegner import CosEvalPts,CosEvalPts2,SinEvalPts,SinEvalPts2,genWigTrans_L2
 from pysofft.make_wiegner import genWigAll,genWigAllTrans,get_euler_angles,wig_little_d_lookup
@@ -16,17 +17,47 @@ from pysofft import soft as _soft
 
 
 class WigSmallCoefView:
-    def __init__(self,array,d_to_coeff_info,bw):        
+    def __init__(self,array,d_to_coeff_info,bw):
+        self.bw = bw
         self.array = array
         self.lookup = d_to_coeff_info[1]
+        self.normalization_factors = wigner_normalization_factors(bw)
         self.n_beta = 2*bw
+    def _get_dlnk_part(self,l,n,k):
+        init_id,step,sign = self.lookup[l][n,k]
+        stop_id = init_id+step*self.n_beta
+        dlnk_part = self.array[init_id:stop_id:step]*sign/self.normalization_factors[l]
+        return dlnk_part
     def __getitem__(self,items):
-        init_id,step,sign = self.lookup[items]
-        stop_id = init_id+step*self.n_beta        
-        return self.array[init_id:stop_id:step]*sign/wigner_normalization_factor(items[0])
+        '''Supports either 3 integers as input (l,n,k) or a single int (l) slice or np.ndarray of l's'''
+        if not isinstance(items,(list,tuple)):
+            items = (items,)
+        n_items = len(items)
+        if n_items == 1:
+            l_spec = items[0]
+            if isinstance(l_spec,int):
+                l=l_spec
+                l_info = self.lookup[l]
+                dlnk = np.zeros((2*l+1,2*l+1,self.n_beta),float)
+                for n in range(-l,l+1):
+                    for k in range(-l,l+1):
+                        dlnk[n,k,:]=self._get_dlnk_part(l,n,k)
+            elif isinstance(l_spec,(slice,np.ndarray)):
+                ls = np.arange(self.bw)[l_spec]
+                dlnk = tuple(np.zeros((2*l+1,2*l+1,self.n_beta),float) for l in ls)
+                for l in ls:
+                    for n in range(-l,l+1):
+                        for k in range(-l,l+1):
+                            dl = dlnk[l]
+                            dl[n,k,:]=self._get_dlnk_part(l,n,k)
+        elif n_items == 3:
+            l,n,k = items
+            dlnk = self._get_dlnk_part(l,n,k)
+        return dlnk
         
 class WigSmallAngleView:
-    def __init__(self,small_d,d_to_coeff_info,bw):        
+    def __init__(self,small_d,d_to_coeff_info,bw):
+        self.bw = bw
         self.array = small_d
         self.normalization_factors = wigner_normalization_factors(bw)
         self.d_to_coeff_ids = d_to_coeff_info[0]        
@@ -158,7 +189,7 @@ class Soft(SoftInterface):
     @property
     def wigners_small(self):
         if not isinstance(self._wigners_small,WignerSmallD):
-            small_d_to_coeff_info = self._soft.d_to_coeff_info(self.bw)
+            small_d_to_coeff_info = self._soft.d_to_coeff_info_v2(self.bw)
             self._wigners_small =  WignerSmallD(self._wigners,small_d_to_coeff_info,self.bw)
         return self._wigners_small
     
@@ -183,21 +214,28 @@ class Soft(SoftInterface):
         log.info('coeff.shape before rotation = {}'.format(coeff.shape))
         rotated_coeff = rotate_coeff(self.bw, coeff,split_ids, euler_angles)
         return rotated_coeff
-    def forward_coeff(self,coeff):
+    def forward_R3_func(self,coeff,thetas,phis):
         ''' SOFT applied on spherical harmonic coefficient.
-        Assumes that coeff = f_{l,m} is represented whose last axis is of size bw**2 with fl beeing at position l*(l+1)+m.'''
-        soft_coeff = self.get_empty_coeff
-         #    coeff_pos = 0
+        Assumes that coeff = f_{l,m} is represented whose last axis is of size bw**2 with fl beeing at position l*(l+1)+m. And thetas, phis are the angular grid points on which to evaluate the transform
+        '''
+        thetas = np.atleast_1d(thetas)
+        phis = np.atleast_1d(phis)
+        angle_grid=np.stack(np.meshgrid(thetas,phis,indexing='ij'),2)
+        if func.ndim == 1:
+            soft_coeff = np.zeros((len(thetas),len(phis),self.n_coeffs))
+        elif func.ndim == 2:
+            soft_coeff = np.zeros((func.shape[0],len(thetas),len(phis),self.n_coeffs))
+        
         for l in range(bw):
             wigNorm = np.sqrt(8.*np.pi/(2.*l+1.))
-            f_l = coeff[l**2,(l+1)**2]
+            f_l = coeff[...,l**2,(l+1)**2]
             m0_pos=l # position of the m = 0 component in arrays with components -l,...,l
             for m1 in range(-l,l+1):
-                f_lm1 = f_l[m0_pos + m1] #should give f_{l-m1}           
+                f_lm1 = f_l[...,m0_pos + m1] #should give f_{l-m1}           
                 for m2 in range(-l,l+1):
                     # and save it in the so3 coefficient array */                
                     index = so3CoefLoc(m1,m2,l,bw)
-                    coeff[index] = wigNorm * f_lm1
+                    coeff[...,index] = (wigNorm * f_lm1)[...,None,None,:]*spherical_harmonic(l,m2,angle_grid[...,0],angle_grid[...,1])[None,...,None]
         return coeff
             
     

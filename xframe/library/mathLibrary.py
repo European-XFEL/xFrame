@@ -14,7 +14,9 @@ from scipy.special import erf as error_function
 from scipy.special import erfi as error_function_imag
 from scipy.special import roots_legendre
 from scipy.special import comb as binomial
+from scipy.special import sph_harm
 from scipy.linalg import polar as polar_decomp
+
 from scipy.linalg import eigh
 import sys
 import abc
@@ -445,6 +447,9 @@ def eval_legendre(degrees,arguments):
 def legendrePlFunction(degree):
     polynomial=specialFunctions.legendre(degree)
     return polynomial
+
+def spherical_harmonic(l,m,theta,phi,**kwargs):
+    return sph_harm(l,m,theta,phi,**kwargs)
 
 @output_lowValuesToZero_decorator
 def fft_realToComplex_mixedRadix_forward(realDataArray):
