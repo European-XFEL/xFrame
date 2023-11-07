@@ -8,7 +8,7 @@ from xframe.library.gridLibrary import NestedArray
 from xframe.library.mathLibrary import spherical_to_cartesian
 from xframe.library.mathLibrary import cartesian_to_spherical
 from xframe.library.mathLibrary import _pi_in_q__to__reciprocity_coefficient
-from xframe.library.pythonLibrary import get_L2_cache_split_parameters
+from xframe.library.pythonLibrary import get_L2_cache_split_parameters,xprint
 from xframe.library import mathLibrary as mLib
 from xframe.interfaces import DatabaseInterface,PresenterInterface
 from xframe.presenters.matplotlibPresenter import heatPolar2D
@@ -176,6 +176,8 @@ def _generate_square_cache_aware(out_array,L2_cache):
     def square_1_loop(data):
         for i in range(0,data_shape[0],step):
             i2 = i+step
+            #print(f'data.shape = {data.shape}')
+            #print(f'i,i2 = {(i,i2)}')
             d = data[i:i2]
             o = out_array[i:i2]
             mult(d,d.conj(),out = o)

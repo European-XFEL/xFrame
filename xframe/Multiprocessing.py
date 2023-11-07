@@ -28,6 +28,8 @@ import traceback
 import numpy as np
 from xframe import settings
 
+xprint(f"main process pid = {multiprocessing.current_process().pid}")
+
 sa = SharedArrayDependency #will be dependency injected with SharedArray module
 MPI = False #will be dependency injected with SharedArray module
 mpi_comm = None #will be set by create_mpi_comm #None if not jet checked False if mpi not available otherwise MPI.COMM_WORLD

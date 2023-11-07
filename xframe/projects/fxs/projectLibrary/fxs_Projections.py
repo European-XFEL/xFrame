@@ -473,8 +473,9 @@ class ReciprocalProjection:
         if self.dimensions==2:
             self.integrated_intensity = midpoint_rule(self.average_intensity.data * self.data_radial_points , self.data_radial_points,axis = 0)*2*np.sqrt(np.pi)
         else:
+            #xprint(f'aint shape = {self.average_intensity.data.shape} data points shape = {self.data_radial_points.shape}')
             self.integrated_intensity = midpoint_rule(self.average_intensity.data * self.data_radial_points**2 , self.data_radial_points,axis = 0)*2*np.sqrt(np.pi)
-        opt = settings.project.projections.reciprocal        
+        opt = settings.project.projections.reciprocal
         self.opt = opt
         self.grid=grid        
         self.radial_points=grid.__getitem__((slice(None),)+(0,)*self.dimensions) # expression is just grid[:,0,0,0] in 3D case ans grid[:,0,0] in 2D
@@ -764,8 +765,8 @@ class ReciprocalProjection:
             unknowns = tuple(np.zeros((len(PD),2*o+1),dtype = complex) for PD,o in zip(PDs,used_orders))
             def approximate_unknowns(intensity_harmonic_coefficients):
                 #log.info('len harmonic coeff = {}'.format(len(intensity_harmonic_coefficients)))
-                for unknown,PD,oid in zip(unknowns,PDs,order_ids):
-                    I = intensity_harmonic_coefficients[oid]
+                for unknown,PD,oid,l in zip(unknowns,PDs,order_ids,used_orders):
+                    I = intensity_harmonic_coefficients.lm[l]
                     #xprint(f'PD contains Nans : {np.isnan(PD).any()}')
                     matmul(*svd(PD @ I,full_matrices=False)[::2],out = unknown)  # PD @ Intensity is  B^\dagger A in a Procrustres Problem min|A-BR|
                 #log.info('unknowns shape ={}'.format(unknowns[-1].shape))
@@ -781,7 +782,8 @@ class ReciprocalProjection:
                     ms_per_order.append(np.concatenate((np.arange(order+1),np.arange(-order,0))))
                 
                 def function(intensity_harmonic_coefficients):
-                    for ms,unknown,PD,I in zip(ms_per_order,unknowns,PDs,intensity_harmonic_coefficients):
+                    for ms,unknown,PD,l in zip(unknowns,PDs,used_orders):
+                        I = intensity_harmonic_coefficients.lm[l]
                         u,s,vh = svd(PD @ I,full_matrices=False)
                         matmul(u,vh,out = unknown)  # PD @ Intensity is  B^\dagger A in a Procrustres Problem min|A-BR|
                     
@@ -838,18 +840,20 @@ class ReciprocalProjection:
             copy=np.array #array is faster than copy
             if not isinstance(zero_id,bool):
                 def mtip_projection(intensity_harmonic_coefficients,unknowns):
-                    projected_intensity_coefficients=[copy(coeff) for coeff in intensity_harmonic_coefficients]
-                    for o_id in self.used_orders.values():
+                    #projected_intensity_coefficients=[copy(coeff) for coeff in intensity_harmonic_coefficients]
+                    projected_intensity_coefficients=intensity_harmonic_coefficients.copy()
+                    for l,o_id in self.used_orders.items():
                         tmp_coeff = projection_matrices[o_id] @ unknowns[o_id]
-                        projected_intensity_coefficients[o_id][radial_mask[o_id],...] = tmp_coeff[radial_mask[o_id],...]
-                    projected_intensity_coefficients[zero_id][radial_mask[zero_id],...] = projection_matrices[zero_id][radial_mask[zero_id],...]
+                        projected_intensity_coefficients.lm[l][radial_mask[o_id]] = tmp_coeff[radial_mask[o_id]]
+                    projected_intensity_coefficients.lm[0][radial_mask[zero_id]] = projection_matrices[zero_id][radial_mask[zero_id]]
                     return projected_intensity_coefficients
             else:
                 def mtip_projection(intensity_harmonic_coefficients,unknowns):
                     projected_intensity_coefficients=[copy(coeff) for coeff in intensity_harmonic_coefficients]
                     for o_id in self.used_orders.values():
                         tmp_coeff = projection_matrices[o_id] @ unknowns[o_id]
-                        projected_intensity_coefficients[o_id][radial_mask[o_id],...] = tmp_coeff[radial_mask[o_id],...]
+                        #projected_intensity_coefficients[o_id][radial_mask[o_id],...] = tmp_coeff[radial_mask[o_id],...]
+                        projected_intensity_coefficients.lm[l][radial_mask[o_id]] = tmp_coeff[radial_mask[o_id]]
                     return projected_intensity_coefficients
         return mtip_projection
     
@@ -872,7 +876,7 @@ class ReciprocalProjection:
                 projected_intensity_coefficients = coeff_projection(intensity_harmonic_coefficients,unknowns)
                 #projected_intensity_coefficients[zero_id][radial_mask[zero_id]]/=np.sqrt(number_of_particles[0])
                 #log.info(f'number of particles scaling factor = {1/np.sqrt(number_of_particles[0])}')
-                projected_intensity_coefficients[zero_id][:]/=np.sqrt(number_of_particles[0])
+                projected_intensity_coefficients.lm[0][:]/=np.sqrt(number_of_particles[0])
                 return projected_intensity_coefficients
         return fixed_projection
 

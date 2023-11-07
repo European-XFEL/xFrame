@@ -84,8 +84,8 @@ def get_integrator(dim,grid):
     return i
 
 def generate_fxs_error_routine(grid_pair,opt):
-    reciprocal_grid = grid_pair.reciprocalGrid
-    dim=reciprocal_grid.n_shape[0]
+    reciprocal_grid = grid_pair['reciprocal']
+    dim=reciprocal_grid.shape[-1]
     integrate = get_integrator(dim,reciprocal_grid).integrate_normed
     def error_routine(intensity,projected_intensity):
         diff_norm = integrate(np.square(np.abs(intensity-projected_intensity)))
@@ -96,14 +96,14 @@ def generate_fxs_error_routine(grid_pair,opt):
 
 def generate_l2_rel_diff_error_routine(grid_pair,_type='real',mask = True):
     if _type == 'reciprocal':
-        grid = grid_pair.reciprocalGrid
+        grid = grid_pair['reciprocal']
         pair_id = 0
         power = 1
     else:            
-        grid = grid_pair.realGrid
+        grid = grid_pair['real']
         pair_id = 1
         power = 2
-    dim=grid.n_shape[0]
+    dim=grid.shape[-1]
     integrate = get_integrator(dim,grid).integrate
 
     nabs = np.abs
@@ -130,14 +130,14 @@ def generate_l2_rel_diff_error_routine(grid_pair,_type='real',mask = True):
 
 def generate_l2_rel_diff_error_routine_cache_aware(grid_pair,L2_cache,_type='real',mask = True):
     if _type == 'reciprocal':
-        grid = grid_pair.reciprocalGrid
+        grid = grid_pair['reciprocal']
         pair_id = 0
         power = 1
     else:            
-        grid = grid_pair.realGrid
+        grid = grid_pair['real']
         pair_id = 1
         power = 2
-    dim=grid.n_shape[0]
+    dim=grid.shape[-1]
     integrate = get_integrator(dim,grid).integrate
 
     nabs = np.abs
@@ -208,14 +208,14 @@ def generate_l2_rel_diff_error_routine_cache_aware(grid_pair,L2_cache,_type='rea
 
 def generate_l2_rel_diff_error_routine_gpu(grid_pair,_type='real'):
     if _type == 'reciprocal':
-        grid = grid_pair.reciprocalGrid
+        grid = grid_pair['reciprocal']
         pair_id = 0
         power = 1
     else:            
-        grid = grid_pair.realGrid
+        grid = grid_pair['real']
         pair_id = 1
         power = 2
-    dim=grid.n_shape[0]
+    dim=grid.shape[-1]
     integrate = get_integrator(dim,grid).integrate
 
     nabs = np.abs
@@ -319,7 +319,7 @@ def generate_deg2_invariant_l2_diff(grid_pair,**opt):
     invariant_mask = opt['invariant_mask']
     #log.info('all qs valid = {}'.format(invariant_mask.all()))
     reference_invariant=reference_invariant[np.array(list(used_orders.keys())).astype(int)]
-    grid = grid_pair.reciprocalGrid[:]
+    grid = grid_pair['reciprocal'][:]
     dimensions = grid.shape[-1]
     radial_points = grid.__getitem__((slice(None),)+(0,)*dimensions) # expression is just grid[:,0,0,0] in 3D case ans grid[:,0,0] in 2D
     if dimensions == 2:
@@ -339,7 +339,7 @@ def generate_deg2_ranked_invariant_l2_diff(grid_pair,**opt):
     invariant_mask = opt['invariant_mask']
     #log.info('all qs valid = {}'.format(invariant_mask.all()))
     reference_invariant=reference_invariant[np.array(list(used_orders.keys())).astype(int)]
-    grid = grid_pair.reciprocalGrid[:]
+    grid = grid_pair['reciprocal'][:]
     dimensions = grid.shape[-1]
     radial_points = grid.__getitem__((slice(None),)+(0,)*dimensions) # expression is just grid[:,0,0,0] in 3D case ans grid[:,0,0] in 2D
     error_order = opt.get('order',False)
@@ -479,7 +479,7 @@ def generate_fqc_error(grid_pair,**opt):
     xray_wavelength = opt['xray_wavelength']
     log.info('all qs valid = {}'.format(invariant_mask.all()))
     reference_invariant=reference_invariant[np.array(list(used_orders.keys())).astype(int)]
-    grid = grid_pair.reciprocalGrid[:]
+    grid = grid_pair['reciprocal'][:]
     dimensions = grid.shape[-1]
     radial_points = grid.__getitem__((slice(None),)+(0,)*dimensions) # expression is just grid[:,0,0,0] in 3D case ans grid[:,0,0] in 2D
     if dimensions == 2:
@@ -559,7 +559,7 @@ def generate_II_error(grid_pair,**opt):
     xray_wavelength = opt['xray_wavelength']
     log.info('all qs valid = {}'.format(invariant_mask.all()))
     reference_invariant=reference_invariant[np.array(list(used_orders.keys())).astype(int)]
-    grid = grid_pair.reciprocalGrid[:]
+    grid = grid_pair['reciprocal'][:]
     dimensions = grid.shape[-1]
     radial_points = grid.__getitem__((slice(None),)+(0,)*dimensions) # expression is just grid[:,0,0,0] in 3D case ans grid[:,0,0] in 2D
     if dimensions == 2:
@@ -639,7 +639,7 @@ def generate_ccd_diff(grid_pair,**opt):
     invariant_mask = opt['invariant_mask']
     xray_wavelength = opt['xray_wavelength']
     reference_invariant=reference_invariant[np.array(list(used_orders.keys())).astype(int)]
-    grid = grid_pair.reciprocalGrid[:]
+    grid = grid_pair['reciprocal'][:]
     dimensions = grid.shape[-1]
     radial_points = grid.__getitem__((slice(None),)+(0,)*dimensions) # expression is just grid[:,0,0,0] in 3D case ans grid[:,0,0] in 2D
     if dimensions == 2:

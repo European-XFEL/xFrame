@@ -249,12 +249,12 @@ class Soft(SoftInterface):
     #   f_coeff: f_{l,m} spherical harmonic coefficients of f 
     #   g_coeff: g_{l,m} spherical harmonic coefficients of g 
     #            f_coeff, g_coeff are complex numpy arrays of shape bw*(bw+1)+bw+1
-    #   split _ids: ids that split coefficients in 2*bw+1 sub arrays indexed by m
+    #   split_ids: ids that split coefficients in bw sub arrays indexed by l
     #
-    def calc_mean_C(self,f_coeff,g_coeff,r_split_ids,ml_split_ids):
+    def calc_mean_C(self,f_coeff,g_coeff,r_split_ids,lm_split_ids):
         r_split_lower=r_split_ids[0]
         r_split_upper=r_split_ids[1]
-        mean_C = calc_mean_C_array(self.bw,f_coeff,g_coeff,r_split_lower,r_split_upper,ml_split_ids,self._wigners_transposed,True)
+        mean_C = calc_mean_C_array(self.bw,f_coeff,g_coeff,r_split_lower,r_split_upper,lm_split_ids,self._wigners_transposed,True)
         return mean_C
     def calc_mean_C_weighted(self,f_coeff,g_coeff,r_split_ids,ml_split_ids):
         '''

@@ -10,7 +10,7 @@ log=logging.getLogger('root')
 
 def shape_change_decorator(item_shape,out_shape=tuple()):
     def decorator(func):
-        def wrapper(ndarray,*args,**kwargs):
+        def wrapper(ndarray):
             input_shape = ndarray.shape
             ndarray = ndarray.reshape(-1,*item_shape)
 
@@ -90,12 +90,14 @@ class ShCoeffView:
         self.__getitem__(items)[:] = value
         
 class ShSmall:
-    def __init__(self,band_width,anti_aliazing_degree = 2,n_phi = 0,n_theta=0):
-        sh = shtns.sht(band_width-1)#,norm = shtns.sht_schmidt)        
+    def __init__(self,bandwidth,anti_aliazing_degree = 2,n_phi = 0,n_theta=0):
+        print(f'bandwidth = {bandwidth}')
+        sh = shtns.sht(int(bandwidth-1))#,norm = shtns.sht_schmidt)        
         self._sh = sh
-        self.band_width = band_width
+        self.bandwidth = bandwidth
+        self.max_order = bandwidth-1
         self.anti_aliazing_degree = anti_aliazing_degree        
-        self.n_coeff = (band_width)**2
+        self.n_coeff = (bandwidth)**2
 
         thetas,phis=self._generate_grid(n_phi=n_phi,n_theta=n_theta)
         #log.info(" sh created  grids n_phi= {},n_theta={}".format(len(phis),len(thetas)))
@@ -104,8 +106,8 @@ class ShSmall:
         self.n_thetas = len(thetas)
         self.n_phis = len(phis)
         self.angular_shape=(self.n_thetas,self.n_phis)
-        self.ls=np.arange(band_width,dtype=int)
-        self.ms=np.arange(-band_width+1,band_width,dtype=int)
+        self.ls=np.arange(bandwidth,dtype=int)
+        self.ms=np.arange(-bandwidth+1,bandwidth,dtype=int)
 
         self.forward_cmplx = self._generate_forward_cmplx()
         self.inverse_cmplx =  self._generate_inverse_cmplx()
@@ -128,7 +130,7 @@ class ShSmall:
         return thetas,phis
     
     def n_angular_step_from_max_order(self):
-        max_order = self.band_width-1
+        max_order = self.bandwidth-1
         size_dict={}
         N = self.anti_aliazing_degree
         n_phi = 2**(int(np.log2((N+1)*max_order)) + 1)
@@ -156,10 +158,10 @@ class ShSmall:
         return inverse_cmplx
     def get_empty_coeff(self,pre_shape=None):
         if not isinstance(pre_shape,tuple):
-            data = np.zeros(self.angular_shape,dtype=complex)
+            data = np.zeros(self.n_coeff,dtype=complex)
             return ShCoeff(data,self.ls,self.ms)
         else:
-            data = np.zeros(pre_shape+self.angular_shape,dtype=complex)
+            data = np.zeros(pre_shape+(self.n_coeff,),dtype=complex)
             return ShCoeff(data,self.ls,self.ms)
     @property
     def grid(self):

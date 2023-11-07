@@ -15,6 +15,7 @@ log = logging.getLogger('root')
 class PolarHarmonicTransform:
     def __init__(self,max_order=32):
         self.max_order = max_order
+        self.bandwidth = bandwidth
         self.n_points = 2*max_order        
         self.forward_cmplx = self._generate_forward_cmplx()
         self.inverse_cmplx = self._generate_inverse_cmplx()
@@ -47,9 +48,22 @@ class PolarHarmonicTransform:
         def inverse_real(data):
             return ifft(data*n_points,n_points,axis=-1)
         return inverse_real
+    def get_empty_coeff(self,pre_shape=None,real=False):
+        if real:
+            angular_shape=(self.bandwidth,)
+        else:
+            angular_shape=(self.n_points,)
+        if not isinstance(pre_shape,tuple):
+            data = np.zeros(angular_shape,dtype=complex)
+            return data
+        else:
+            data = np.zeros(pre_shape+angular_shape,dtype=complex)
+            return data
+        return np.zeros(self.n_points,complex)
 
 
-def get_harmonic_transform(bandwidth:int,dimensions=3,options={}):
+def get_harmonic_transform(bandwidth,dimensions=3,options={}):
+    xprint(f"bw = {bandwidth}, dimensions = {dimensions}, options = {options}")
     if dimensions==2:
         return PolarHarmonicTransform(max_order=bandwidth)
     elif dimensions==3:
@@ -60,6 +74,10 @@ def get_harmonic_transform(bandwidth:int,dimensions=3,options={}):
         
 
 class HankelTransformWeights:
+    @staticmethod
+    def _reciprocity_relation(Nq,reciprocity_coefficient,Q_or_R):
+        R_or_Q =  reciprocity_coefficient*Nq/Q_or_R
+        return R_or_Q
     @staticmethod
     def _read_n_points(n_points):
         if isinstance(n_points,(list,tuple)):
@@ -84,6 +102,7 @@ class HankelTransformWeights:
     ### Direct Midpoint ###
     @classmethod
     def midpoint(cls,n_points,angular_bandwidth,dimensions,reciprocity_coefficient,n_processes_for_weight_generation,**kwargs):
+        xprint(f'calculating weights for bandwidth = {angular_bandwidth}')
         if dimensions==3:
             orders = np.arange(angular_bandwidth)
         elif dimensions ==2:
@@ -91,10 +110,9 @@ class HankelTransformWeights:
         worker_by_dimensions= {2:cls.midpoint_polar_worker,3:cls.midpoint_spherical_worker}
         worker = worker_by_dimensions[dimensions]
         weights = Multiprocessing.comm_module.request_mp_evaluation(worker,input_arrays=[orders],const_inputs=[n_points,reciprocity_coefficient],call_with_multiple_arguments=True,n_processes=n_processes_for_weight_generation)
-
-        #if dimensions == 3:
-        weights = weights[0]        
-        return weights
+        forward_weights = np.concatenate([part[0] for part in weights],axis =0 )
+        inverse_weights = np.concatenate([part[1] for part in weights],axis = 0)
+        return (forward_weights,inverse_weights)
     @classmethod
     def midpoint_polar_worker(cls,orders,n_points,reciprocity_coefficient,**kwargs):
         '''
@@ -174,7 +192,9 @@ class HankelTransformWeights:
         worker_by_dimensions= {2:cls.chebyshev_polar_worker,3:cls.chebyshev_spherical_worker}
         worker = worker_by_dimensions[dimensions]
         weights = Multiprocessing.comm_module.request_mp_evaluation(worker,input_arrays=[orders],const_inputs=[n_points,reciprocity_coefficient],call_with_multiple_arguments=True,n_processes=n_processes_for_weight_generation)
-        return weights
+        forward_weights = np.concatenate([part[0] for part in weights],axis =0 )
+        inverse_weights = np.concatenate([part[1] for part in weights],axis = 0)
+        return (forward_weights,inverse_weights)
     @classmethod
     def chebyshev_polar_worker(cls,orders,n_points,reciprocity_coefficient,**kwargs):
         '''
@@ -254,9 +274,23 @@ class HankelTransformWeights:
     def sincos_trapz(cls,n_points,angular_bandwidth,dimensions,reciprocity_coefficient,n_processes_for_weight_generation,**kwargs):
         pass
 
+
+    @classmethod
+    def get_weights_dict(cls,dimensions,mode,angular_bandwidth,n_points,reciprocity_coefficient,n_processes_for_weight_generation,other={}):
+        weight_generator = getattr(cls,mode)
+        weights = weight_generator(n_points,angular_bandwidth,dimensions,reciprocity_coefficient,n_processes_for_weight_generation,**other)
+        weights_dict = {}
+        weights_dict["weights"]=weights
+        weights_dict["mode"]=mode
+        weights_dict["dimensions"]=dimensions
+        weights_dict["n_points"]=n_points
+        weights_dict["bandwidth"]=angular_bandwidth
+        weights_dict["reciprocity_coefficient"]=reciprocity_coefficient
+        return weights_dict
     
 class HankelTransform:
     ht_modes = ['trapz','zernike_trapz','sincos_trapz','midpoint','zernike_midpoint','sincos_midpoint']
+    
     def __init__(self,n_points=64,angular_bandwidth=32,r_max=1,mode='midpoint',dimensions = 3, weights = None, reciprocity_coefficient = np.pi, use_gpu = True, n_processes_for_weight_generation = None,other={}):
         self.mode = mode
         self.dimensions = dimensions
@@ -265,7 +299,8 @@ class HankelTransform:
         self.use_gpu=use_gpu
         self.reciprocity_coefficient = reciprocity_coefficient
         self.r_max = r_max
-        if use_gpu:
+        xprint(f'current process id = {Multiprocessing.get_process_name()}')
+        if use_gpu and Multiprocessing.get_process_name()==0:
             settings.general.n_control_workers = 1
             Multiprocessing.comm_module.restart_control_worker()
         if not isinstance(weights,(np.ndarray,list,tuple)):            
@@ -279,7 +314,7 @@ class HankelTransform:
     def from_weight_dict(self,weights_dict,r_max=1,use_gpu=True):
         w = weights_dict
         weights = w['weights']
-        n_points = w['n_points']
+        n_points = w['radial_points']
         bandwidth = w['bandwidth']
         dimensions = w['dimensions']
         mode = w['mode']
@@ -378,30 +413,30 @@ class HankelTransform:
         if 'trapz' in self.mode:
             kernel_str = """
             __kernel void
-            apply_weights(__global double2* out, 
-            __global double2* w, 
-            __global double2* rho, 
-            long nq,long nlm, long nl)
+            apply_weights(__global double2* out,
+            __global double2* w,
+            __global double2* rho,
+            long nr,long nq,long nlm, long nl)
             {
       
-            long i = get_global_id(0); 
+            long i = get_global_id(0);
             long j = get_global_id(1);
             long l = (long) sqrt((double)j);
     
-     
-            // value stores the element that is 
+    
+            // value stores the element that is
             // computed by the thread
             double2 value = 0;
             // wlm is of shape (sum_q,nq,m) where sum_q = nq-1
-            for (int q = 0; q < nq-1; ++q)
+            for (int r = 0; r < nr-1; ++r)
             {
-            double2 wqql = w[q*nq*nl + i*nl + l];
-            double2 rqlm = rho[(q+1)*nlm + j];
+            double2 wqql = w[r*nq*nl + i*nl + l];
+            double2 rqlm = rho[(r+1)*nlm + j];
             value.x += wqql.x * rqlm.x - wqql.y * rqlm.y;
             value.y += wqql.x * rqlm.y + wqql.y * rqlm.x;
             }
         
-            // Write the matrix to device memory each 
+            // Write the matrix to device memory each
             // thread writes one element
             out[i * nlm + j] = value;//w[nq*nl+i*nl + l];
             }
@@ -409,30 +444,30 @@ class HankelTransform:
         else:
             kernel_str = """
             __kernel void
-            apply_weights(__global double2* out, 
-            __global double2* w, 
-            __global double2* rho, 
-            long nq,long nlm, long nl)
+            apply_weights(__global double2* out,
+            __global double2* w,
+            __global double2* rho,
+            long nr,long nq,long nlm, long nl)
             {
       
-            long i = get_global_id(0); 
+            long i = get_global_id(0);
             long j = get_global_id(1);
             long l = (long) sqrt((double)j);
     
-     
-            // value stores the element that is 
+    
+            // value stores the element that is
             // computed by the thread
             double2 value = 0;
             // wlm is of shape (sum_q,nq,m) where sum_q = nq-1
-            for (int q = 0; q < nq; ++q)
+            for (int r = 0; r < nr; ++r)
             {
-            double2 wqql = w[q*nq*nl + i*nl + l];
-            double2 rqlm = rho[q*nlm + j];
+            double2 wqql = w[r*nq*nl + i*nl + l];
+            double2 rqlm = rho[r*nlm + j];
             value.x += wqql.x * rqlm.x - wqql.y * rqlm.y;
             value.y += wqql.x * rqlm.y + wqql.y * rqlm.x;
             }
         
-            // Write the matrix to device memory each 
+            // Write the matrix to device memory each
             // thread writes one element
             out[i * nlm + j] = value;//w[nq*nl+i*nl + l];
             }
@@ -443,10 +478,10 @@ class HankelTransform:
                 'name': 'forward_hankel',
                 'functions': ({
                     'name': 'apply_weights',
-                    'dtypes' : (complex,complex,complex,np.int64,np.int64,np.int64),
-                    'shapes' : ((nq,nlm),forward_weights.shape,(nr,nlm),None,None,None),
-                    'arg_roles' : ('output','const_input','input','const_input','const_input','const_input'),
-                    'const_inputs' : (None,forward_weights,None,np.int64(nr),np.int64(nlm),np.int64(nl)),
+                    'dtypes' : (complex,complex,complex,np.int64,np.int64,np.int64,np.int64),
+                    'shapes' : ((nq,nlm),forward_weights.shape,(nr,nlm),None,None,None,None),
+                    'arg_roles' : ('output','const_input','input','const_input','const_input','const_input','const_input'),
+                    'const_inputs' : (None,forward_weights,None,np.int64(nr),np.int64(nq),np.int64(nlm),np.int64(nl)),
                     'global_range' : (nq,nlm),
                     'local_range' : None,                    
                 },)
@@ -457,11 +492,11 @@ class HankelTransform:
                 'name': 'inverse_hankel',
                 'functions': ({
                     'name': 'apply_weights',
-                    'dtypes' : (complex,complex,complex,np.int64,np.int64,np.int64),
-                    'shapes' : ((nr,nlm),inverse_weights.shape,(nq,nlm),None,None,None),
-                    'arg_roles' : ('output','const_input','input','const_input','const_input','const_input'),
-                    'const_inputs' : (None,inverse_weights,None,np.int64(nq),np.int64(nlm),np.int64(nl)),
-                    'global_range' : (nr,nlm), 
+                    'dtypes' : (complex,complex,complex,np.int64,np.int64,np.int64,np.int64),
+                    'shapes' : ((nr,nlm),inverse_weights.shape,(nq,nlm),None,None,None,None),
+                    'arg_roles' : ('output','const_input','input','const_input','const_input','const_input','const_input'),
+                    'const_inputs' : (None,inverse_weights,None,np.int64(nq),np.int64(nr),np.int64(nlm),np.int64(nl)),
+                    'global_range' : (nr,nlm),
                     'local_range' : None
                 },)
             }
@@ -475,7 +510,7 @@ class HankelTransform:
         inverse_hankel_transform = Multiprocessing.comm_module.add_gpu_process(inverse_gpu_process,local_outputs=inverse_coeff)
             
         return hankel_transform,inverse_hankel_transform
-
+    
     def _generate_polar_ht(self):
         '''
         Generates polar hankel transform using Zernike weights. $HT_m(f_m) = \sum_k f_m(k)*w_kpm$ for $m\geq 0$.
@@ -653,14 +688,15 @@ class SphericalFourierTransform:
     def _init_end(self):
         self.dimensions=self.ht.dimensions
         self.forward_cmplx,self.inverse_cmplx = self._generate_transforms()
-    def from_weight_dict(self,weights_dict,r_max=1,use_gpu=True,other={}):
+    @classmethod
+    def from_weight_dict(cls,weights_dict,r_max=1,use_gpu=True,other={}):
         w = weights_dict
         weights = w['weights']
         n_points = w['n_points']
         bandwidth = w['bandwidth']
         reciprocity_coefficient = w['reciprocity_coefficient']
-        self.__init__(n_radial_points=n_points,angular_bandwidth=bandwidth,r_max=r_max,mode = w['mode'],dimensions=w['dimensions'],weights=weights,reciprocity_coefficient=reciprocity_coefficient,use_gpu=use_gpu,other=other)
-        return self
+        instance = cls(n_radial_points=n_points,angular_bandwidth=bandwidth,r_max=r_max,mode = w['mode'],dimensions=w['dimensions'],weights=weights,reciprocity_coefficient=reciprocity_coefficient,use_gpu=use_gpu,other=other)
+        return instance
 
     def from_transforms(self,hankel_transform,harmonic_transform):
         self.ht = hankel_transform
@@ -687,7 +723,7 @@ class SphericalFourierTransform:
         return np.zeros(radial_shape+angular_shape,dtype=complex)
     @property
     def real_grid(self):
-        rs = self.ht.real_radial_points
+        rs = self.ht.grids["real"]
         phis = self.harm.phis
         if self.dimensions==2:
             grid = np.stack(np.meshgrid(rs,phis,indexing='ij'),2)
@@ -697,13 +733,13 @@ class SphericalFourierTransform:
         return grid
     @property
     def reciprocal_grid(self):
-        qs = self.ht.reziprocal_radial_points
+        qs = self.ht.grids["reciprocal"]
         phis = self.harm.phis
         if self.dimensions==2:
             grid = np.stack(np.meshgrid(qs,phis,indexing='ij'),2)
         elif self.dimensions == 3:
             thetas = self.harm.thetas
-            grid = np.stack(np.meshgrid(rs,thetas,phis,indexing='ij'),3)
+            grid = np.stack(np.meshgrid(qs,thetas,phis,indexing='ij'),3)
         return grid
 
 class ZernikeTransform:

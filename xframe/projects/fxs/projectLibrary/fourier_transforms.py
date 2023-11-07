@@ -10,27 +10,21 @@ from .hankel_transforms import generate_ht
 from .misk import _get_reciprocity_coefficient
 from .hankel_transforms import generate_weightDict
 from xframe.library.mathLibrary import SphericalIntegrator,PolarIntegrator
+from xframe.library.math_transforms import HankelTransformWeights
 
-#from xframe import database
+from xframe import database
 
 
-def load_fourier_transform_weights(dimensions,ft_opt,grid_opt,database):
-    db = database
-    ft_type = ft_opt['type']
-    max_order=grid_opt.max_order
-    n_radial_points=grid_opt.n_radial_points
-    n_orders=max_order+1
-    reciprocity_coefficient = _get_reciprocity_coefficient(ft_opt)
-    
-    name_postfix='N'+str(n_radial_points)+'mO'+str(max_order)+'nO'+str(n_orders)+'rc'+str(reciprocity_coefficient)
+def load_fourier_transform_weights(dimensions,ft_type,max_order,n_radial_points,reciprocity_coefficient,allow_weight_saving = False,n_processes = False,other = {}):
+    db = database.project
+    name_postfix='N'+str(n_radial_points)+'max_order'+str(max_order)+'rc'+str(reciprocity_coefficient)
     log.info(f'ft name postfix = {name_postfix}')
     try:
         weights_dict = db.load('ft_weights',path_modifiers={'postfix':name_postfix,'type':ft_type+'_'+str(dimensions)+'D'})
     except FileNotFoundError as e:
-        if ft_opt.allow_weight_calculation:
-            weights_dict = generate_weightDict(max_order, n_radial_points,reciprocity_coefficient=reciprocity_coefficient,dimensions=dimensions,mode=ft_type)
-            if ft_opt.allow_weight_saving:
-                db.save('ft_weights',weights_dict,path_modifiers={'postfix':name_postfix,'type':ft_type+'_'+str(dimensions)+'D'})
+        weights_dict = HankelTransformWeights.get_weights_dict(dimensions,ft_type,max_order+1,n_radial_points,reciprocity_coefficient,n_processes_for_weight_generation = n_processes,other=other)
+        if allow_weight_saving:
+            db.save('ft_weights',weights_dict,path_modifiers={'postfix':name_postfix,'type':ft_type+'_'+str(dimensions)+'D'})
                     
     return weights_dict
 

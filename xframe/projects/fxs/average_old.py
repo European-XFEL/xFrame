@@ -22,8 +22,6 @@ from xframe.library.pythonLibrary import selectElementOfFunctionOutput_decorator
 from xframe.library.pythonLibrary import xprint
 from xframe.interfaces import ProjectWorkerInterface
 
-from xframe.library.math_transforms import SphericalFourierTransform,get_harmonic_transform,HankelTransformWeights
-
 #from .projectLibrary.hankel_transforms import generateHT_SinCos
 from .projectLibrary.hankel_transforms import generate_weightDict
 from .projectLibrary.fourier_transforms import generate_ft
@@ -31,7 +29,7 @@ from .projectLibrary.misk import getAnalysisRecipeFacotry
 from .projectLibrary.misk import get_analysis_process_factory
 from .projectLibrary.misk import generate_load_from_dict
 from .projectLibrary.misk import generate_calc_center
-#from .projectLibrary.classes import FTGridPair
+from .projectLibrary.classes import FTGridPair
 from .projectLibrary.fxsShrinkWrap import generateSW_SupportMaskRoutine
 from .projectLibrary.fxsShrinkWrap import generateSW_multiply_ft_gaussian
 from .projectLibrary.fxs_Projections import generate_negative_shift_operator,generate_shift_by_operator
@@ -40,7 +38,6 @@ from .projectLibrary.misk import _get_reciprocity_coefficient
 from .projectLibrary.resolution_metrics import PRTF_fxs,FQCB_2D,FQCB_3D,FSC_single_fxs,FSC_bit_limit
 from .projectLibrary.fxs_invariant_tools import intensity_to_deg2_invariant,harmonic_coeff_to_deg2_invariants
 from xframe.externalLibraries import shtns_plugin,soft_plugin
-from .projectLibrary.fourier_transforms import generate_ft,load_fourier_transform_weights
 #from analysisLibrary.classes import ReciprocalProjectionData
 from xframe import settings
 from xframe import database
@@ -71,8 +68,8 @@ class ProjectWorker(ProjectWorkerInterface):
         try:
             reciprocity_coefficient = _get_reciprocity_coefficient(r_opt.fourier_transform)
             result['reciprocity_coefficient'] = reciprocity_coefficient
-            result['internal_grid'] = {'real_grid':ft_grids['real'][:],
-                                       'reciprocal_grid':ft_grids["reciprocal"][:]}
+            result['internal_grid'] = {'real_grid':ft_grids.realGrid[:],
+                                       'reciprocal_grid':ft_grids.reciprocalGrid[:]}
             #    if self.mp_opt['type'] != 'routine_construction_and_phasing_and_post_processing':
             #        processed_results=self.results.get('MTIP',{})
             #        processed_results_list=[result_dict for result_dict in processed_results]
@@ -205,7 +202,7 @@ class ProjectWorker(ProjectWorkerInterface):
             average_scaling_factors_per_file[file_id] = np.mean(scaling_factors[r_ids])
                 
         ft_grids = alignment.ft_grids
-        rgrid = ft_grids["reciprocal"][:]
+        rgrid = ft_grids.reciprocalGrid[:]
         integrate = PolarIntegrator(rgrid).integrate
         #log.info('leen reconstructions before reference extraction = {}'.format(len(reconstructions)))
         reference_reconstruction = reconstructions.pop(reference_arg)
@@ -397,7 +394,7 @@ class ProjectWorker(ProjectWorkerInterface):
         align_opt = {'opt':opt,'r_opt':r_opt}
         alignment = Alignment(self.process_factory,self.db,align_opt)
         ft_grids = alignment.ft_grids
-        rgrid = ft_grids["reciprocal"][:]
+        rgrid = ft_grids.reciprocalGrid[:]
         fft = self.process_factory.get_operator('fourier_transform')
         ifft = self.process_factory.get_operator('inverse_fourier_transform')
         xprint('done.\n')
@@ -723,7 +720,7 @@ class ProjectWorker(ProjectWorkerInterface):
         xprint("\t{} loaded reconstruction with error metrics smaller than {}, error values are: \n\t{}".format(len(reconstructions),error_limit,errors))
         g_dict = r_opt['internal_grid']
         #log.info(g_dict.real_grid)
-        ft_grids = {'real':g_dict['real_grid'],"reciprocal":g_dict['reciprocal_grid']}
+        ft_grids = FTGridPair(g_dict['real_grid'],g_dict['reciprocal_grid'])
         r_opt['internal_grid'] = ft_grids
         reference_arg = self.get_reference_arg(errors,reconstruction_keys)
         #log.info('reference reconstruction={}'.format(reconstruction_keys2[reference_arg]))
@@ -769,7 +766,6 @@ class Alignment():
     def __init__(self,process_factory,db,opt):
         self.opt = opt['opt'] # alignment options
         self.max_order = self.opt['max_order']
-        self.lm_split_ids = (np.arange(1,self.max_order+1)**2).astype(int)
         self.r_opt = opt['r_opt'] # options of the reconstructions
         #self.r_opt['grid']['max_order']=63
         #print(f'max alignment order = {self.max_order}')
@@ -778,10 +774,7 @@ class Alignment():
                 settings.general.n_control_workers = self.r_opt['GPU'].get("n_gpu_workers",4)
                 Multiprocessing.comm_module.restart_control_worker()
         self.ft_grids = self.r_opt.internal_grid
-        self.dimension = self.ft_grids['real'][:].shape[-1]
-        self.max_q = self.ft_grids['reciprocal'].__getitem__((slice(None),)+(0,)*self.dimension).max()
-        self.max_r = self.ft_grids['real'].__getitem__((slice(None),)+(0,)*self.dimension).max()
-        self.Nr,self.Nq = self.ft_grids['real'].shape[0],self.ft_grids['reciprocal'].shape[0]
+        self.dimension = self.ft_grids.realGrid[:].shape[-1]
         self.db = db
         self.process_factory = process_factory
         self._reference_reconstruction = 'not set'
@@ -818,52 +811,113 @@ class Alignment():
 
     def generate_operators(self):
         r_opt = self.r_opt
-        transform_objects = self.assemble_transform_op(r_opt)
-        self.sht = transform_objects['harmonic_transform']
-        self.sft = transform_objects['fourier_transform']
-        find_center = generate_calc_center(self.ft_grids['real'])
-        shift = generate_shift_by_operator(self.ft_grids["reciprocal"])
-        negative_shift = generate_shift_by_operator(self.ft_grids["reciprocal"],opposite_direction = True)
+        if self.dimension ==3:
+            self.harm_lm_split_ids, self.harm_ml_split_ids,self.sht = self.assemble_transform_op(r_opt)
+        elif self.dimension ==2 :
+            self.sht = self.assemble_transform_op(r_opt)
+        find_center = generate_calc_center(self.ft_grids.realGrid)
+        shift = generate_shift_by_operator(self.ft_grids.reciprocalGrid)
+        negative_shift = generate_shift_by_operator(self.ft_grids.reciprocalGrid,opposite_direction = True)
         limit_density_values = self.generate_limit_density_values()
         self.process_factory.addOperators({'find_center':find_center,'shift':shift,'negative_shift':negative_shift,'limit_density_values':limit_density_values})
         if self.dimension ==3:
             rotate = self.generate_rotate()
             self.process_factory.addOperators({'rotate':rotate})
 
-    def assemble_transform_op(self,r_opt):
-        max_q = self.max_q
-        Nr,Nq = self.Nr,self.Nq
-        max_r = self.max_r
-        harmonic_transform_opt = { i:r_opt.grid.get(i,0) for i in ['n_phi','n_theta']}
-        
-        fourier_transform_weights = load_fourier_transform_weights(self.dimension,r_opt.fourier_transform.type,self.max_order,(self.Nr,self.Nq),r_opt.fourier_transform.reciprocity_coefficient,allow_weight_saving=True,n_processes=self.opt.multi_process.n_processes_weight_generation)
-        
-        sft = SphericalFourierTransform.from_weight_dict(fourier_transform_weights,r_max = max_r,use_gpu=self.opt.GPU.use,other = harmonic_transform_opt)
 
-        if self.dimension == 2:
-            bandwidth = fourier_transform_weights['bandwidth']
-            cht_forward,cht_inverse = sft.harm.forward_cmplx, sft.harm.inverse_cmplx
-            ht =  get_harmonic_transform(bandwidth, dimensions = dimensions, options=harmonic_transform_opt) # HarmonicTransform('real',ht_opt)
-            ht_forward,ht_inverse = ht.forward_real,ht.inverse_real
-        elif self.dimension == 3:
-            ht = sft.harm
-            ht_forward,ht_inverse = cht_forward,cht_inverse = sft.harm.forward_cmplx, sft.harm.inverse_cmplx        
-        #grid_pair={'real':sft.real_grid,'reciprocal':sft.reciprocal_grid}
-        ft_forward,ft_inverse=sft.forward_cmplx,sft.inverse_cmplx
+    def generate_fourier_transforms(self,grid_pair,ft_opt,harm_trf):
+        opt = settings.project
+        db = database.project
+        dimensions = grid_pair.realGrid[:].shape[-1]
+        ft_type = ft_opt['type']
+        max_order=self.max_order #self.r_opt['grid']['max_order']
+        harmonic_orders = np.arange(max_order+1)
+        n_orders=len(harmonic_orders)
+        reciprocity_coefficient = _get_reciprocity_coefficient(ft_opt)
+        rs=grid_pair.realGrid[:].__getitem__((slice(None),)+(0,)*self.dimension) # expression is just grid[:,0,0,0] in 3D case ans grid[:,0,0] in 2D
+        r_max = np.max(rs)
+        n_radial_points = len(rs)
+    
+        name_postfix='N'+str(n_radial_points)+'mO'+str(max_order)+'nO'+str(n_orders)+'rc'+str(reciprocity_coefficient)
+        #xprint(f'generating fourier transform postfox = {name_postfix}')
+        try:
+            weights_dict = db.load('ft_weights',path_modifiers={'postfix':name_postfix,'type':ft_type+'_'+str(dimensions)+'D'})
+        except FileNotFoundError as e:
+            weights_dict = generate_weightDict(max_order, n_radial_points,reciprocity_coefficient=reciprocity_coefficient,dimensions=dimensions,mode=ft_type)
+            db.save('ft_weights',weights_dict,path_modifiers={'postfix':name_postfix,'type':ft_type+'_'+str(dimensions)+'D'})
         
+        
+        use_gpu = self.r_opt['GPU']['use']
+        
+        fourierTransform,inverseFourierTransform=generate_ft(r_max,weights_dict,harm_trf,dimensions,pos_orders=harmonic_orders,reciprocity_coefficient=reciprocity_coefficient,use_gpu = use_gpu,mode = ft_type)
+        return fourierTransform,inverseFourierTransform
+
+    def generate_fourier_transforms_old(self, grid_pair,ft_opt , harm_trf):                    
+        db = database.project
+        dimensions = grid_pair.realGrid[:].shape[-1]
+        ft_type = ft_opt.type
+        data_type = ft_opt.data_type
+        max_order=self.max_order #self.r_opt['grid']['max_order']
+        harmonic_orders = np.arange(max_order+1)
+        n_orders=len(harmonic_orders)
+
+        pi_in_q = ft_opt.get('pi_in_q',None)
+        reciprocity_coefficient = _get_reciprocity_coefficient(ft_opt)
+
+        rs=grid_pair.realGrid[:].__getitem__((slice(None),)+(0,)*self.dimension) # expression is just grid[:,0,0,0] in 3D case ans grid[:,0,0] in 2D
+        r_max = np.max(rs)
+        n_radial_points = len(rs)
+            
+        use_gpu = self.r_opt['GPU']['use']
+        name_postfix='N'+str(n_radial_points)+'mO'+str(max_order)+'nO'+str(n_orders)+'rc'+str(reciprocity_coefficient)
+        try:
+            weights_dict = db.load('ft_weights',path_modifiers={'postfix':name_postfix,'type':ft_type+'_'+str(dimensions)+'D'})
+        except FileNotFoundError as e:
+            if ft_opt.allow_weight_calculation:
+                weights_dict = generate_weightDict(max_order, n_radial_points,reciprocity_coefficient=reciprocity_coefficient,dimensions=dimensions,mode=ft_type)
+                if ft_opt.allow_weight_saving:
+                    db.save('ft_weights',weights_dict,path_modifiers={'postfix':name_postfix,'type':ft_type+'_'+str(dimensions)+'D'})
+
+        
+        fourierTransform,inverseFourierTransform=generate_ft(r_max,weights_dict,harm_trf,dimensions,pos_orders=harmonic_orders,reciprocity_coefficient=reciprocity_coefficient,use_gpu = use_gpu,mode = ft_type)
+
+        #fourierTransform,inverseFourierTransform=generate_ft(r_max,weights_dict,harm_trf,dimensions,reciprocity_coefficient,use_gpu = use_gpu,mode = ft_type)
+        
+        return fourierTransform,inverseFourierTransform
+
+    def assemble_transform_op(self,r_opt):
+        ht_opt={
+            'dimensions':self.dimension,
+            **r_opt['grid']
+        }
+        ht_opt['max_order']=self.max_order
+        # Create harmonic transforms (needs to happen before grid selection since harmonic transform plugin can choose the angular part of the grid.)
+        #log.info('create harmonic transforms.')
+        cht=HarmonicTransform('complex',ht_opt)
+        #ht_data_type = opt['harmonic_transform']['data_type']
+        if self.dimension == 2:
+            ht =  HarmonicTransform('real',ht_opt)
+        elif self.dimension == 3:
+            ht=cht
+        cht_forward,cht_inverse = cht.forward, cht.inverse
+        ht_forward,ht_inverse = ht.forward, ht.inverse
+        #log.info("ht grid param = {}".format(cht.grid_param))
+        # fourier transforms
+        ft_forward,ft_inverse=self.generate_fourier_transforms(self.ft_grids,r_opt['fourier_transform'],cht)
+
         transform_op={'fourier_transform':ft_forward,'inverse_fourier_transform':ft_inverse,'harmonic_transform':ht_forward,'inverse_harmonic_transform':ht_inverse,'complex_harmonic_transform':cht_forward,'complex_inverse_harmonic_transform':cht_inverse}
-        transform_objects = {'fourier_transform':sft,'harmonic_transform':ht}
+        # fourier transforms on SO(3)
         if self.dimension == 3:
             l_max= self.max_order #np.max(r_opt['grid']['max_order'])
             soft = mLib.get_soft_obj(l_max)
-            transform_op.update({'soft':soft.forward_cmplx,'inverse_soft':soft.inverse_cmplx})
+            harmonic_transpose_lm_to_ml, harmonic_transpose_ml_to_lm = self.generate_harmonic_transposes(cht)
+            transform_op.update({'soft':soft.forward_cmplx,'inverse_soft':soft.inverse_cmplx,'lm_to_ml':harmonic_transpose_lm_to_ml,'ml_to_lm':harmonic_transpose_ml_to_lm})
+
         self.process_factory.addOperators(transform_op)
-        return transform_objects
-#        if self.dimension == 3:
-#            return cht.l_split_indices,cht.m_split_indices,cht
-#        elif self.dimension ==2:
-#            return cht
-#        return transform_op,grid_pair,ht.max_order,transform_objects
+        if self.dimension == 3:
+            return cht.l_split_indices,cht.m_split_indices,cht
+        elif self.dimension ==2:
+            return cht
 
     def assemble_align_parts(self):         
         find_shift = self.generate_find_shift()
@@ -872,11 +926,26 @@ class Alignment():
         parts = {'find_shift':find_shift,'find_rotation':find_rotation,'save_shift':save_shift}        
         self.process_factory.addOperators(parts)
         
+    def generate_harmonic_transposes(self,cht):
+        m_indices_concat = np.concatenate(cht.m_indices)
+        m_indices = cht.m_indices
+        # also turns a single 1D numpy array into a tuple of 1D arrays
+        def lm_to_ml(l_coeff):
+            #log.info('l_coeff shape = {}'.format(l_coeff.shape))
+            m_coeff = [l_coeff[:,index] for index in m_indices]
+            return m_coeff
+        # also turns tuple of 1Darrays into a single 1D numpy array
+        def ml_to_lm(m_coeff):
+            l_coeff = np.zeros((len(m_coeff[0]),cht.n_coeff),np.complex128)
+            l_coeff[:,m_indices_concat] = np.concatenate(m_coeff,axis = 1)
+            return l_coeff
+        return lm_to_ml,ml_to_lm
+
     
     def generate_find_shift(self):
         ref_amplitude = self.reference_reconstruction[1]
         ift = self.process_factory.get_operator('inverse_fourier_transform')
-        real_grid = self.ft_grids['real']
+        real_grid = self.ft_grids.realGrid
         def find_shift(ref_amplitude,amplitude):
             cc = ift(amplitude*ref_amplitude.conj())
             argmax = np.unravel_index(np.argmax(cc),cc.shape)
@@ -927,13 +996,13 @@ class Alignment():
             calc_mean_C = self.soft.calc_mean_C_weighted
         else:
             calc_mean_C = self.soft.calc_mean_C
-        lm_split_ids = self.lm_split_ids
+        lm_split_ids = self.harm_lm_split_ids
         angle_grid = self.soft_grid
-        r_limit_ids = self.opt['find_rotation'].get('r_limit_ids', [0,self.ft_grids['real'].shape[0]])
+        r_limit_ids = self.opt['find_rotation'].get('r_limit_ids', [0,self.ft_grids.realGrid.shape[0]])
         self.beta = 0
         def find_rotation(ref_lm_coeff,lm_coeff):            
-            #ref_lm_coeff = np.concatenate(ref_lm_coeff,axis = 1).copy()
-            #lm_coeff = np.concatenate(lm_coeff,axis = 1).copy()
+            ref_lm_coeff = np.concatenate(ref_lm_coeff,axis = 1).copy()
+            lm_coeff = np.concatenate(lm_coeff,axis = 1).copy()
             #print('limits = {}'.format(r_limit_ids))
             mean_C = calc_mean_C(lm_coeff,ref_lm_coeff,r_limit_ids,lm_split_ids).real
             self.results['rotation_metrics'].append(mean_C)
@@ -949,13 +1018,14 @@ class Alignment():
         return find_rotation    
     def generate_rotate(self):
         rotate_coeff = self.soft.rotate_coeff
-        lm_split_ids = self.lm_split_ids
+        lm_split_ids = self.harm_lm_split_ids
+        l_indices = self.sht.l_indices
         def rotate(lm_coeff,euler_angles):
             #log.info('euler_angles = {}'.format(euler_angles))
-            #lm_coeff = np.concatenate(lm_coeff,axis = 1)
+            lm_coeff = np.concatenate(lm_coeff,axis = 1)
             #log.info(lm_coeff.shape)
-            rotated_coeff = lm_coeff.copy()
-            rotated_coeff[:] = rotate_coeff(lm_coeff,lm_split_ids,euler_angles)
+            rotated_coeff = rotate_coeff(lm_coeff,lm_split_ids,euler_angles)
+            rotated_coeff = np.split(rotated_coeff,lm_split_ids,axis = 1)
             return rotated_coeff
         return rotate
 
@@ -1051,7 +1121,7 @@ class Alignment():
         align = self.align
         max_iterations = self.opt['max_iterations']
         error_limit = self.opt['alignment_error_limit']
-        integrate = mLib.SphericalIntegrator(self.ft_grids['real'][:]).integrate_normed
+        integrate = mLib.SphericalIntegrator(self.ft_grids.realGrid[:]).integrate_normed
         shift = self.process_factory.get_operator('shift')
         ft = self.process_factory.get_operator('fourier_transform')
         ift = self.process_factory.get_operator('inverse_fourier_transform')
