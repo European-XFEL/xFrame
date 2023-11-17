@@ -45,6 +45,10 @@ class RealProjection:
     @property
     def initial_support(self):
         return ~self._initial_mask.copy()
+    @initial_support.setter
+    def initial_support(self,support):
+        self._initial_mask = ~support
+        self.support = support
 
 
     @property
@@ -469,6 +473,7 @@ class ReciprocalProjection:
 
                 
     def __init__(self,grid,data,max_order):
+        #xprint(f"max_order = {max_order}")
         self.load_data(data)
         if self.dimensions==2:
             self.integrated_intensity = midpoint_rule(self.average_intensity.data * self.data_radial_points , self.data_radial_points,axis = 0)*2*np.sqrt(np.pi)
@@ -491,6 +496,7 @@ class ReciprocalProjection:
                     
         self.used_order_ids = opt.used_order_ids
         self.used_orders = {order:id for (order,id) in zip(self.positive_orders,self.used_order_ids)}
+        #xprint(f"orders = {self.used_orders}")
         self.use_SO_freedom=opt.SO_freedom.use
         
         # Won't work without the list around opt.number_of_particles.initial .
@@ -498,7 +504,6 @@ class ReciprocalProjection:
         self.number_of_particles = [opt.number_of_particles.initial] 
         self.number_of_particles_dict = {'number_of_particles':self.number_of_particles,'negative_fraction':[],'gradient':[]}
 
-        #log.info('data_projection_matrices shape = {}'.format(tuple(d.shape for d in self.data_projection_matrices)))
         pm,low_res = self._regrid_data()        
         #log.info(f'len regridded proj mat = {len(pm)}')
         
@@ -536,7 +541,7 @@ class ReciprocalProjection:
         if self.use_SO_freedom:
             radial_high_pass=opt.SO_freedom.get('radial_high_pass',0.2)
             self.remaining_SO_projection = self.generate_remaining_SO_projection(radial_high_pass=radial_high_pass)
-
+        #xprint(f'pm shape = {len(self.projection_matrices)} mask len = {len(self.radial_mask)}')
     
 
     @property
@@ -1448,6 +1453,7 @@ def generate_shift_by_operator(grid,opposite_direction=False):
             cart_vect = spherical_to_cartesian(vector)
             #log.info('cart shift vect = {}'.format(-cart_vect*prefactor))
             phases = np.exp(-1.j*prefactor*(cart_grid*cart_vect).sum(axis=-1))
+            print(f'reciprocal dens shape = {reciprocal_density.shape} phases shape = {phases.shape}')
             reciprocal_density*=phases
             return reciprocal_density        
     return shift_by

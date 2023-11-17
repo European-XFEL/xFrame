@@ -238,17 +238,20 @@ class MTIP:
         loops_str += f'\t{loop_name}:'+' '*(max_loop_name_size-len(loop_name))+ f'\t {iterations}x( '+''.join(methods_string)+')\n'
    
     @classmethod
-    def preinit(cls):
+    def preinit(cls,init_data = None):
         ''' 
         This Method prepares needed quantities which require multiprocessing that are equal for all MTIP instances before __init__ is called in a multi process environment. This is currently done only to preload the fourier transform weights.
         '''
+        if init_data is None:
+            tmp = cls.load_mtip_data()
+        else:
+            tmp = init_data
         opt = settings.project
         cls.dimensions = opt.dimensions
-        tmp = cls.load_mtip_data()
         cls.mtip_data = tmp[0]
         cls.data_q_limits = tmp[1]
         cls.data_number_of_radial_points = tmp[2]
-
+        cls.max_q = opt.grid.max_q
         max_order = opt.grid.max_order
         n_radial_points = opt.grid.n_radial_points
         reciprocity_coefficient = opt.fourier_transform.reciprocity_coefficient
@@ -256,6 +259,7 @@ class MTIP:
         n_processes = opt.multi_process.n_weight_generating_processes
         cls.fourier_transform_weights = load_fourier_transform_weights(opt.dimensions,ft_type,max_order,n_radial_points,reciprocity_coefficient,allow_weight_saving=opt.fourier_transform.allow_weight_saving,n_processes=n_processes)
         cls.preinit_was_called = True
+            
     @classmethod
     def load_mtip_data(cls):
         opt = settings.project
@@ -265,7 +269,7 @@ class MTIP:
         data_number_of_radial_points = len(data['data_radial_points'])
         #log.info('data points = {}'.format(data['data_radial_points']))
         return [data,data_q_limits,data_number_of_radial_points]
-    
+        
 
     def __init__(self,process_factory):
         set_globals()
@@ -322,6 +326,7 @@ class MTIP:
         
         transform_op={'fourier_transform':ft_forward,'inverse_fourier_transform':ft_inverse,'harmonic_transform':ht_forward,'inverse_harmonic_transform':ht_inverse,'complex_harmonic_transform':cht_forward,'complex_inverse_harmonic_transform':cht_inverse}
         transform_objects = {'fourier_transform':sft,'harmonic_transform':ht}
+        #xprint(f'\n max order = {ht.max_order} \n')
         return transform_op,grid_pair,ht.max_order,transform_objects
 
     def assemble_reciprocal_projection_op(self,grid_pair,max_order):
@@ -362,7 +367,7 @@ class MTIP:
 
         if self.dimensions ==3:
             pr_padded = harm_obj.get_empty_coeff(pre_shape=(q_grid.shape[0],))
-            xprint(f'pr_padded shape = {pr_padded.shape}')
+            #xprint(f'pr_padded shape = {pr_padded.shape}')
             for l,p in enumerate(pr):
                 n_ms = 2*l+1
                 if p.shape[1]!= n_ms:
@@ -712,7 +717,7 @@ class MTIP:
             ['fourier_transform'],
             ['square_grid'],
             ['harmonic_transform'],
-            ['calc_deg2_invariant']
+            [(0,0),['calc_deg2_invariant']]
         ]
         calc_deg2_invariant = self.process_factory.buildProcessFromSketch(calc_deg2_invariant_sketch)
         return calc_deg2_invariant
@@ -909,12 +914,22 @@ class MTIP:
         self.loops=loops
 
         #### assemble main loop ####
-        def create_initial_state():
+        def create_initial_state(initial_density_pair=None,initial_support=None):
             initial_support = self.projection_objects['real'].initial_support
-            real_density_guess = real_density_guess_method()
-            #log.info('density guess type = {}'.format(real_density_guess.dtype))
-            reciprocal_density_guess=fourier_transform(real_density_guess)
-            real_density_guess = inverse_fourier_transform(reciprocal_density_guess)
+            if initial_density_pair is None:
+                real_density_guess = real_density_guess_method()
+                #log.info('density guess type = {}'.format(real_density_guess.dtype))
+                reciprocal_density_guess=fourier_transform(real_density_guess)
+                real_density_guess = inverse_fourier_transform(reciprocal_density_guess)
+            else:
+                real_density_guess = initial_density_pair[0]
+                reciprocal_density_guess = initial_density_pair[1]
+            if not isinstance(initial_support,np.ndarray):
+                initial_support = self.projection_objects['real'].initial_support
+            else:
+                self.projection_objects['real'].initial_support = initial_support
+                
+                
             #real_density_guess.imag = 0
             #real_density_guess[real_density_guess.real<0]=0
             #real_density_guess[~initial_support]=0
@@ -946,6 +961,12 @@ class MTIP:
             log.info("last density shape = {}".format(out_last_density_pair[1].shape))
             calc_deg2_invariant=routines['calc_deg2_invariant']
             last_deg2_invariant = calc_deg2_invariant.run(out_last_density_pair[1])
+            #cht = self.transform_objects['harmonic_transform']
+            #ft = self.transform_objects['fourier_transform']
+            #ftd = ft.forward_cmplx(out_last_density_pair[1])
+            #I = ftd*ftd.conj()
+            #Ilm = cht.forward_cmplx(I)
+            #last_deg2_invariant = harmonic_coeff_to_deg2_invariants_3d(Ilm)
             #last_deg2_invariant = calc_deg2_invariant.run(state['density_pair_history'][-1][1])
             
             #log.info("fraction shapes ={}".format([i.shape for i in self.results.get('n_particles_fraction',np.array([]))]))
@@ -976,7 +997,10 @@ class MTIP:
                         'last_deg2_invariant':last_deg2_invariant}
             return resultDict
         def main_loop(*args,**kwargs):
-            initial_state = create_initial_state()
+            if 'state' in kwargs:
+                initial_state = kwargs["initial_state"]
+            else:
+                initial_state = create_initial_state()
             initial_densities = tuple(d.copy() for d in initial_state['best_density_pair'])
             initial_mask = initial_state['mask'].copy()
             iterations = []
@@ -988,7 +1012,7 @@ class MTIP:
                 state = next_state
             out = generate_output(state,iterations,initial_densities,initial_mask)
             return out        
-        return main_loop
+        return main_loop,create_initial_state
         
         
     def init_error_dict(self):
@@ -1230,4 +1254,4 @@ class MTIP:
         log.info('Setting up phasing routines (HIO,ER,etc.)')
         self.routines = self.assemble_MTIP_routines()
         log.info('Assemble phasing loop (HIO,ER,etc.)')
-        self.phasing_loop = self.assemble_phasing_loop()
+        self.phasing_loop,self.create_initial_state = self.assemble_phasing_loop()

@@ -28,7 +28,7 @@ import traceback
 import numpy as np
 from xframe import settings
 
-xprint(f"main process pid = {multiprocessing.current_process().pid}")
+#xprint(f"main process pid = {multiprocessing.current_process().pid}")
 
 sa = SharedArrayDependency #will be dependency injected with SharedArray module
 MPI = False #will be dependency injected with SharedArray module
@@ -170,6 +170,7 @@ def update_free_cpus():
     free_cpus = get_free_cpus()
     free_threads = int(2*get_local_cpu_count()-get_n_child_processes())-1
     default_n_processes = free_cpus
+    #print(free_c)
 def check_available_cpus_before_spawning_childs(n_childs,are_daemons=False):
     update_free_cpus()
     would_use_hyperthreads = (free_cpus - n_childs<0)

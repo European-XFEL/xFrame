@@ -21,6 +21,10 @@ multi_process:
     _value: True
 
 selection:
+  used_reconstruction:
+    _value: "last"
+    _possible_values: ["last","best"]
+    _description: "Whether to use the reconstruction with the lowest error recorded error metric ('best') or the one from the last refinement iteration regardless of its error metric['last'] "
   method:
     _value: 'least_error'
     _possible_values: ['least_error','manual']

@@ -91,7 +91,7 @@ class ShCoeffView:
         
 class ShSmall:
     def __init__(self,bandwidth,anti_aliazing_degree = 2,n_phi = 0,n_theta=0):
-        print(f'bandwidth = {bandwidth}')
+        #print(f'bandwidth = {bandwidth}')
         sh = shtns.sht(int(bandwidth-1))#,norm = shtns.sht_schmidt)        
         self._sh = sh
         self.bandwidth = bandwidth

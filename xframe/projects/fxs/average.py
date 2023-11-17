@@ -476,7 +476,7 @@ class ProjectWorker(ProjectWorkerInterface):
             
             elif opt.normalize_reconstructions.mode == 'mean':
                 for r_id,r in enumerate(reconstructions):
-                    scale = np.mean(r[0][r[0]>0])
+                    scale = np.mean(r[0][r[0]>0].real)
                     scaling_factors[r_id]=scale
                     reconstructions[r_id] = [r[0]/scale,r[1]/scale]
             xprint('done.\n')        
@@ -534,6 +534,7 @@ class ProjectWorker(ProjectWorkerInterface):
             for temp in outs:
                 for out in temp:
                     #log.info(out.keys())
+                    r_id = out[0]
                     out = out[1]
                     densities.append(out['densities'])
                     rotation_metrics.append(out['rotation_metrics'])
@@ -696,19 +697,35 @@ class ProjectWorker(ProjectWorkerInterface):
                 pr_group = h5_file['projection_matrices']
                 pr_mat = [pr_group[str(i)][:] for i in range(max_order)]
                 projection_matrices.append(pr_mat)
+                
+                
                 #log.info(start_id)
                 for key,value in h5_file['reconstruction_results'].items():
-                    error = value['error_dict'][error_metric][-1]
-                    if error < error_limit:
-                        reconstr = (value['last_real_density'][:],value['last_reciprocal_density'][:])
-                        if self.valid_maximal_density(reconstr[0].real.max()):
-                            errors.append(error)
-                            reconstruction_keys[num][key] = len(reconstructions)
-                            pos = len(reconstructions)
-                            reconstruction_keys2[pos] = (num,key)
-                            reconstruction_ids_per_file[num].append(pos)
-                            reconstructions.append(reconstr)                            
-                            support_masks.append(np.asarray(value['support_mask'][:]))
+                    if opt.selection.used_reconstruction == 'last':
+                        error = value['error_dict'][error_metric][-1]
+                        if error < error_limit:
+                            reconstr = (value['last_real_density'][:],value['last_reciprocal_density'][:])
+                            if self.valid_maximal_density(reconstr[0].real.max()):
+                                errors.append(error)
+                                reconstruction_keys[num][key] = len(reconstructions)
+                                pos = len(reconstructions)
+                                reconstruction_keys2[pos] = (num,key)
+                                reconstruction_ids_per_file[num].append(pos)
+                                reconstructions.append(reconstr)                            
+                                support_masks.append(np.asarray(value['support_mask'][:]))
+                    elif opt.selection.used_reconstruction == 'best':
+                        error = value['final_error'][tuple()]
+                        if error < error_limit:
+                            reconstr = (value['real_density'][:],value['reciprocal_density'][:])
+                            if self.valid_maximal_density(reconstr[0].real.max()):
+                                errors.append(error)
+                                reconstruction_keys[num][key] = len(reconstructions)
+                                pos = len(reconstructions)
+                                reconstruction_keys2[pos] = (num,key)
+                                reconstruction_ids_per_file[num].append(pos)
+                                reconstructions.append(reconstr)                            
+                                support_masks.append(np.asarray(value['support_mask'][:]))
+                        
                 if num == 0:                    
                     r_opt = db.load('reconstruction_settings',path_modifiers= {'path':os.path.dirname(file_path)})
                     r_opt['internal_grid'] = db.get_db('file://_.h5').recursively_load_dict_from_group(h5_file,'/configuration/')['internal_grid']
@@ -791,10 +808,12 @@ class Alignment():
             self.soft = get_soft_obj(self.max_order+1)
             self.soft_grid = self.soft.make_SO3_grid()
         self.sht = 'not set' #spherical harmonic transform object will be set by generate_operators
+        self.sft = 'not set' #Fourier_transform object will be set by generate_operators
         # The next function call generates all necessary operators and adds them
         # to the process_factory.
         self.generate_operators()
-        self.shift_to_center = self.assemble_shift_to_center().run
+        
+        self.shift_to_center = self.assemble_shift_to_center()
         self.shift_by = self.assemble_shift_by()
         if self.dimension ==3:
             self.rotate_by = self.assemble_rotate_by()
@@ -828,7 +847,7 @@ class Alignment():
         self.process_factory.addOperators({'find_center':find_center,'shift':shift,'negative_shift':negative_shift,'limit_density_values':limit_density_values})
         if self.dimension ==3:
             rotate = self.generate_rotate()
-            self.process_factory.addOperators({'rotate':rotate})
+            self.process_factory.addOperators({'rotate':rotate})        
 
     def assemble_transform_op(self,r_opt):
         max_q = self.max_q
@@ -939,7 +958,7 @@ class Alignment():
             self.results['rotation_metrics'].append(mean_C)
             #log.info('mean C shape = {},max = {}, min = {}'.format(mean_C.shape,np.max(mean_C),np.min(mean_C)))
             argmax = np.unravel_index(np.argmax(mean_C),C_shape)
-            euler_angles = angle_grid[argmax[0],argmax[1],argmax[2]]
+            euler_angles = (angle_grid[argmax[0],argmax[1],argmax[2]]).copy()
             euler_angles[0] = 2*pi - euler_angles[0]
             euler_angles[2] = 2*pi - euler_angles[2]
             self.results['rotation_angles'].append(euler_angles)
@@ -1017,18 +1036,23 @@ class Alignment():
         return align
     def assemble_shift_to_center(self):
         #start with reciprocal_density,real_density
-        shift_to_center_sketch_old = [
-            ['find_center','id'],
-            [np.array([1,0,0],dtype=int),['negative_shift','id']],         
-            [np.array([0,0,1],dtype=int),['inverse_fourier_transform','id','id']]
-        ]
-        shift_to_center_sketch = [
-            [(0,0,1),['find_center','fourier_transform','id']],
-            [(1,0,2,0,0),['negative_shift','negative_shift','id']],         
-            [(0,1,2),['inverse_fourier_transform','id','id']]
-        ]
-        shift_to_center = self.process_factory.buildProcessFromSketch(shift_to_center_sketch)
-        return shift_to_center
+        find_center = self.process_factory.get_operator('find_center')
+        shift = self.sft.shift
+        ft,ift = self.sft.forward_cmplx,self.sft.inverse_cmplx
+        def center(real_density,reciprocal_density):
+            center = find_center(real_density)
+            ftd1 = shift(ft(real_density),center,opposite_direction=True)
+            ftd2 = shift(reciprocal_density,center,opposite_direction=True)
+            density = ift(ftd1)
+            return (density,ftd2)
+            
+        #shift_to_center_sketch = [
+        #    [(0,0,1),['find_center','fourier_transform','id']],
+        #    [(1,0,2,0,0),['negative_shift','negative_shift','id']],         
+        #    [(0,1,2),['inverse_fourier_transform','id','id']]
+        #]
+        #shift_to_center = self.process_factory.buildProcessFromSketch(shift_to_center_sketch)
+        return center
     def assemble_rotate_by(self):
         rotate_by_sketch = [
             ['complex_harmonic_transform','id'],

@@ -117,7 +117,7 @@ class ControlWorker:
         some_workers_are_running = False
         import multiprocessing
         for worker in self.workers:
-            xprint(f"worker = {worker.name} process ={worker.process} current process pid = {multiprocessing.current_process().pid}")
+            #xprint(f"worker = {worker.name} process ={worker.process} current process pid = {multiprocessing.current_process().pid}")
             if worker.process.is_alive():
                 some_workers_are_running = True
                 break

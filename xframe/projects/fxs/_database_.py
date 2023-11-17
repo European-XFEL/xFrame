@@ -52,12 +52,17 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         time_struct=time.gmtime()
         time_str=str(time_struct[2])+'_'+str(time_struct[1])+'_'+str(time_struct[0])
         return time_str
-    def get_reconstruction_path(self):
+    def get_reconstruction_path(self,return_modifiers=False):
         time_str=self.get_time_string()
         path=self.folders[self.files['reconstructions']['folder']]
-        run= self.get_latest_run('reconstructions',path_modifiers={'time':time_str}) + 1
-        run_path=path.format(time=time_str,run=run)
-        return run_path
+        path_modifiers={'time':time_str,'structure_name':settings.project.structure_name,'dimensions':settings.project.dimensions}
+        run= self.get_latest_run('reconstructions',path_modifiers=path_modifiers) + 1
+        path_modifiers['run']=run
+        run_path=path.format(**path_modifiers)
+        if return_modifiers:
+            return run_path,path_modifiers
+        else:
+            return run_path
     
     def get_latest_run(self,folder_name,path_modifiers = {}):
         '''
@@ -242,11 +247,12 @@ class ProjectDB(DefaultDB,DatabaseInterface):
     def save_reconstructions(self,name,data,**kwargs):
         options = self.files['reconstructions']['options']
         time_str=self.get_time_string()
-        path=self.folders[self.files['reconstructions']['folder']]
-        path_modifiers={'time':time_str,'structure_name':settings.project.structure_name,'dimensions':settings.project.dimensions}     
-        run= self.get_latest_run('reconstructions',path_modifiers=path_modifiers) + 1
-        path_modifiers['run']=run
-        run_path=path.format(**path_modifiers)
+        #path=self.folders[self.files['reconstructions']['folder']]
+        #path_modifiers={'time':time_str,'structure_name':settings.project.structure_name,'dimensions':settings.project.dimensions}     
+        #run= self.get_latest_run('reconstructions',path_modifiers=path_modifiers) + 1
+        #path_modifiers['run']=run
+        #run_path=path.format(**path_modifiers)
+        run_path,path_modifiers = self.get_reconstruction_path(return_modifiers=True)
 
         internal_grids = data['configuration']['internal_grid']
         real_grid  = internal_grids['real_grid'].copy()
@@ -376,8 +382,11 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         try:
             plot_reconstructed_deg2_invariants,deg2_slice = option_switch(options.get('plot_reconstructed_deg2_invariants',False),slice(None))
             if plot_reconstructed_deg2_invariants:
+                xprint("saving bl plots")
                 for key,value in tuple(data['reconstruction_results'].items())[deg2_slice]:
                     Bls = value['last_deg2_invariant']
+                    #xprint(f'bl shape {Bls.shape}')
+                    #xprint(f'bl shape {Bls[0].shape}')
                     log.info("last deg2 invariant shape = {}".format(Bls.shape))
                     self._save_first_invariants(Bls,q_radial_points,run_path,options,name="{}_out_".format(key))
 
@@ -413,7 +422,8 @@ class ProjectDB(DefaultDB,DatabaseInterface):
     
     def _save_first_invariants(self,bls,radial_points,base_path,options,name='',mask = True):
         bls = bls.copy()
-        bls[~mask]=0
+        if isinstance(mask,np.ndarray):
+            bls[~mask]=0
         try:
             assert not np.isnan(bls).any(),'Nan values detected during plotting setting them to -1.'
         except:
@@ -445,6 +455,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         layouts = []
         plot_data = []
         #log.info('bls shape = {} grid shape = {}'.format(bls.shape,grid.shape))
+
         for i in range(shape[0]):
             layout_part = []
             plot_data_part = []

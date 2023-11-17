@@ -3,10 +3,10 @@ import numpy as np
 import scipy as sp
 import logging
 import traceback
-
+import sys
 from xframe import Multiprocessing
 from xframe.library.physicsLibrary import ewald_sphere_theta_pi
-from xframe.library.pythonLibrary import measureTime
+from xframe.library.pythonLibrary import measureTime,xprint
 from xframe.library.gridLibrary import GridFactory
 from xframe.library.mathLibrary import eval_legendre,leg_trf,spherical_to_cartesian,cartesian_to_spherical,masked_mean
 from xframe.library.mathLibrary import RadialIntegrator,solve_procrustes_problem,psd_back_substitution,back_substitution
@@ -964,7 +964,7 @@ def density_to_deg2_invariants(density,fourier_transform,dimensions,density2 = F
         ftd2 = fourier_transform(density2)
         intensity2 = ftd2*ftd2.conj()
     return intensity_to_deg2_invariant(intensity,intensity2 = intensity2,cht = cht)
-def harmonic_coeff_to_deg2_invariants(dimensions,harm_coeff,harm_coeff2 = False):
+def harmonic_coeff_to_deg2_invariants(dimensions,harm_coeff,harm_coeff2 = None):
     if dimensions ==2:
         deg2_invariants = harmonic_coeff_to_deg2_invariants_2d(harm_coeff,Ims2=harm_coeff2)
     if dimensions == 3:
@@ -980,14 +980,25 @@ def harmonic_coeff_to_deg2_invariants_2d(Ims,Ims2=False):
     else:
         Bm = np.array(tuple(Im1[:,None]*Im2[None,:].conj() for Im1,Im2 in zip(Ims.T,Ims2.T)))
     return Bm
-def harmonic_coeff_to_deg2_invariants_3d(Ilm,Ilm2 = False):
+def harmonic_coeff_to_deg2_invariants_3d(Ilm,Ilm2 = None):
     '''
     Calculates the degree 2 invariants $B_l$ via $B_l = \sum_l I_{lm} I^*_{lm}$. 
     '''
-    if isinstance(Ilm2,bool):
-        Bl = np.array(tuple(Il @ Il.T.conj() for Il in Ilm))
+    #xprint(f"ilm1 = {Ilm}, ilm2 = {Ilm2}")
+    #xprint("fu")
+    #sys.exit()
+    if Ilm2 is None:
+        if isinstance(Ilm,(tuple,list)):
+            Bl = np.array(tuple(Il @ Il.T.conj() for Il in Ilm))
+        else:
+            ls = Ilm.ls
+            Bl = np.array(tuple(Ilm.lm[l] @ Ilm.lm[l].T.conj() for l in ls))
     else:
-        Bl = np.array(tuple(Il1 @ (Il2.T.conj()) for Il1,Il2 in zip(Ilm,Ilm2)))
+        if isinstance(Ilm,(tuple,list)):
+            Bl = np.array(tuple(Il1 @ (Il2.T.conj()) for Il1,Il2 in zip(Ilm,Ilm2)))
+        else:
+            ls = Ilm.ls
+            Bl = np.array(tuple(Ilm.lm[l] @ Ilm2.lm[l].T.conj() for l in ls))            
     return Bl
 
 

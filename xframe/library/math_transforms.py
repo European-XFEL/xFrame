@@ -63,7 +63,7 @@ class PolarHarmonicTransform:
 
 
 def get_harmonic_transform(bandwidth,dimensions=3,options={}):
-    xprint(f"bw = {bandwidth}, dimensions = {dimensions}, options = {options}")
+    #xprint(f"bw = {bandwidth}, dimensions = {dimensions}, options = {options}")
     if dimensions==2:
         return PolarHarmonicTransform(max_order=bandwidth)
     elif dimensions==3:
@@ -291,7 +291,7 @@ class HankelTransformWeights:
 class HankelTransform:
     ht_modes = ['trapz','zernike_trapz','sincos_trapz','midpoint','zernike_midpoint','sincos_midpoint']
     
-    def __init__(self,n_points=64,angular_bandwidth=32,r_max=1,mode='midpoint',dimensions = 3, weights = None, reciprocity_coefficient = np.pi, use_gpu = True, n_processes_for_weight_generation = None,other={}):
+    def __init__(self,n_points=64,angular_bandwidth=32,r_max=1,mode='midpoint',dimensions = 3, weights = None, reciprocity_coefficient = np.pi, use_gpu = True, n_processes_for_weight_generation = None,other={},r_max_support = None):
         self.mode = mode
         self.dimensions = dimensions
         self.Nr,self.Nq = HankelTransformWeights._read_n_points(n_points)
@@ -299,7 +299,8 @@ class HankelTransform:
         self.use_gpu=use_gpu
         self.reciprocity_coefficient = reciprocity_coefficient
         self.r_max = r_max
-        xprint(f'current process id = {Multiprocessing.get_process_name()}')
+        self.r_max_support = r_max_support
+        #xprint(f'current process id = {Multiprocessing.get_process_name()}')
         if use_gpu and Multiprocessing.get_process_name()==0:
             settings.general.n_control_workers = 1
             Multiprocessing.comm_module.restart_control_worker()
@@ -308,10 +309,14 @@ class HankelTransform:
             weights = weight_generator(n_points,angular_bandwidth,dimensions,reciprocity_coefficient,n_processes_for_weight_generation,**other)
         self.assembled_weights = getattr(HankelTransformWeights,'assemble_'+mode)(weights,self.bandwidth,r_max,self.reciprocity_coefficient,dimensions=self.dimensions)
         self.grids = {'real':self.assembled_weights.pop('real_points'),'reciprocal':self.assembled_weights.pop('reciprocal_points')}
+        if r_max_support is not None:
+            max_id = np.argmin(self.grids['real']<r_max_support)-1
+            self.grids['real']=self.grids['real'][:1]
+        
         self._forward_coeff,self._inverse_coeff = self._generate_coeff_arrays()
         self.forward_cmplx,self.inverse_cmplx = self._generate_ht()
 
-    def from_weight_dict(self,weights_dict,r_max=1,use_gpu=True):
+    def from_weight_dict(self,weights_dict,r_max=1,use_gpu=True,r_max_support=None):
         w = weights_dict
         weights = w['weights']
         n_points = w['radial_points']
@@ -319,7 +324,7 @@ class HankelTransform:
         dimensions = w['dimensions']
         mode = w['mode']
         reciprocity_coefficient = w['reciprocity_coefficient']
-        self.__init__(n_points=n_points,angular_bandwidth=bandwidth,r_max=r_max,mode = mode,dimensions=dimensions,weights=weights,reciprocity_coefficient=reciprocity_coefficient,use_gpu=use_gpu)
+        self.__init__(n_points=n_points,angular_bandwidth=bandwidth,r_max=r_max,mode = mode,dimensions=dimensions,weights=weights,reciprocity_coefficient=reciprocity_coefficient,use_gpu=use_gpu,r_max_support = r_max_support)
         return self
     
     def _generate_coeff_arrays(self):
@@ -685,6 +690,8 @@ class SphericalFourierTransform:
         self.ht = HankelTransform(n_points=n_radial_points,angular_bandwidth=angular_bandwidth,r_max=r_max,mode=mode,dimensions=dimensions,weights=weights,reciprocity_coefficient=reciprocity_coefficient,use_gpu=use_gpu,n_processes_for_weight_generation = n_processes_for_weight_generation,other=other)
         self.harm = get_harmonic_transform(angular_bandwidth,dimensions=dimensions,options=other)
         self._init_end()
+        self.reciprocal_grid_in_cartesian_coords = None
+        self._shift = None
     def _init_end(self):
         self.dimensions=self.ht.dimensions
         self.forward_cmplx,self.inverse_cmplx = self._generate_transforms()
@@ -742,6 +749,27 @@ class SphericalFourierTransform:
             grid = np.stack(np.meshgrid(qs,thetas,phis,indexing='ij'),3)
         return grid
 
+    @property
+    def shift(self):
+        if self._shift is None:
+            self._shift = self._generate_shift()
+        return self._shift
+    
+    def _generate_shift(self):
+        from xframe.library.mathLibrary import spherical_to_cartesian        
+        if self.reciprocal_grid_in_cartesian_coords is None:
+            self.reciprocal_grid_in_cartesian_coords = spherical_to_cartesian(self.reciprocal_grid)
+        cart_grid = self.reciprocal_grid_in_cartesian_coords
+        def shift(reciprocal_density,vector,opposite_direction=False):
+            if opposite_direction:
+                prefactor = -1
+            else:
+                prefactor = 1
+            cart_vect = spherical_to_cartesian(vector)
+            phases = np.exp(-1.j*prefactor*(cart_grid*cart_vect).sum(axis=-1))
+            reciprocal_density*=phases
+            return reciprocal_density
+        return shift
 class ZernikeTransform:
     '''class implementing Zernike Series expansion.'''
     def __init__(self,bandwidth=32,order=0,n_points=128,max_r=1,dimension=3,grid='uniform',bw_to_sampling_factor=4):

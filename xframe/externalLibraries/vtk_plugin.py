@@ -107,9 +107,9 @@ class vtkSaver(VTKInterface):
             vtk_grid.GetPointData().AddArray(vtk_density)
             # print grid.GetPointData().GetNumberOfArrays()
             if isinstance(dset_names,str):
-                vtk_density.SetName("{}_{}".format(dset_names,n))
+                vtk_density.SetName("{}:{}".format(n,dset_names))
             elif isinstance(dset_names,(list,tuple)):
-                vtk_density.SetName("{}_{}".format(dset_names[n],n))                        
+                vtk_density.SetName("{}:{}".format(n,dset_names[n]))                        
         
         writer = vtk.vtkXMLStructuredGridWriter()
         writer.SetInputData(vtk_grid)
@@ -163,9 +163,9 @@ class vtkSaver(VTKInterface):
             vtk_grid.GetPointData().AddArray(vtk_density)
             # print grid.GetPointData().GetNumberOfArrays()
             if isinstance(dset_names,str):
-                vtk_density.SetName("{}_{}".format(dset_names,n))
+                vtk_density.SetName("{}:{}".format(n,dset_names))
             elif isinstance(dset_names,(list,tuple)):
-                vtk_density.SetName("{}_{}".format(dset_names[n],n))
+                vtk_density.SetName("{}:{}".format(n,dset_names[n]))
             else:
                 vtk_density.SetName("data_{}".format(n))
         #xprint(vtk_grid)
