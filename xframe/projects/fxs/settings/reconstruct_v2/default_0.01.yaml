@@ -9,6 +9,9 @@ grid:
   max_q:
     _value: False
     _description: Sets the maximal radial mometumtransver value resolved in the reciprocal grid.
+  max_nonzero_r:
+    _value: 1.1
+    _description: 'maximal considered real radial value that can attain non zero values, in units of the particle_radius, i.e. 1 means max_nonzero_r = particle_radius, 2 means max_nonzero_r = 2*particle_radius'
   max_order:
     _value: 63
   n_phi:
@@ -26,8 +29,9 @@ fourier_transform:
     _description: Choose midpoint rule or zernike approximation for the hankel transform inside used to calculate the fourier transform
   reciprocity_coefficient:
     _value:
-      command: '2.0'
+      command: 'np.pi'
     _description: 'Reciprocity relation is Q R = x N where Q,R are the radial limits in real an d reciprocal space and N is the number of radial steps of the grid (n_radial_point). The reciprocity coefficient is x. For x = pi this relation mimics the corresponding relation of cartesian grids used in Fast Fourier Transforms. Lowering x while keeping Q fixed effectively causes a smoothening of the real space density.'
+  
   allow_weight_calculation:
     _value: True
     _description: 'Whether or not to allow on-the-fly calculation of hankel transform weights.'

@@ -7,10 +7,6 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1" 
 os.environ["OMP_NUM_THREADS"] = "1" 
 os.environ['OPENBLAS_NUM_THREADS'] = "1"
-import numpy
-import scipy
-importlib.reload(numpy)
-importlib.reload(scipy)
 
 from xframe import startup_routines
 
