@@ -250,8 +250,8 @@ class ShrinkWrapParts():
         threshold = self._threshold
         def get_new_mask(convolution_data):
             #log.info(f'\n SW threshold = {threshold} and sigma = {self._gaussian_sigma}\n')
-            convolution_data=convolution_data.real #np.abs(convolution_data).real
-            #convolution_data=np.abs(convolution_data).real
+            #convolution_data=convolution_data.real #np.abs(convolution_data).real
+            convolution_data=np.abs(convolution_data.real)
             #convolution_data=np.abs(convolution_data).real #np.abs(convolution_data).real
             convolution_data[convolution_data<0]=0
             max_value= convolution_data.real.max()

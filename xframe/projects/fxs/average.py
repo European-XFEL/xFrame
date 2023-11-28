@@ -786,6 +786,7 @@ class Alignment():
     def __init__(self,process_factory,db,opt):
         self.opt = opt['opt'] # alignment options
         self.max_order = self.opt['max_order']
+        #xprint(f"Alignment is using {self.max_order+1} harmonic orders.")
         self.lm_split_ids = (np.arange(1,self.max_order+1)**2).astype(int)
         self.r_opt = opt['r_opt'] # options of the reconstructions
         #self.r_opt['grid']['max_order']=63
@@ -796,9 +797,10 @@ class Alignment():
                 Multiprocessing.comm_module.restart_control_worker()
         self.ft_grids = self.r_opt.internal_grid
         self.dimension = self.ft_grids['real'][:].shape[-1]
+        
         self.max_q = self.ft_grids['reciprocal'].__getitem__((slice(None),)+(0,)*self.dimension).max()
         self.max_r = self.ft_grids['real'].__getitem__((slice(None),)+(0,)*self.dimension).max()
-        self.Nr,self.Nq = self.ft_grids['real'].shape[0],self.ft_grids['reciprocal'].shape[0]
+        self.Nr,self.Nq = HankelTransformWeights._read_n_points(self.r_opt.grid.n_radial_points)# self.ft_grids['real'].shape[0],self.ft_grids['reciprocal'].shape[0]
         self.db = db
         self.process_factory = process_factory
         self._reference_reconstruction = 'not set'
@@ -857,7 +859,7 @@ class Alignment():
         
         fourier_transform_weights = load_fourier_transform_weights(self.dimension,r_opt.fourier_transform.type,self.max_order,(self.Nr,self.Nq),r_opt.fourier_transform.reciprocity_coefficient,allow_weight_saving=True,n_processes=self.opt.multi_process.n_processes_weight_generation)
         
-        sft = SphericalFourierTransform.from_weight_dict(fourier_transform_weights,r_max = max_r,use_gpu=self.opt.GPU.use,other = harmonic_transform_opt)
+        sft = SphericalFourierTransform.from_weight_dict(fourier_transform_weights,q_max = max_q,use_gpu=self.opt.GPU.use,other = harmonic_transform_opt,r_support = r_opt.particle_radius*r_opt.grid.max_nonzero_r)
 
         if self.dimension == 2:
             bandwidth = fourier_transform_weights['bandwidth']
