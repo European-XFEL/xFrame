@@ -745,6 +745,7 @@ class SphericalFourierTransform:
         def inverse_cmplx(data):
             rcoeff = harm_forward_cmplx(data)
             coeff = hankel_inverse_cmplx(rcoeff)
+            #temp = harm_inverse_cmplx(coeff)
             return harm_inverse_cmplx(coeff)
         return forward_cmplx,inverse_cmplx
     def empty_density(self):

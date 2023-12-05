@@ -232,14 +232,15 @@ def cross_correlation_mask(data_grid,datadict):
     return mask
 
 
-def modify_cross_correlation(cc,cc_mask,phis,max_order,average_intensity=False,enforce_max_order=False, low_pass_order_in_q = False, enforce_zero_odd_harmonics = False,q1q2_symmetric=False, pi_periodicity = False, interpolate_masked=False,apply_binned_mean = False,subtract_average_intensity= False):
+def modify_cross_correlation(cc,cc_mask,phis,max_order,average_intensity=False,enforce_max_order=False, low_pass_order_in_q = False, enforce_zero_odd_harmonics = False,q1q2_symmetric=False, pi_periodicity = False, interpolate_masked=False,apply_binned_mean = False,subtract_average_intensity= False,even=False):
     '''
     Imposes several constraints on the cross_correlation:
     1) enforce_max_ordes: $C_n = 0$ for $n >$ max order, since by $C_n = sum_l=|m|^\infty B_l(q_1,q_2) \overline{P}^{|m|}_l(\theta(q_1))  \overline{P}^{|m|}_l(\theta(q_2))$ they dont contribute to B_l with l<=max_order.
     2) low_pass_order_in_q: butterworth low pass filter in q1 and q2 of cc
-    3) enforce_zero_odd_harmonics: cc is pi symmetric in phi => odd circular harmonic coefficients should be zero
+    3) enforce_zero_odd_harmonics: cc is pi symmetric in phi => odd circular harmonic coefficients should be zero (ONLY VALID FOR "flat" Ewalds sphere)
     4) q1q2_symmetric: enforces cc(q1,q2,\delta) = cc(q2,q1,-\delta).
-    5) pi_periodicity: same as 3) but enforced directy on the CC values if number of phis is even.
+    5) pi_periodicity: same as 3) but enforced directy on the CC values if number of phis is even (ONLY VALID FOR "flat" Ewalds sphere).
+    6) pi_symmetric: C(q1,q2,\delta) = C(q1,q2,-\delta) is true if C was averaged over uniform distribution of sample orientations.
     '''
     #log.info('enforce max order {}, low pass = {}, zero odd ={}, q1q2 {}, qhipi {}, interpolate {}, bunned_mean {}'.format(enforce_max_order, low_pass_order_in_q, enforce_zero_odd_harmonics, q1q2_transpose , phi_pi, interpolate_masked,apply_binned_mean))
     if subtract_average_intensity and isinstance(average_intensity,np.ndarray):
@@ -278,6 +279,15 @@ def modify_cross_correlation(cc,cc_mask,phis,max_order,average_intensity=False,e
         cc,mask = masked_mean([np.swapaxes(cc_angle_swaped,0,1),cc],[np.swapaxes(cc_mask_angle_swaped,0,1),cc_mask])
         cc_mask = mask.astype(bool)
     #log.info('binned_mean: {}'.format(apply_binned_mean))
+    if even:
+        cc_tmp = cc[...,1:].copy()
+        cc_mask_tmp = cc_mask[...,1:].copy()
+        #cc[...,1:] = (cc_tmp+cc_tmp[...,::-1])/2
+        mean,mask = masked_mean([cc_tmp[...,::-1],cc_tmp],[cc_mask_tmp[...,::-1],cc_mask_tmp])
+        cc[...,1:]=mean
+        cc_mask[...,1:]=mask
+        #cc[...,1:]/=2
+        #cc_mask[...,1:] |= cc_mask_tmp[...,::-1]
     if apply_binned_mean:
         log.info('calculating binned mean')
         cc,cc_mask,phis = binned_mean(cc_mask,cc,max_order,phis)

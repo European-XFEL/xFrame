@@ -16,6 +16,7 @@ from scipy.special import roots_legendre
 from scipy.special import comb as binomial
 from scipy.special import sph_harm
 from scipy.linalg import polar as polar_decomp
+from scipy.stats import rv_discrete
 
 from scipy.linalg import eigh
 import sys
@@ -1611,10 +1612,48 @@ class CharFuncSO3(np.ndarray):
     def distrib(self):
         return self._soft.inverse_cmplx(self).reshape(self.so3_grid.shape[:-1])/self.so3_const
     @property
-    def integrate_distib(self):
+    def pmf(self):
+        density = self.distrib
+        N = len(self.so3_grid)
+        pmf = (density.real*(2*np.pi/N)**2*self._soft.legendre_weights[None,:,None])
+        min_pmf = pmf.min()
+        if min_pmf<0:
+            pmf[pmf<np.abs(min_pmf)]=0
+            pmf/=np.sum(pmf)
+        return pmf
+        
+    @property
+    def integrate_distrib(self):
         distrib = self._soft.inverse_cmplx(self).reshape(self.so3_grid.shape[:-1])/self.so3_const
         return self._soft.integrate_over_so3(distrib)
+    def sample(self,size = 100):
+        pmf = self.pmf.copy()
+        flat_pmf = pmf.reshape(-1)
+        vals = np.arange(len(flat_pmf))
+        flat_pos_pmf = flat_pmf[flat_pmf>0]
+        pos_vals = vals[flat_pmf>0]
+        rv = rv_discrete(name='so3_delta',values = (pos_vals,flat_pos_pmf))
 
+        samples = rv.rvs(size = size)
+        abg_samples = self.so3_grid.reshape(-1,3)[samples,:]
+        return abg_samples
+
+    def get_sampling_func(self):
+        pmf = self.pmf.copy()
+        flat_pmf = pmf.reshape(-1)
+        vals = np.arange(len(flat_pmf))
+        flat_pos_pmf = flat_pmf[flat_pmf>0]
+        pos_vals = vals[flat_pmf>0]
+        rv = rv_discrete(name='so3_delta',values = (pos_vals,flat_pos_pmf))
+        flat_so3_grid = self.so3_grid.reshape(-1,3)
+
+        def sample_func(size = 100):
+            samples = rv.rvs(size = size)
+            abg_samples = flat_so3_grid[samples,:].copy()
+            return abg_samples
+        return sample_func
+        
+        
     def mean(self,so3_function):
         '''
         Computes the average of a scalar/ndarray valued function on SO3 using the current probability distribution.
@@ -1740,6 +1779,8 @@ class CharFuncFactory:
     #1D distribution to SO(3) distribution via Bernstein functions
     @staticmethod
     def gaussian(bw = 16, sigma=1,center_rotation=None):
+        if sigma<np.sqrt(2*np.pi)/bw:
+            log.warning('sigma < sqrt(2*pi)/bw : distribution will contain negative values due to finite sampling. Incriase bw or decrease sigma to avoid this situation.')
         gauss = CharFuncSO3(bw)
         coeffs = gauss._soft.lnks
         if center_rotation is None:

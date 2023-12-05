@@ -311,7 +311,14 @@ class MTIP:
         Nr,Nq = HankelTransformWeights._read_n_points(opt.grid.n_radial_points)
         #max_r = HankelTransformWeights._reciprocity_relation(Nq,opt.fourier_transform.reciprocity_coefficient,self.max_q)
         harmonic_transform_opt = { i:opt.grid.get(i,0) for i in ['n_phi','n_theta']}
-        sft = SphericalFourierTransform.from_weight_dict(self.fourier_transform_weights,q_max = max_q,r_support = opt.particle_radius*opt.grid.max_nonzero_r,use_gpu=opt.GPU.use,other = harmonic_transform_opt)
+
+        max_nonzero_r = opt.grid.max_nonzero_r
+        if max_nonzero_r is None:
+            r_support = None
+        else:
+            r_support =  opt.particle_radius*max_nonzero_r
+        
+        sft = SphericalFourierTransform.from_weight_dict(self.fourier_transform_weights,q_max = max_q,r_support = r_support,use_gpu=opt.GPU.use,other = harmonic_transform_opt)
 
         if self.dimensions == 2:
             bandwidth = self.fourier_transform_weights['bandwidth']

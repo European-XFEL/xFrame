@@ -420,7 +420,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         settings, raw_settings = self.load('settings',direct_path=path)
         return settings
     
-    def _save_first_invariants(self,bls,radial_points,base_path,options,name='',mask = True):
+    def _save_first_invariants(self,bls,radial_points,base_path,options,name='',mask = True,cmap='plasma',scale = 'log',plot_abs = True):
         bls = bls.copy()
         if isinstance(mask,np.ndarray):
             bls[~mask]=0
@@ -467,7 +467,10 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                           }
                 layout_part.append(layout)
                 try:
-                    plot_data_part.append(np.abs(bls[o]))
+                    if plot_abs:
+                        plot_data_part.append(np.abs(bls[o]))
+                    else:
+                        plot_data_part.append(bls[o])
                 except IndexError:
                     plot_data_part.append(np.zeros_like(bls[0],dtype = float))
                     log.info('IndexError')
@@ -475,7 +478,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             layouts.append(layout_part)
             plot_data.append(plot_data_part)
                                                     
-        fig_bl_masks = heat2D_multi.get_fig(plot_data,scale = 'log',layout = layouts,grid =grid[:],shape = shape,size = (30,shape[0]*5),vmin= vmin, vmax = vmax,cmap='plasma')
+        fig_bl_masks = heat2D_multi.get_fig(plot_data,scale = scale,layout = layouts,grid =grid[:],shape = shape,size = (30,shape[0]*5),vmin= vmin, vmax = vmax,cmap=cmap)
         bl_path = base_path +name+'Bl.matplotlib'
         self.save(bl_path,fig_bl_masks,dpi = 300)
     def _save_C0(self,c0,radial_points,base_path,options,name=''):
@@ -697,10 +700,12 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             xprint('first invar')
             if options.get('plot_first_invariants',False):
                 for key,bls in proj_class.b_coeff.items():
-                    bl_args = np.angle(bls)+np.pi
+                    bl_args = np.angle(bls)
                     mask = proj_class.b_coeff_masks[key]
                     self._save_first_invariants(bls,proj_class.data_radial_points,data_folder,options,name="first_{}_".format(key))
-                    self._save_first_invariants(bl_args,proj_class.data_radial_points,data_folder,options,name="first_arg_of_{}_".format(key))
+                    arg_opt = {'plot_range':[0,np.pi]}
+                    #xprint(f"bl args minmax = {[bl_args.min(),bl_args.max()]}")
+                    self._save_first_invariants(bl_args,proj_class.data_radial_points,data_folder,arg_opt,scale = 'lin',cmap='coolwarm',name="first_arg_of_{}_".format(key))
                     self._save_first_invariants(bls,proj_class.data_radial_points,data_folder,options,name="mask_of_{}_".format(key),mask = mask)
         except Exception as e:
             log.info('Plotting first invariants failed !')

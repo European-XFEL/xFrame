@@ -60,7 +60,7 @@ qrange_xcca:
   _value: False
 phi_range:
   _value:
-    command: '(0.0, 2*np.pi, 1536, "exact")'
+    command: '(0.0, 2*np.pi, 1024, "exact")'
 fc_n_max:
   _value: 15 
 

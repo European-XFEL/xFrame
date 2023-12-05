@@ -798,8 +798,10 @@ class Alignment():
         self.ft_grids = self.r_opt.internal_grid
         self.dimension = self.ft_grids['real'][:].shape[-1]
         
-        self.max_q = self.ft_grids['reciprocal'].__getitem__((slice(None),)+(0,)*self.dimension).max()
-        self.max_r = self.ft_grids['real'].__getitem__((slice(None),)+(0,)*self.dimension).max()
+        self.max_q = self.ft_grids['reciprocal'].__getitem__((slice(None),)+(0,)*self.dimension).max()+self.ft_grids['reciprocal'].__getitem__((slice(None),)+(0,)*self.dimension).min()
+        
+        #xprint(f"max q = {self.max_q}")
+        #self.max_r = self.ft_grids['real'].__getitem__((slice(None),)+(0,)*self.dimension).max()
         self.Nr,self.Nq = HankelTransformWeights._read_n_points(self.r_opt.grid.n_radial_points)# self.ft_grids['real'].shape[0],self.ft_grids['reciprocal'].shape[0]
         self.db = db
         self.process_factory = process_factory
@@ -854,12 +856,17 @@ class Alignment():
     def assemble_transform_op(self,r_opt):
         max_q = self.max_q
         Nr,Nq = self.Nr,self.Nq
-        max_r = self.max_r
         harmonic_transform_opt = { i:r_opt.grid.get(i,0) for i in ['n_phi','n_theta']}
         
         fourier_transform_weights = load_fourier_transform_weights(self.dimension,r_opt.fourier_transform.type,self.max_order,(self.Nr,self.Nq),r_opt.fourier_transform.reciprocity_coefficient,allow_weight_saving=True,n_processes=self.opt.multi_process.n_processes_weight_generation)
+        max_nonzero_r = r_opt.grid.get("max_nonzero_r",None)
+        if max_nonzero_r is None:
+            r_support = None
+        else:
+            r_support = r_opt.particle_radius*max_nonzero_r
+            
         
-        sft = SphericalFourierTransform.from_weight_dict(fourier_transform_weights,q_max = max_q,use_gpu=self.opt.GPU.use,other = harmonic_transform_opt,r_support = r_opt.particle_radius*r_opt.grid.max_nonzero_r)
+        sft = SphericalFourierTransform.from_weight_dict(fourier_transform_weights,q_max = max_q,use_gpu=self.opt.GPU.use,other = harmonic_transform_opt,r_support = r_support)
 
         if self.dimension == 2:
             bandwidth = fourier_transform_weights['bandwidth']
