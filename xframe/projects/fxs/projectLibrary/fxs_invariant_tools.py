@@ -260,25 +260,7 @@ def modify_cross_correlation(cc,cc_mask,phis,max_order,average_intensity=False,e
             cc_coeff[...,max_order+1:]=0
         if enforce_zero_odd_harmonics:
             cc_coeff[...,1::2]=0
-        cc = ht.inverse(cc_coeff)
-        log.info(cc.shape)
-    if pi_periodicity:
-        assert cc.shape[-1]%2 == 0, 'for odd number of phi symmetry enforcing is not possible since phi+pi is not an existing grid point.'
-        assert cc.shape[-1] == len(phis), 'Cross correlation has {} angular datapoints but only {} angle values are given.'.format(cc.shape[-1],len(phis))
-        bad_angles = (phis < np.pi/2) | (phis >= 3*np.pi/2)
-        cc[...,bad_angles] = 0
-        cc += np.roll(cc,len(phis)//2,axis=-1)
-        cc_mask = cc_mask | np.roll(cc_mask,len(phis)//2,axis=-1)
-    if q1q2_symmetric:
-        #swap angles
-        log.info('Enforce cross correlation symmetry q1q2\delta = q2q1-\delta')
-        cc_angle_swaped = cc.copy()
-        cc_angle_swaped[...,1:] = cc[...,1:][...,::-1]
-        cc_mask_angle_swaped = cc_mask.copy()
-        cc_mask_angle_swaped[...,1:] = cc_mask[...,1:][...,::-1]
-        cc,mask = masked_mean([np.swapaxes(cc_angle_swaped,0,1),cc],[np.swapaxes(cc_mask_angle_swaped,0,1),cc_mask])
-        cc_mask = mask.astype(bool)
-    #log.info('binned_mean: {}'.format(apply_binned_mean))
+            cc = ht.inverse(cc_coeff)
     if even:
         cc_tmp = cc[...,1:].copy()
         cc_mask_tmp = cc_mask[...,1:].copy()
@@ -291,13 +273,36 @@ def modify_cross_correlation(cc,cc_mask,phis,max_order,average_intensity=False,e
     if apply_binned_mean:
         log.info('calculating binned mean')
         cc,cc_mask,phis = binned_mean(cc_mask,cc,max_order,phis)
+    if q1q2_symmetric:
+        #swap angles
+        log.info('Enforce cross correlation symmetry q1q2\delta = q2q1-\delta')
+        cc_angle_swaped = cc.copy()
+        cc_angle_swaped[...,1:] = cc[...,1:][...,::-1]
+        cc_mask_angle_swaped = cc_mask.copy()
+        cc_mask_angle_swaped[...,1:] = cc_mask[...,1:][...,::-1]
+        cc,mask = masked_mean([np.swapaxes(cc_angle_swaped,0,1),cc],[np.swapaxes(cc_mask_angle_swaped,0,1),cc_mask])
+        cc_mask = mask.astype(bool)
+        #log.info('binned_mean: {}'.format(apply_binned_mean))
+    if pi_periodicity:
+        assert cc.shape[-1]%2 == 0, 'for odd number of phi symmetry enforcing is not possible since phi+pi is not an existing grid point.'
+        assert cc.shape[-1] == len(phis), 'Cross correlation has {} angular datapoints but only {} angle values are given.'.format(cc.shape[-1],len(phis))
+        bad_angles = (phis < np.pi/2) | (phis >= 3*np.pi/2)
+        cc_diag = np.diagonal(cc).copy().T
+        cc_diag[:,bad_angles] = 0
+        xprint(f"min {phis.min()} max {phis.max()} nphi = {len(phis)}")
+        xprint(f"nangles = {len(bad_angles)} bad angles = {bad_angles.sum()}")
+        cc_diag += np.roll(cc_diag,len(phis)//2,axis=-1)
+        diag_ids = np.diag_indices(cc.shape[0])
+        xprint(f'cc shape = {cc.shape} cc diag shape = {cc[diag_ids].shape} diag in shape = {cc_diag.shape}')
+        cc[diag_ids]=cc_diag
+        #cc_mask = cc_mask | np.roll(cc_mask,len(phis)//2,axis=-1)                 
     if interpolate_masked:
         log.info('interpolating masked cc areas')
         cc =  interpolate(cc,cc_mask,phis)
         cc_mask[...]=True
-    
-    return cc,cc_mask,phis
         
+    return cc,cc_mask,phis
+
 def ccd_remove_0_order(cc):
     ht = HarmonicTransform('real',{"dimensions":2,'n_angular_points':cc.shape[-1]})
     ccf = ht.forward(cc)
@@ -359,8 +364,154 @@ def interpolate(cc,mask,phis):
     cci = cci.reshape(shape)
     mask = mask.reshape(shape)
     return cci
-    
 
+
+class CC:
+    """
+    Class that collects functions concerning the averaged FXS cross correlation function.
+    """ 
+    
+    ## mod functions modify cross correlation data
+    ## Args: cc + arbitary keyword arguments
+    ## Out: cc or (cc,cc_mask)
+    @staticmethod
+    def mod_cc_symmetry(cc,cc_mask=None,**kwargs):
+        #swap angles
+        log.info('Enforce cross correlation symmetry q1q2\delta = q2q1-\delta')
+        cc_angle_swaped = cc.copy()
+        cc_angle_swaped[...,1:] = cc[...,1:][...,::-1]
+        if mask is None:
+            cc = (np.swapaxes(cc_angle_swaped,0,1)+cc)/2
+            return cc
+        else:
+            cc_mask_angle_swaped = cc_mask.copy()
+            cc_mask_angle_swaped[...,1:] = cc_mask[...,1:][...,::-1]
+            cc,mask = masked_mean([np.swapaxes(cc_angle_swaped,0,1),cc],[np.swapaxes(cc_mask_angle_swaped,0,1),cc_mask])
+            cc_mask = mask.astype(bool)
+            return cc,cc_mask
+    @staticmethod
+    def mod_force_even(cc,cc_mask=None,**kwargs):
+        log.info('Force cross correlation to be even as function of its angle')
+        # Averaged FXS cross-correlations have to be even in the limit of infinite measurements.
+        # This causes its harmonic coefficients and therfore the deg 2 invariants Bl to be real.
+        cc_out = np.array(cc)
+        cc_tmp = cc_out[...,1:]
+        if mask is None:
+            cc_mask_tmp = cc_mask[...,1:].copy()
+            mean = (cc_tmp[...,::-1]+cc_tmp)/2
+            cc_out[...,1:]=mean
+            return cc
+        else:        
+            cc_mask_tmp = cc_mask[...,1:].copy()
+            mean,mask = masked_mean([cc_tmp[...,::-1],cc_tmp],[cc_mask_tmp[...,::-1],cc_mask_tmp])
+            cc_out[...,1:]=mean
+            mask_out = np.array(cc_mask)
+            mask_out[...,1:]=mask
+        return cc_out,mask_out
+    @staticmethod
+    def mod_pi_periodicity(cc,**kwargs):
+        # In small scattering angle (flat Ewald's sphere) apporximation CC becomes Pi periodic.
+        # Therefore CC is completely specified by its values phi in [pi/2,3/2 pi]. and we can use
+        # CC(...,phi)=CC(..., phi%pi+pi/2)
+        # This is useful since noise is amplified, in CC, around phi = 0 duf to self correlation.
+        # Assumes cc is sampled on a uniform angular grid
+        
+        nphis = cc.shape[-1]
+        phi_ids = np.arange(nphis)
+        assert cc.shape[-1]%2 == 0, 'for odd number of phi symmetry enforcing is not possible since phi+pi is not an existing grid point.'
+        bad_angles = np.ones(nphis,dtype =bool)
+        phi_half_id = int(nphis/4+0.5)
+        bad_angles[phi_half_id:phi_half_id+nphis//2]=False
+        cc_out = np.array(cc)
+        cc_out[...,bad_angles]=0
+        cc_out += np.roll(cc_out,nphis//2,axis=-1)
+        return cc_out
+    
+    @staticmethod
+    def mod_pi_periodicity_diag(cc,**kwargs):
+        # In small scattering angle (flat Ewald's sphere) apporximation CC becomes Pi periodic.
+        # Therefore CC is completely specified by its values phi in [pi/2,3/2 pi]. and we can use
+        # CC(q,q,phi)=CC(q,q, phi%pi+pi/2)
+        # This is useful since noise is amplified, in CC, around phi = 0 duf to self correlation.
+        # Assumes cc is sampled on a uniform angular grid
+        symetrized_cc = CC.mod_pi_periodicity(cc)
+        diag_ids = np.diag_indices(cc.shape[0])
+        diag_sym = symetrized_cc[diag_ids].copy()
+        symetrized_cc[:]=cc
+        symetrized_cc[diag_ids]=diag_sym
+        return symetrized_cc
+
+    @staticmethod
+    def mod_subtract_average_intensity(cc,average_intensity = None,**kwargs):
+        if not isinstance(average_intensity,np.ndarray):
+            log.warning('Provided average intensity is not a numpy array.Skipping.')
+            cc_out = cc
+        else:
+            cc_out = np.array(cc)
+            cc_out -= average_intensity[:,None,None]*average_intensity[None,:,None]
+        return cc_out
+
+    @staticmethod
+    def mod_interpolate_masked(cc,cc_mask = None,phis = None,**kwargs):
+        if not isinstance(cc_mask,np.ndarray):
+            log.warning("Provided cc_mask is not a numpy array. Skipping!")
+            cc_out = cc
+            mask_out = cc_mask
+        else:
+            log.info('interpolating masked cc areas')
+            if not isinstance(phis,np.ndarray):
+                nphis = cc.shape[-1]
+                phis = np.arange(nphis)*2*np.pi/nphis
+            cc_out = interpolate(cc,cc_mask,phis)
+            mask_out = np.ones_like(cc_mask,dtype = bool)           
+        return cc_out,mask_out
+    
+    def modifier_names():
+        names = []
+        for key in CC.__dict__.keys():
+            if key[:4]=='mod_':
+                names.append(key[4:])
+        return names
+    @staticmethod
+    def modify(cc,cc_mask=None,phis=None, actions = [],**kwargs):
+        for action in actions:
+            try:
+                modifier = getattr(CC,'mod_'+action)
+            except AttributeError as e:
+                log.warning(f"Action '{action}' not defined.Skipping!")
+                continue
+            out = modifier(cc,cc_mask=cc_mask,phis=phis,**kwargs)
+            if isinstance(out,np.ndarray):
+                cc = out
+            else:
+                cc,cc_mask = out
+        return cc,cc_mask
+
+
+class CCN:
+    """
+    Class that collects functions concerning harmonic coefficients of the averaged FXS cross correlation function.
+    """
+    @staticmethod
+    def denoise_tv(ccn,weight = 0.1,n_processes = False,use_multi_processing=True,**kwargs):        
+        def func_real(orders,**kwargs):
+            denoiser = mLib.skimage.denoise_tv_chambolle
+            cns = np.zeros((len(orders),) + ccn.shape[:-1],dtype = ccn.dtype)
+            for o_id,o in enumerate(orders):
+                cns[o_id]=denoiser(ccn[...,o].real,weight=weight)
+            return cns
+        def func(orders,**kwargs):
+            denoiser = mLib.skimage.denoise_tv_chambolle
+            cns = np.zeros((len(orders),) + ccn.shape[:-1],dtype = ccn.dtype)
+            for o_id,o in enumerate(orders):
+                cns[o_id]=denoiser(ccn[...,o].real,weight=weight)+1.j*denoiser(ccn[...,o].imag,weight=weight)
+            return cns
+        if ccn.dtype == np.dtype(complex):
+            f = func
+        else:
+            f = func_real
+        denoised_ccn = Multiprocessing.process_mp_request(f,input_arrays=[np.arange(ccn.shape[-1])],call_with_multiple_arguments=True,n_processes = n_processes)
+        return np.moveaxis(denoised_ccn,0,-1)
 ########### deg2 invariants and cross correlations  ##################
 def get_q_slice(q_mask):
     q_lims = [0,len(q_mask)]
@@ -1200,7 +1351,7 @@ def deg2_invariant_to_projection_matrices(dim,b_coeff,q_id_limits=False,sort_mod
         #if bad_eigen_values_detected.any():
         #    log.info('Eigenvalues lower than Noise floor estimate detected in orders {}. Threating them as 0.'.format(orders[bad_eigen_values_detected]))
     return  (proj_matrices,eigen_values)
-def deg2_invariant_eigenvalues(b_matrix,sort_mode=0):
+def deg2_invariant_eigenvalues(b_matrix,sort_mode=0,use_svd = False):
     # Calculates the eigenvalue/eignvector pairs and sorts them.
     # Assumes input matrix to be hermitian
     # sort_mode can be 0 or 1
@@ -1211,8 +1362,13 @@ def deg2_invariant_eigenvalues(b_matrix,sort_mode=0):
     b_matrix = (b_matrix + b_matrix.T.conj())/2
     is_zero = np.isclose(b_matrix,0).all() 
     if not is_zero:
-        # at the time of writing this code comparing the eigen_decomposition of b_matrix with itself yielded lower errors when using scipy linalg.eigh with driver 'ev'. 
-        eig_vals,eig_vect=sp.linalg.eigh(b_matrix,driver = 'ev') 
+        # at the time of writing this code comparing the eigen_decomposition of b_matrix with itself yielded lower errors when using scipy linalg.eigh with driver 'ev'.
+
+        if use_svd:
+            eig_vect,eig_vals,_ = np.linalg.svd(b_matrix,driver = 'ev')
+        else:
+            eig_vals,eig_vect = sp.linalg.eigh(b_matrix,driver = 'ev')
+        
         #eig_vals,eig_vect=np.linalg.eigh(b_matrix)
     else:
         eig_vect = np.zeros(b_matrix.shape)

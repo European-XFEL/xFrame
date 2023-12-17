@@ -28,6 +28,7 @@ from xframe.library.interfaces import SphericalHarmonicTransformDependency
 from xframe.library.interfaces import SoftDependency
 from xframe.library.interfaces import DiscreteLegendreTransformDependency
 from xframe.library.interfaces import PeakDetectorDependency
+from xframe.library.interfaces import SkimageDependency
 from scipy.stats import ttest_1samp
 from scipy.optimize import root_scalar as sp_root
 
@@ -37,6 +38,7 @@ gsl = GSLDependency
 shtns = SphericalHarmonicTransformDependency
 Soft = SoftDependency
 leg_trf = DiscreteLegendreTransformDependency
+skimage = SkimageDependency
 nj = False
 PeakDetector = PeakDetectorDependency
 

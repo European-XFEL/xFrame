@@ -334,7 +334,7 @@ class heatPolar2D:
         
 class heat2D:
     @classmethod
-    def get_fig(cls,data,grid=False,layout={},scale='lin',vmin = False,vmax =False,cmap='inferno'):   
+    def get_fig(cls,data,grid=False,layout={},scale='lin',vmin = False,vmax =False,cmap='inferno',symlog_thresh=1e-8):   
         fig = plt.figure()
         ax = fig.add_subplot(111)
         #            cmap=plt.get_cmap('viridis')
@@ -356,7 +356,7 @@ class heat2D:
             y=np.swapaxes(y,0,1)
             #log.debug('r shape = {} phi shape={}'.format(x.shape,y.shape))
             #        plt.pcolormesh(th, r, z)
-        if scale=='log':
+        if scale=='log' or scale == 'symlog':
             cmap.set_bad(cmap(0))
             if isinstance(vmin,bool) and (not isinstance(vmax,bool)):
                 vmin = data.min()
@@ -375,7 +375,10 @@ class heat2D:
                 else:            
                     orders = 12
                     vmin,vmax = [max_value*10**(-orders//2),max_value]
-            norm = matplotlib.colors.LogNorm(vmin=vmin,vmax=vmax)
+            if scale =='log':
+                norm = matplotlib.colors.LogNorm(vmin=vmin,vmax=vmax)
+            else:
+                norm = matplotlib.colors.SymLogNorm(symlog_thresh,vmin=vmin,vmax=vmax)
             heatmap=ax.pcolormesh(x,y,data,norm = norm,cmap=cmap, shading ='auto')
         else:
             heatmap=ax.pcolormesh(x,y,data,cmap=cmap,vmin = vmin,vmax =vmax,shading='auto')

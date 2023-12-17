@@ -342,13 +342,20 @@ class InvariantExtractor:
         if min_type == 'line':
             min_mask,q_id_mins = self.calc_deg_2_invariant_line_mask(dopt.bl_q_limits.min[min_type])
             q_id_limits[:,:,0]=q_id_mins
+        elif min_type == 'q1q2_ids':            
+            lim_dict = dopt.bl_q_limits.min.q1q2_ids
+            min_mask,q_ids = self.calc_deg_2_invariant_q1q2_ids_mask(lim_dict)
+            q_id_limits[:,:,0]=q_ids            
         else:
-            min_mask = empty_mask.copy()
-            
+            min_mask = empty_mask.copy()            
         # max_limit        
         if max_type == 'line':
             max_mask,q_id_maxs = self.calc_deg_2_invariant_line_mask(dopt.bl_q_limits.max[max_type],invert = True)
             q_id_limits[:,:,1]=q_id_maxs
+        elif max_type == 'q1q2_ids':
+            lim_dict = dopt.bl_q_limits.max.q1q2_ids
+            max_mask,q_ids = self.calc_deg_2_invariant_q1q2_ids_mask(lim_dict,upper_limit=True)
+            q_id_limits[:,:,1]=q_ids
         else:
             max_mask = empty_mask.copy()
 
@@ -363,8 +370,39 @@ class InvariantExtractor:
         #log.info(f'computed q_ids shape = {q_id_limits.shape}')
         return mask,q_id_limits
         
-        
-        
+    def calc_deg_2_invariant_q1q2_ids_mask(self,lim_dict, upper_limit = False):
+        qs = self.data_radial_points
+        Nq = len(qs)
+        orders = np.arange(self.max_order+1)
+        Nl = len(orders)
+        mask = np.ones((Nl,Nq,Nq),dtype=bool)
+        if upper_limit:
+            q_id_lims = np.full((Nl,2),Nq,dtype = int)  
+        else:
+            q_id_lims = np.zeros((Nl,2),dtype = int)
+        for order,lims in lim_dict.items():
+            order = int(order)
+            if upper_limit:
+                m1 = qs<lims[0]
+                m2 = qs<lims[1]
+                mask[order] = m1[:,None]&m2[None,:]
+                q_id_lims[order,:]=[np.argmin(m1),np.argmin(m2)]
+                if m1.all():
+                    q_id_lims[order,0]=Nq
+                if m2.all():
+                    q_id_lims[order,1]=Nq
+            else:
+                m1 = qs>=lims[0]
+                m2 = qs>=lims[1]
+                mask[order] = m1[:,None]&m2[None,:]
+                q_id_lims[order,:]=[np.argmax(m1),np.argmax(m2)]
+                if not m1.any():
+                    q_id_lims[order,0]=Nq-1
+                if not m2.any():
+                    q_id_lims[order,1]=Nq-1
+        #xprint(f"qlims = {q_id_lims}")
+        return mask,q_id_lims
+    
     def calc_deg_2_invariant_line_mask(self,line_specifier,invert=False):
         qs = self.data_radial_points
         n_qs = len(qs)
@@ -372,7 +410,10 @@ class InvariantExtractor:
         data_grid = GridFactory.construct_grid('uniform',[orders,qs])
         #log.info(f'line specifyer type = {type(line_specifier)}')
         if isinstance(line_specifier,tuple):
+            min_order = line_specifier[0][0]
             mask1 = (-1*distance_from_line_2d(np.array(line_specifier[0]),data_grid[:]))>=0
+            if min_order > 0:
+                mask1[:min_order-1]=True
             #log.info(f'mask1 shape = {mask1.shape}')
             mask2 = (-1*distance_from_line_2d(np.array(line_specifier[1]),data_grid[:]))>=0
             if not invert:
@@ -396,7 +437,10 @@ class InvariantExtractor:
             q_id_limits = np.stack((q1_id,q2_id),axis = -1) 
             mask = mask1[:,:,None] * mask2[:,None,:]
         else:
+            min_order = line_specifier[0][0]
             mask = (-1*distance_from_line_2d(np.array(line_specifier),data_grid[:]))>=0
+            if min_order > 0:
+                mask[:min_order-1]=True
             #log.info(f'mask shape = {mask.shape}')
             if not invert:
                 q_id = np.argmax(mask,axis = 1)
@@ -425,8 +469,8 @@ class InvariantExtractor:
             for o in range(len(b_coeff)):
                 q_slice = slice(*q_id_limits[o,0])
                 b_coeff_out[o,q_slice,q_slice] = nearest_positive_semidefinite_matrix(b_coeff[o,q_slice,q_slice],low_positive_eigenvalues_to_zero=False)
-            #eig,_=np.linalg.eigh(b_coeff_out[2])
-            #log.info(f'min eigenvalue after corrections = {np.min(eig)}')
+        eig,_=np.linalg.eigh(b_coeff_out[2])
+        xprint(f'min eigenvalue after corrections = {np.sort(eig)[::-1][:30]}')
         return b_coeff_out
     
 

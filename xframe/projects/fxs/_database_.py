@@ -562,6 +562,8 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         out_dict['qs']=qs
         #log.info('\n MAX Q={}'.format(qs[-1]))
         phis = data['phi']
+        if phis.max()>7:
+            phis*=2*np.pi/360
         out_dict['angular_points']=phis
         out_dict['phis']=phis        
         out_dict['pi_in_q']=data.get('pi_in_q',True)
