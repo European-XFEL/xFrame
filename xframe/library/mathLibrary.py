@@ -28,7 +28,6 @@ from xframe.library.interfaces import SphericalHarmonicTransformDependency
 from xframe.library.interfaces import SoftDependency
 from xframe.library.interfaces import DiscreteLegendreTransformDependency
 from xframe.library.interfaces import PeakDetectorDependency
-from xframe.library.interfaces import SkimageDependency
 from scipy.stats import ttest_1samp
 from scipy.optimize import root_scalar as sp_root
 
@@ -38,8 +37,6 @@ gsl = GSLDependency
 shtns = SphericalHarmonicTransformDependency
 Soft = SoftDependency
 leg_trf = DiscreteLegendreTransformDependency
-skimage = SkimageDependency
-nj = False
 PeakDetector = PeakDetectorDependency
 
 from xframe.library.math_transforms import get_harmonic_transform,HankelTransformWeights,HankelTransform,SphericalFourierTransform
@@ -1912,7 +1909,7 @@ def _error(f,img,lamb=0.1):
 def _chambolle_step(pk,f,lamb,tau):
     return tau*_diff(_div(pk[0],pk[1])-f/lamb)
 
-def denoise_tv_chambolle(img,lamb=0.1,tau=0.25,n_iterations=70,pk=None):
+def denoise_tv_chambolle(img,lamb=0.1,tau=0.25,n_iterations=70,pk=None,return_loss=False):
     '''
     Implementation of Chambolle's implementation of Total variation denoising.
     Reference:
@@ -1920,24 +1917,45 @@ def denoise_tv_chambolle(img,lamb=0.1,tau=0.25,n_iterations=70,pk=None):
     An Algorithm for Total Variation Minimization and Applications
     Journal of Mathematical Imaging and Vision 20: 89–97, 2004
     '''
+    errs = []
     if pk is None:
         pk = np.zeros((2,)+img.shape,dtype=img.dtype)
-        
-    for i in range(n_iterations):
-        s=_chambolle_step(pk,img,lamb,tau)
-        pk=(pk+s)/(1+np.linalg.norm(s,axis=0))
-    return img-lamb*_div(pk[0],pk[1])
 
-def denoise_tv_chambolle_sparse_mask(img,mask,lamb=0.1,tau=0.25,n_iterations=70,mask_iterations=10):
+    if return_loss:
+        for i in range(n_iterations):
+            s=_chambolle_step(pk,img,lamb,tau)
+            pk=(pk+s)/(1+np.linalg.norm(s,axis=0))
+            errs.append(_error(img-lamb*_div(pk[0],pk[1]),img,lamb=lamb))
+        out = img-lamb*_div(pk[0],pk[1])
+        return out, np.array(errs)
+    else:
+        for i in range(n_iterations):
+            s=_chambolle_step(pk,img,lamb,tau)
+            pk=(pk+s)/(1+np.linalg.norm(s,axis=0))
+        out = img-lamb*_div(pk[0],pk[1])
+        return out
+
+def denoise_tv_chambolle_masked(img,mask,lamb=0.1,tau=0.25,n_iterations=70,mask_iterations=10,mask_sigma=0.25,return_loss = False):
     '''
-    Additional itterations to deal with sparse a mask.
+    Additional iterations trying to deal with masked/bad data parts.
     '''
+    #xprint(f'mask iterations = {mask_iterations} mask_sigma = {mask_sigma}')
     f= img.copy()
     pk = np.zeros((2,)+img.shape,dtype=img.dtype)
-    for i in range(mask_iterations):
-        pk[:]=0
-        out=denoise_tv_chambolle(f,lamb=lamb,tau=tau,n_iterations=n_iterations,pk=pk)
-        f[mask]=out[mask]
-    return out,f
+    sig = mask_sigma
+    errs = []
+    if return_loss:
+        for i in range(mask_iterations):
+            pk[:]=0
+            out,err_part=denoise_tv_chambolle(f,lamb=lamb,tau=tau,n_iterations=n_iterations,pk=pk,return_loss=True)
+            errs=np.concatenate((errs,err_part))
+            f[mask]= (out[mask]+sig*f[mask])/(sig+1)
+        return out,f,errs
+    else:
+        for i in range(mask_iterations):
+            pk[:]=0
+            out=denoise_tv_chambolle(f,lamb=lamb,tau=tau,n_iterations=n_iterations,pk=pk)
+            f[mask]= (out[mask]+sig*f[mask])/(sig+1)
+        return out,f
         
     

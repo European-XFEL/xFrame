@@ -15,7 +15,6 @@ log = logging.getLogger('root')
 class PolarHarmonicTransform:
     def __init__(self,max_order=32):
         self.max_order = max_order
-        self.bandwidth = 2*max_order+1
         self.n_points = 2*max_order        
         self.forward_cmplx = self._generate_forward_cmplx()
         self.inverse_cmplx = self._generate_inverse_cmplx()
@@ -50,7 +49,7 @@ class PolarHarmonicTransform:
         return inverse_real
     def get_empty_coeff(self,pre_shape=None,real=False):
         if real:
-            angular_shape=(self.bandwidth,)
+            angular_shape=(self.max_order+1,)
         else:
             angular_shape=(self.n_points,)
         if not isinstance(pre_shape,tuple):

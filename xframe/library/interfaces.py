@@ -96,14 +96,3 @@ class PeakDetectorInterface(abc.ABC):
 class PeakDetectorDependency(PeakDetectorInterface,metaclass=DependencyMeta):
     pass
 
-class SkimageInterface(abc.ABC):
-    '''
-    Interface for the external library shtns which supplies spherical harmonic transforms
-    '''
-    _external_dependency_name_ = 'skimage'
-    @abc.abstractmethod
-    def denoise_tv_chambolle():
-        pass
-class SkimageDependency(SkimageInterface,metaclass=DependencyMeta):
-    pass
-    

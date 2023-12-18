@@ -8,7 +8,7 @@ from xframe import Multiprocessing
 from xframe.library.physicsLibrary import ewald_sphere_theta_pi
 from xframe.library.pythonLibrary import measureTime,xprint
 from xframe.library.gridLibrary import GridFactory
-from xframe.library.mathLibrary import eval_legendre,leg_trf,spherical_to_cartesian,cartesian_to_spherical,masked_mean
+from xframe.library.mathLibrary import eval_legendre,leg_trf,spherical_to_cartesian,cartesian_to_spherical,masked_mean,denoise_tv_chambolle,denoise_tv_chambolle_masked
 from xframe.library.mathLibrary import RadialIntegrator,solve_procrustes_problem,psd_back_substitution,back_substitution
 from .harmonic_transforms import HarmonicTransform
 import xframe.library.mathLibrary as mLib
@@ -396,11 +396,10 @@ class CC:
         # This causes its harmonic coefficients and therfore the deg 2 invariants Bl to be real.
         cc_out = np.array(cc)
         cc_tmp = cc_out[...,1:]
-        if mask is None:
-            cc_mask_tmp = cc_mask[...,1:].copy()
+        if cc_mask is None:
             mean = (cc_tmp[...,::-1]+cc_tmp)/2
             cc_out[...,1:]=mean
-            return cc
+            return cc_out
         else:        
             cc_mask_tmp = cc_mask[...,1:].copy()
             mean,mask = masked_mean([cc_tmp[...,::-1],cc_tmp],[cc_mask_tmp[...,::-1],cc_mask_tmp])
@@ -487,32 +486,222 @@ class CC:
                 cc,cc_mask = out
         return cc,cc_mask
 
-
 class CCN:
     """
     Class that collects functions concerning harmonic coefficients of the averaged FXS cross correlation function.
     """
     @staticmethod
-    def denoise_tv(ccn,weight = 0.1,n_processes = False,use_multi_processing=True,**kwargs):        
-        def func_real(orders,**kwargs):
-            denoiser = mLib.skimage.denoise_tv_chambolle
-            cns = np.zeros((len(orders),) + ccn.shape[:-1],dtype = ccn.dtype)
-            for o_id,o in enumerate(orders):
-                cns[o_id]=denoiser(ccn[...,o].real,weight=weight)
-            return cns
-        def func(orders,**kwargs):
-            denoiser = mLib.skimage.denoise_tv_chambolle
-            cns = np.zeros((len(orders),) + ccn.shape[:-1],dtype = ccn.dtype)
-            for o_id,o in enumerate(orders):
-                cns[o_id]=denoiser(ccn[...,o].real,weight=weight)+1.j*denoiser(ccn[...,o].imag,weight=weight)
-            return cns
-        if ccn.dtype == np.dtype(complex):
-            f = func
+    def _read_denoise_argument(n_orders,arg):
+        if arg is not  None:        
+            if not isinstance(arg,(list,tuple)):
+                arg = (arg,)*n_orders
+            elif len(arg)<n_orders:
+                n_args = len(arg)
+                arg = tuple(arg)+(arg[-1],)*(n_orders-n_args)
+        return arg    
+    @staticmethod
+    def mod_denoise_tv(ccn,weights = 0.1,masks=None,n_iterations=70,mask_iterations=10,mask_feedback=0.25,skip_odd_orders = False,n_processes = False,use_multi_processing=True,**kwargs):
+        ccn_out = np.array(ccn)
+        shape = ccn.shape
+        n_orders = int((shape[-1]+1*skip_odd_orders)/(1+skip_odd_orders)) # if skip_odd_orders:  number of even orders else: shape[-1]
+        argument_step = int(skip_odd_orders)+1
+        
+        weights = CCN._read_denoise_argument(n_orders,weights)
+        masks = CCN._read_denoise_argument(n_orders,masks)
+        n_iterations = CCN._read_denoise_argument(n_orders,n_iterations)
+        mask_iterations = CCN._read_denoise_argument(n_orders,mask_iterations)
+        mask_feedback = CCN._read_denoise_argument(n_orders,mask_feedback)
+        
+        if masks is None:
+            def denoiser(orders,**kwargs):
+                out = np.zeros((len(orders),)+shape[:-1],dtype=ccn.dtype)
+                for o_id,o in enumerate(orders):
+                    arg_id = o//argument_step
+                    out[o_id]=denoise_tv_chambolle(ccn[...,o],lamb = weights[arg_id],n_iterations = n_iterations[arg_id])
+                return out
         else:
-            f = func_real
-        denoised_ccn = Multiprocessing.process_mp_request(f,input_arrays=[np.arange(ccn.shape[-1])],call_with_multiple_arguments=True,n_processes = n_processes)
-        return np.moveaxis(denoised_ccn,0,-1)
+            def denoiser(orders,**kwargs):
+                out = np.zeros((len(orders),)+shape[:-1],dtype=ccn.dtype)
+                for o_id,o in enumerate(orders):
+                    arg_id = o//argument_step
+                    out[o_id],_=denoise_tv_chambolle_masked(ccn[...,o],masks[arg_id],lamb = weights[arg_id],n_iterations = n_iterations[arg_id],mask_iterations = mask_iterations[arg_id],mask_sigma=mask_feedback[arg_id])
+                return out
+        if use_multi_processing:
+            denoised_ccn = Multiprocessing.process_mp_request(denoiser,input_arrays=[np.arange(0,ccn.shape[-1],argument_step)],call_with_multiple_arguments=True,n_processes = n_processes)
+        else:
+            denoised_ccn = denoiser(np.arange(shape[-1]))
+        ccn_out[...,::argument_step] = np.moveaxis(denoised_ccn,0,-1)
+        return ccn_out
+    @staticmethod
+    def modify(ccn,actions=[],**kwargs):
+        for action in actions:
+            try:
+                modifier = getattr(CCN,'mod_'+action)
+            except AttributeError as e:
+                log.warning(f"Action '{action}' not defined.Skipping!")
+                continue
+            ccn = modifier(ccn,**kwargs)
+        return ccn
 ########### deg2 invariants and cross correlations  ##################
+class Conversion2Dim:
+    @staticmethod
+    def from_intensity(I,I2=None,cht=None):
+        '''
+        B_n(q1,q2) = I_n(q_1)*I_n(q2).conj()
+        Where In are circular harmonic coefficients of the Intensity I
+        I and I2 are supposed to be a 2D arrays I(q,phi).
+        If I is complex only its real part is used. 
+        cht: if provided is a function that computes the positive harmonic coefficients of I.real
+        such that cht(I) is of type (p,harmonic_orders) 
+        '''
+        if not isinstance(cht,HarmonicTransform):
+            cht = HarmonicTransform.from_data_array('real',I).forward
+        In = cht(I.real)
+        In = np.moveaxis(In,-1,0)
+        if isinstance(I2, np.ndarray):
+            In2 = cht(I2.real)
+            In2 = np.moveaxis(In2,-1,0)
+        else:
+            In2 = None
+        return Conversion2Dim.from_intensity_coeff(In,In2 = In2)  
+        
+    @staticmethod
+    def from_intensity_coeff(In,In2=None):
+        '''
+        B_n(q1,q2) = I_n(q_1)*I_n(q2).conj()
+        Assumes In contain the positive frequency coefficients of the fourier series of I.
+        In and In2, are 2 dimensional arrays of type (order,q).
+        If In2 is given this routine returns
+        B_n(q1,q2) = I_n(q_1)*I_n2(q2).conj()
+        '''
+        if isinstance(In2,np.ndarray):
+            Bn = In[:,:,None]*In2[:,None,:].conj()
+        else:
+            Bn = In[:,:,None]*In[:,None,:].conj() 
+        return Bn
+    @staticmethod
+    def from_ccn(ccn):
+        ''' For 2D rotations around the Xray beam axis CC_n = B_n, so there is nothing to do!'''
+        return ccn
+
+    
+class Conversion3DimFromCCN:
+    @staticmethod
+    def back_substitution(ccn,xray_wavelength,momentum_transfer_points,max_order=None,assume_zero_odd_orders = False):
+        '''
+        Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta).
+        Uses 
+        $ Cn = \sum_{l=|n|}^\infty B_l(q_1,q_2) \overline{P}^{|n|}_l(q_1) \overline{P}^{|n|}_l(q_2) $
+        to extract B_l from given fourier coefficients of the averaged cross_correlation Cn by inverting the upper triangular matrix:
+        $\overline{P}^{|n|}_l(q_1) \overline{P}^{|n|}_l(q_2) $
+        where \overline{P}^{|n|}_l are the associated Legendre Polynomials that are used in the spherical harmonic coefficients.
+
+        :param ccn: cross-correlation angular harmonic coefficients
+        :type complex ndarray: shape $= (n_q(q),n_q(qq),n_pos_order)$
+        :param xray_wavelength: wavelength at which the cross-correlations where calculated.
+        :type float: unit eV
+        :param momuntum_transfer_points: q points at which the ccn is calculated.
+        :type ndarray: shape $(n_q,)$
+        :param orders: $l$'s for which to calculate the invariants $B_l$
+        :type int ndarray: shape $= (n_orders)$
+        :return: $B_l$ coeff.
+        :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
+        '''
+        # Get Pl arguments 
+        qs = momentum_transfer_points
+        thetas = ewald_sphere_theta_pi(xray_wavelength,qs)
+        
+        if max_order is None:
+            max_order = ccn.shape[-1]-1
+        if assume_zero_odd_orders:
+            l_stride = 2
+            orders = np.arange(0,max_order+1,2)
+        else:
+            l_stride = 1
+            orders = np.arange(max_order+1)
+            
+        bl = np.zeros(ccn.shape,dtype=complex)
+        ccn = ccn[...,:max_order+1:l_stride] #mLib.circularHarmonicTransform_real_forward(cc[qq_mask,:])[...,:l_max+1:l_stride]
+        #lazy back substitution
+        # reversed orders shoud be decreasing L,L-1,... or L,L-2,...
+        reversed_orders=orders[::-1]
+        for l in reversed_orders:
+            last_triangular_matrix_column = ccd_associated_legendre_matrices_single_l(thetas,l,l)[...,::l_stride]
+            bl[...,l]= ccn[...,-1]/last_triangular_matrix_column[...,-1]
+            ccn = ccn[...,:-1]-bl[...,l,None]*last_triangular_matrix_column[...,:-1]
+        b_coeff = np.moveaxis(bl,-1,0)
+        return b_coeff
+    
+    @staticmethod
+    def least_sqeares():
+        pass
+    @staticmethod
+    def legendre():
+        pass
+class Conversion3DimToCCN:
+    @staticmethod
+    def back_substitution():
+        pass
+    @staticmethod
+    def least_sqeares():
+        pass
+    @staticmethod
+    def legendre():
+        pass
+    
+class Conversion3Dim:
+    from_ccn = Conversion3DimFromCCN
+    to_ccn = Conversion3DimFromCCN
+    @staticmethod
+    def from_intensity():
+        pass
+    @staticmethod
+    def from_intensity_coeff():
+        pass
+    
+class Conversion:
+    dim2 = Conversion2Dim
+    dim3 = Conversion3Dim
+    
+class Regularization:
+    @staticmethod
+    def dim2():
+        pass
+    @staticmethod
+    def dim3():
+        pass
+class Deg2Invar:
+    conversion = Conversion
+    regularization = Regularization
+    @staticmethod
+    def from_ccn():
+        pass
+    @staticmethod
+    def to_ccn():
+        pass
+    @staticmethod
+    def from_intensity():
+        pass
+    @staticmethod
+    def from_intensity_coeff():
+        pass
+    @staticmethod
+    def regularize():
+        pass
+    @staticmethod
+    def mod_enforce_psd():
+        pass
+    @staticmethod
+    def modify(inv,actions=[],**kwargs):
+        for action in actions:
+            try:
+                modifier = getattr(inv,'mod_'+action)
+            except AttributeError as e:
+                log.warning(f"Action '{action}' not defined.Skipping!")
+                continue
+            inv = modifier(inv,**kwargs)
+        return inv
+    
 def get_q_slice(q_mask):
     q_lims = [0,len(q_mask)]
     if not q_mask[0]:
@@ -776,13 +965,13 @@ def ccd_to_deg2_invariant_3d_back_substitution(cc,xray_wavelength,data_grid,orde
     else:
         l_stride = 2
         #orders = orders//2
-    log.info(f'l_stride = {l_stride}')
+    #xprint(f'l_stride = {l_stride}')
     # Calculate triangular PP matrices and harmoncic coefficents CCn of the cross-correlation
     #log.info('start')
     #qq_matrices = ccd_associated_legendre_matrices(thetas,l_max,l_max)[:,:,::l_stride,::l_stride]
     ccn = np.zeros((len(qs),len(qs),len(orders)),dtype = complex)
     ccn[qq_mask,:] = mLib.circularHarmonicTransform_real_forward(cc[qq_mask,:])[...,:l_max+1:l_stride]
-
+    
     #lazy back substitution
     bl = np.zeros(ccn.shape,dtype=complex)
     # reversed orders shoud be decreasing L,L-1,... or L,L-2,...
@@ -1767,64 +1956,6 @@ def rank_projection_matrices_3d(projection_matrices,orders,radial_points,radial_
 
 
 #################### number of particles estimation not working ##############
-def estimate_number_of_particles_old(projection_matrices,radial_points,search_space,average_intensity=False,n_orders=False):
-    '''
-    Routine that estimates the number of particles based on the projection_matrices calculated from the deg2 invariants.
-    It assumes that the unknowns are Identity matrices and computes the volume of negative Intensity valus as function of a scaling parameter $s$,
-    which is applied to the 0'th intensity harmonic coefficient like $I_(0,0)/s$.
-    We realiced that the inflection point in the plot of negative volume over scaling parameter approximates the square root of the number of particles, independent of the actual unknowns.
-    :param projection_matrices: projection_matrices
-    :type list: list of numpy.ndarray's of length max_order + 1
-    :param radial_points: radial component of the recoprocal grid (momentumtransfer values)
-    :type numpy.ndarray: dtype float
-    :param search_space: [start,stop,number_of_points] for the scaling parameter $s$
-    :type list: of length = 3
-    :param use_average_intensity: average intensity or bool. If not bool use average intensity instead of 0'th prijection matrix.
-    :type bool,numpy.ndarray: 
-    :return n_particles: estimated number of particles
-    :rtype float: 
-    :return grad: Gradient of negative volume over scaling parameter (inflection point is a local extrema here)
-    :rtype ndarray: 
-    '''
-    if projection_matrices[2].ndim>1:
-        dimensions = 3
-    else:
-        dimensions = 2
-    max_order = len(projection_matrices)-1
-    h_dict = {'dimensions':dimensions,'max_order':max_order,'anti_aliazing_degree':2,'n_phi':False,'n_theta':False}
-    cht = HarmonicTransform('complex',h_dict)
-    r_grid = GridFactory.construct_grid('uniform',[radial_points,cht.grid_param['thetas'],cht.grid_param['phis']])
-    integrator = mLib.SphericalIntegrator(r_grid[:])
-
-    log.info('integrator grod shape = {}'.format(r_grid.shape))
-    if isinstance(average_intensity,np.ndarray):
-        log.info('use average intensity')
-        log.info('a int shape = {}'.format(average_intensity.shape))
-        I0 = average_intensity[:,None]*2*np.sqrt(np.pi)
-    else:
-        log.info('use V 0')
-        I0 = projection_matrices[0]
-    if (np.sum(I0)<0):
-        I0*=-1
-        
-    scales = np.linspace(*search_space)
-    nq = len(radial_points)
-    I_lm = [ np.zeros((nq, 2*o+1),dtype=complex) for o in range(max_order+1)]
-    for i in range(len(I_lm)):        
-        I_l = I_lm[i]
-        I_l[:,:projection_matrices[i].shape[-1]]=projection_matrices[i]
-
-    worker = estimate_number_of_particles_worker
-    log.info('I0 shape = {}'.format(I0.shape))
-    neg_volumes = Multiprocessing.comm_module.request_mp_evaluation(worker,input_arrays=[scales], const_args=[I_lm,I0,integrator,cht], callWithMultipleArguments=True,splitMode = 'modulus')
-    neg_volumes = neg_volumes/integrator.integrate(np.ones(r_grid[:].shape[:-1]))
-    grad = np.gradient(neg_volumes,scales[1]-scales[0])
-    n_particles = scales[np.argmax(np.abs(grad))]**2        
-    return n_particles,grad,neg_volumes
-
-def estimate_number_of_particles_worker_old(scales,I_lm,I0,integrator,cht,**kwargs):
-    return np.array(tuple( integrator.integrate(cht.inverse([I0/s]+I_lm[1:])<0)  for s in scales))
-
 def estimate_number_of_particles(projection_matrices,radial_points,search_space,average_intensity=False,n_orders=False,radial_mask=True):
     '''
     Routine that estimates the number of particles based on the projection_matrices calculated from the deg2 invariants.

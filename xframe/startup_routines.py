@@ -57,7 +57,6 @@ def create_dependency_dict():
         'shtns':[(('shtns_plugin','sh','shtns'),('xframe.lib.math','shtns'),())],
         'persistent_homology':[(('persistent_homology','PersistentHomologyPlugin','None'),('xframe.lib.math','PeakDetector'),())],
         'pysofft':[(('soft_plugin','Soft','pysofft'),('xframe.lib.math','Soft'),())],
-        'skimage':[(('scikit_image_plugin','SkimagePlugin','skimage'),('xframe.lib.math','skimage'),())],
         ##### multiprocessing & GPU #####
         'shared_array':[('SharedArray',('xframe.lib.python','sa'),()),
                         ('SharedArray',('xframe.Multiprocessing','sa'),())],
