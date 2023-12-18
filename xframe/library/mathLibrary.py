@@ -1889,3 +1889,55 @@ class CharFuncFactory:
         return watson
 
 
+###############################
+## Total Variation Denoising ##
+def _diff(f):
+    return np.array([np.diff(f,append=f[-1][None,:],axis=0),np.diff(f,append=f[:,-1][:,None],axis=1)])
+
+def _div(f1,f2):
+    divf = np.zeros_like(f1)
+    divf[1:-1]=f1[1:-1,:]-f1[:-2,:]
+    divf[0]=f1[0,:]
+    divf[-1]=-f1[-2,:]    
+    divf[:,1:-1]+=f2[:,1:-1]-f2[:,:-2]
+    divf[:,0]+=f2[:,0]
+    divf[:,-1]+=-f2[:,-2]
+    return divf
+
+def _error(f,img,lamb=0.1):
+    '''TV loss function ||Dxf||_1+||Dyf||_1+1/(2*lamb)*||f-img||_2'''
+    diff_x,diff_y=_diff(f)
+    return np.abs(diff_x.flatten()).sum()+np.abs(diff_y.flatten()).sum()+np.linalg.norm((f-img).flatten())
+
+def _chambolle_step(pk,f,lamb,tau):
+    return tau*_diff(_div(pk[0],pk[1])-f/lamb)
+
+def denoise_tv_chambolle(img,lamb=0.1,tau=0.25,n_iterations=70,pk=None):
+    '''
+    Implementation of Chambolle's implementation of Total variation denoising.
+    Reference:
+    ANTONIN CHAMBOLLE
+    An Algorithm for Total Variation Minimization and Applications
+    Journal of Mathematical Imaging and Vision 20: 89–97, 2004
+    '''
+    if pk is None:
+        pk = np.zeros((2,)+img.shape,dtype=img.dtype)
+        
+    for i in range(n_iterations):
+        s=_chambolle_step(pk,img,lamb,tau)
+        pk=(pk+s)/(1+np.linalg.norm(s,axis=0))
+    return img-lamb*_div(pk[0],pk[1])
+
+def denoise_tv_chambolle_sparse_mask(img,mask,lamb=0.1,tau=0.25,n_iterations=70,mask_iterations=10):
+    '''
+    Additional itterations to deal with sparse a mask.
+    '''
+    f= img.copy()
+    pk = np.zeros((2,)+img.shape,dtype=img.dtype)
+    for i in range(mask_iterations):
+        pk[:]=0
+        out=denoise_tv_chambolle(f,lamb=lamb,tau=tau,n_iterations=n_iterations,pk=pk)
+        f[mask]=out[mask]
+    return out,f
+        
+    
