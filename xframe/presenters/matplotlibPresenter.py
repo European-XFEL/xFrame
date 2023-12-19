@@ -378,7 +378,7 @@ class heat2D:
             if scale =='log':
                 norm = matplotlib.colors.LogNorm(vmin=vmin,vmax=vmax)
             else:
-                norm = matplotlib.colors.SymLogNorm(symlog_thresh,vmin=vmin,vmax=vmax)
+                norm = matplotlib.colors.SymLogNorm(symlog_thresh,linscale=0.1,vmin=vmin,vmax=vmax)
             heatmap=ax.pcolormesh(x,y,data,norm = norm,cmap=cmap, shading ='auto')
         else:
             heatmap=ax.pcolormesh(x,y,data,cmap=cmap,vmin = vmin,vmax =vmax,shading='auto')

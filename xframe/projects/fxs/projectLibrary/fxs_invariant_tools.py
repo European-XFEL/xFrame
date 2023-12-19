@@ -10,6 +10,7 @@ from xframe.library.pythonLibrary import measureTime,xprint
 from xframe.library.gridLibrary import GridFactory
 from xframe.library.mathLibrary import eval_legendre,leg_trf,spherical_to_cartesian,cartesian_to_spherical,masked_mean,denoise_tv_chambolle,denoise_tv_chambolle_masked
 from xframe.library.mathLibrary import RadialIntegrator,solve_procrustes_problem,psd_back_substitution,back_substitution
+from xframe.library.math_transforms import get_harmonic_transform
 from .harmonic_transforms import HarmonicTransform
 import xframe.library.mathLibrary as mLib
 from xframe.library.mathLibrary import nearest_positive_semidefinite_matrix
@@ -543,7 +544,7 @@ class CCN:
             ccn = modifier(ccn,**kwargs)
         return ccn
 ########### deg2 invariants and cross correlations  ##################
-class Conversion2Dim:
+class _Conversion2Dim:
     @staticmethod
     def from_intensity(I,I2=None,cht=None):
         '''
@@ -563,7 +564,7 @@ class Conversion2Dim:
             In2 = np.moveaxis(In2,-1,0)
         else:
             In2 = None
-        return Conversion2Dim.from_intensity_coeff(In,In2 = In2)  
+        return _Conversion2Dim.from_intensity_coeff(In,In2 = In2)  
         
     @staticmethod
     def from_intensity_coeff(In,In2=None):
@@ -583,9 +584,7 @@ class Conversion2Dim:
     def from_ccn(ccn):
         ''' For 2D rotations around the Xray beam axis CC_n = B_n, so there is nothing to do!'''
         return ccn
-
-    
-class Conversion3DimFromCCN:
+class _Conversion3DimFromCCN:
     @staticmethod
     def back_substitution(ccn,xray_wavelength,momentum_transfer_points,max_order=None,assume_zero_odd_orders = False):
         '''
@@ -613,32 +612,130 @@ class Conversion3DimFromCCN:
         
         if max_order is None:
             max_order = ccn.shape[-1]-1
+            
+        bl = np.zeros(ccn.shape,dtype=complex)
+        ccn = ccn[...,:max_order+1]        
         if assume_zero_odd_orders:
             l_stride = 2
             orders = np.arange(0,max_order+1,2)
+            #lazy back substitution + least squares 
+            # reversed orders shoud be decreasing L,L-1,... or L,L-2,...
+            for l in orders[::-1]:
+                last_triangular_matrix_column = ccd_associated_legendre_matrices_single_l(thetas,l,l)
+                # least squares step
+                a = (last_triangular_matrix_column[...,-2:]**2).sum(axis=-1)
+                ab = (ccn[...,-2:]*last_triangular_matrix_column[...,-2:]).sum(axis=-1)
+                bl[...,l]= ab.conj()/a 
+                ccn = ccn[...,:-2]-bl[...,l,None]*last_triangular_matrix_column[...,:-2]            
         else:
-            l_stride = 1
             orders = np.arange(max_order+1)
-            
-        bl = np.zeros(ccn.shape,dtype=complex)
-        ccn = ccn[...,:max_order+1:l_stride] #mLib.circularHarmonicTransform_real_forward(cc[qq_mask,:])[...,:l_max+1:l_stride]
-        #lazy back substitution
-        # reversed orders shoud be decreasing L,L-1,... or L,L-2,...
-        reversed_orders=orders[::-1]
-        for l in reversed_orders:
-            last_triangular_matrix_column = ccd_associated_legendre_matrices_single_l(thetas,l,l)[...,::l_stride]
-            bl[...,l]= ccn[...,-1]/last_triangular_matrix_column[...,-1]
-            ccn = ccn[...,:-1]-bl[...,l,None]*last_triangular_matrix_column[...,:-1]
+            #lazy back substitution
+            # reversed orders shoud be decreasing L,L-1,... or L,L-2,...
+            for l in orders[::-1]:
+                last_triangular_matrix_column = ccd_associated_legendre_matrices_single_l(thetas,l,l)
+                bl[...,l]= ccn[...,-1]/last_triangular_matrix_column[...,-1]
+                ccn = ccn[...,:-1]-bl[...,l,None]*last_triangular_matrix_column[...,:-1]
+        
         b_coeff = np.moveaxis(bl,-1,0)
         return b_coeff
+    @staticmethod
+    def _least_squares_worker(q_ids,qq_ids,cc,phis,thetas,orders,**kwargs):
+        '''
+        Uses pseudoinverse of the legendre matrices (numpy internal uses a singular value decomposition)
+        '''
+        legendre_matrices = ccd_legendre_matrices(q_ids,qq_ids,phis,thetas,orders)
+        cc_part = cc[q_ids,qq_ids,:]
+        
+        b_coeff = np.array(tuple(np.linalg.lstsq(leg_matrix,cc_subpart,rcond=None)[0] for leg_matrix,cc_subpart in zip(legendre_matrices,cc_part)))               
+        return b_coeff
+    @staticmethod
+    def least_squares(ccn,xray_wavelength,momentum_transfer_points,max_order=None,assume_zero_odd_orders=False):
+        '''
+        Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta) using
+        $CC=\sum F_l B_l$.
+        Currently implemented method uses pseudo inverses to invert above linear system
+        :param cc: cross-correlation data
+        :type complex ndarray: shape $= (n_q(q),n_q(qq),n_\Delta)$
+        :param xray_wavelength: wavelength at which the cross-correlations where calculated.
+        :type float: unit eV
+        :param momentum_transfer_points: qs at whih cc is calculated.
+        :type ndarray: shape $(n_q,)$
+        :param max_order: max $l$ for which to calculate the invariants $B_l$
+        :type int:
+        :return: $B_l$ coeff.
+        :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
+        '''
+        
+        # Get Fl arguments 
+        qs = momentum_transfer_points
+        thetas = ewald_sphere_theta_pi(xray_wavelength,qs)
+        
+        if max_order is None:
+            max_order = ccn.shape[-1]-1
+        else:
+            ccn = ccn[...,:max_order+1]
+            
+        cht=get_harmonic_transform(max_order,dimensions=2)
+        cc = cht.inverse_real(ccn)
+        #xprint(f'ccn shape = {ccn.shape} cc shape ={cc.shape} cht.npoints= {cht.n_points}')
+        phis = np.arange(2*max_order)*np.pi/max_order
+        
+        # calc deg 2 invcariants      
+        q_ids = np.arange(len(qs))
+        if assume_zero_odd_orders:
+            orders = np.arange(0,max_order+1,2)
+            stride = 2
+        else:
+            orders = np.arange(max_order+1)
+            stride = 1
+        b_coeff = np.zeros((max_order+1,len(qs),len(qs)))
+        out = Multiprocessing.comm_module.request_mp_evaluation(_Conversion3DimFromCCN._least_squares_worker,
+                                                                input_arrays=[q_ids,q_ids],
+                                                                const_inputs=[cc,phis,thetas,orders],
+                                                                call_with_multiple_arguments=True)
+        #print(out.shape)
+        b_coeff[::stride,...]= np.moveaxis(out,-1,0)
+        return b_coeff
+    @staticmethod
+    def _legendre_worker(q_ids,qq_ids,cc,orders,**kwargs):
+        '''
+        Uses legendre transform to compute Bl (Assumes small scattering angle approximation)
+        '''
+        cc_parts=cc[q_ids,qq_ids,:]
+        bl_part = np.zeros((len(q_ids),len(orders)),dtype=complex)
+        leg_forward = leg_trf.forward
+        for n in range(len(q_ids)):
+            cc_part = cc_parts[n]
+            leg_coeff = leg_forward(cc_part,closed = True)            
+            leg_coeff= -leg_coeff[orders]*np.pi*4
+            bl_part[n] = leg_coeff
+        return bl_part
+    @staticmethod
+    def legendre(ccn,xray_wavelength,momentum_transfer_points,max_order=None):
+        # Get Fl arguments 
+        qs = momentum_transfer_points
+        
+        if max_order is None:
+            max_order = ccn.shape[-1]-1
+        else:
+            ccn = ccn[...,:max_order+1]
+        orders=np.arange(max_order+1)
+            
+        cht=get_harmonic_transform(max_order,dimensions=2)
+        cc = cht.inverse_real(ccn)
+        phis = np.arange(2*max_order)*np.pi/max_order  
     
-    @staticmethod
-    def least_sqeares():
-        pass
-    @staticmethod
-    def legendre():
-        pass
-class Conversion3DimToCCN:
+        # Small angle approxmation => can symmetrize cc
+        cc = CC.modify(cc,actions=['pi_periodicity','force_even'])[0]
+           
+        n_qs = len(qs)
+        q_ids = np.arange(n_qs)
+        b_coeff = Multiprocessing.comm_module.request_mp_evaluation(_Conversion3DimFromCCN._legendre_worker,
+                                                                           input_arrays=[q_ids,q_ids],
+                                                                           const_inputs=[cc,orders],
+                                                                           call_with_multiple_arguments=True,n_processes=1)
+        return np.moveaxis(b_coeff,-1,0)
+class _Conversion3DimToCCN:
     @staticmethod
     def back_substitution():
         pass
@@ -647,11 +744,10 @@ class Conversion3DimToCCN:
         pass
     @staticmethod
     def legendre():
-        pass
-    
-class Conversion3Dim:
-    from_ccn = Conversion3DimFromCCN
-    to_ccn = Conversion3DimFromCCN
+        pass    
+class _Conversion3Dim:
+    from_ccn = _Conversion3DimFromCCN
+    to_ccn = _Conversion3DimToCCN
     @staticmethod
     def from_intensity():
         pass
@@ -659,11 +755,11 @@ class Conversion3Dim:
     def from_intensity_coeff():
         pass
     
-class Conversion:
-    dim2 = Conversion2Dim
-    dim3 = Conversion3Dim
+class _Conversion:
+    dim2 = _Conversion2Dim
+    dim3 = _Conversion3Dim
     
-class Regularization:
+class _Regularization:
     @staticmethod
     def dim2():
         pass
@@ -671,8 +767,8 @@ class Regularization:
     def dim3():
         pass
 class Deg2Invar:
-    conversion = Conversion
-    regularization = Regularization
+    conversion = _Conversion
+    regularization = _Regularization
     @staticmethod
     def from_ccn():
         pass

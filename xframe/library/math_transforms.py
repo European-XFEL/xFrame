@@ -19,7 +19,7 @@ class PolarHarmonicTransform:
         self.forward_cmplx = self._generate_forward_cmplx()
         self.inverse_cmplx = self._generate_inverse_cmplx()
         self.forward_real = self._generate_forward_real()
-        self.inverse_real = self._generate_inverse_cmplx()
+        self.inverse_real = self._generate_inverse_real()
         self.phis = np.arange(self.n_points)*2*np.pi/self.n_points
         self.angular_shape = (self.n_points,)
 
