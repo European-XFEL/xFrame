@@ -394,7 +394,7 @@ class heat2D:
 
 class heat2D_multi(Plotter):
     @classmethod
-    def get_fig(cls,datasets,grid=False,layout={},scale='lin',shape=(1,1),size = False,vmin = None,vmax =None,cmap = 'inferno'):
+    def get_fig(cls,datasets,grid=False,layout={},scale='lin',shape=(1,1),size = False,vmin = None,vmax =None,cmap = 'inferno',symlog_thresh=1e-8):
         cmap=plt.get_cmap(cmap).copy()
         if isinstance(size,bool):
             size = tuple(9*i for i in shape[::-1])
@@ -424,8 +424,12 @@ class heat2D_multi(Plotter):
             #log.debug('r shape = {} phi shape={}'.format(x.shape,y.shape))
             #        plt.pcolormesh(th, r, z)
         heatmaps = []
-        if scale=='log':
+        if scale=='log' or scale == 'symlog':
             cmap.set_bad(cmap(0))
+            if scale =='log':
+                norm = matplotlib.colors.LogNorm(vmin=vmin,vmax=vmax)
+            else:
+                norm = matplotlib.colors.SymLogNorm(symlog_thresh,linscale=0.1,vmin=vmin,vmax=vmax)
             for ax_row,dataset_row in zip(axes,datasets):
                 heatmap_row = []
                 for ax,data in zip(ax_row,dataset_row):
@@ -433,9 +437,10 @@ class heat2D_multi(Plotter):
                     #    vmin = data.min()
                     #if isinstance(vmax,bool):
                     #    vmax = data.min()
-                    heatmap_row.append(ax.pcolormesh(x,y,data,norm=matplotlib.colors.LogNorm(vmin=vmin,vmax=vmax),cmap=cmap,shading='auto'))
+                    heatmap_row.append(ax.pcolormesh(x,y,data,norm=norm,cmap=cmap,shading='auto'))
                     ax.set_aspect('equal')
                 heatmaps.append(heatmap_row)
+            
         else:
             for ax_row,dataset_row in zip(axes,datasets):
                 heatmap_row = []

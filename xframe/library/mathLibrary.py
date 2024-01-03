@@ -1939,7 +1939,7 @@ def denoise_tv_chambolle_masked(img,mask,lamb=0.1,tau=0.25,n_iterations=70,mask_
     '''
     Additional iterations trying to deal with masked/bad data parts.
     '''
-    #xprint(f'mask iterations = {mask_iterations} mask_sigma = {mask_sigma}')
+    #print(f'Marked TV denoising mask iterations = {mask_iterations} mask_sigma = {mask_sigma}')
     f= img.copy()
     pk = np.zeros((2,)+img.shape,dtype=img.dtype)
     sig = mask_sigma

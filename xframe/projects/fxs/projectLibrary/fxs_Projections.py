@@ -730,6 +730,7 @@ class ReciprocalProjection:
         order_ids=tuple(used_orders.values())
         proj_matrices=self.projection_matrices
         radial_points=self.radial_points
+        radial_mask = self.radial_mask
         if dim == 2:
             proj_matrices = self.projection_matrices.T
             sum=np.sum
@@ -760,20 +761,24 @@ class ReciprocalProjection:
                 function = approximate_unknowns
             
         if dim == 3:
+            from scipy.ndimage import gaussian_filter1d
             D=np.diag(radial_points) #diagonal matrix of radial points
+            #L = proj_matrices[0]
+            #L[L==0]=1
             PDs=tuple(proj_matrices[_id].T.conj() @ D**2 for _id in order_ids)
             matmul=np.matmul
             svd=np.linalg.svd
             determinant = np.linalg.det
-            loge = np.log
             n_orders = len(PDs)
-            unknowns = tuple(np.zeros((len(PD),2*o+1),dtype = complex) for PD,o in zip(PDs,used_orders))
+            unknowns = tuple(np.eye(2*o+1,dtype = complex) for PD,o in zip(PDs,used_orders))
+            unknowns = tuple(u[:len(PD),:] for PD,u in zip(PDs,unknowns))
+            PDs=tuple(pd[:,mask] for pd,mask in zip(PDs,radial_mask))
             def approximate_unknowns(intensity_harmonic_coefficients):
                 #log.info('len harmonic coeff = {}'.format(len(intensity_harmonic_coefficients)))
-                for unknown,PD,oid,l in zip(unknowns,PDs,order_ids,used_orders):
+                for unknown,PD,oid,l,qmask in zip(unknowns,PDs,order_ids,used_orders,radial_mask):
                     I = intensity_harmonic_coefficients.lm[l]
                     #xprint(f'PD contains Nans : {np.isnan(PD).any()}')
-                    matmul(*svd(PD @ I,full_matrices=False)[::2],out = unknown)  # PD @ Intensity is  B^\dagger A in a Procrustres Problem min|A-BR|
+                    matmul(*svd(PD @ (I[qmask]),full_matrices=False)[::2],out = unknown)  # PD @ Intensity is  B^\dagger A in a Procrustres Problem min|A-BR|
                 #log.info('unknowns shape ={}'.format(unknowns[-1].shape))
                 return unknowns
             if self.use_SO_freedom:
@@ -787,9 +792,9 @@ class ReciprocalProjection:
                     ms_per_order.append(np.concatenate((np.arange(order+1),np.arange(-order,0))))
                 
                 def function(intensity_harmonic_coefficients):
-                    for ms,unknown,PD,l in zip(unknowns,PDs,used_orders):
+                    for ms,unknown,PD,l,qmask in zip(unknowns,PDs,used_orders,radial_mask):
                         I = intensity_harmonic_coefficients.lm[l]
-                        u,s,vh = svd(PD @ I,full_matrices=False)
+                        u,s,vh = svd(PD @ I[qmask],full_matrices=False)
                         matmul(u,vh,out = unknown)  # PD @ Intensity is  B^\dagger A in a Procrustres Problem min|A-BR|
                     
                     u_SO = unknowns[SO_order_id]
@@ -882,6 +887,23 @@ class ReciprocalProjection:
                 #projected_intensity_coefficients[zero_id][radial_mask[zero_id]]/=np.sqrt(number_of_particles[0])
                 #log.info(f'number of particles scaling factor = {1/np.sqrt(number_of_particles[0])}')
                 projected_intensity_coefficients.lm[0][:]/=np.sqrt(number_of_particles[0])
+                
+                #for l,o_id in self.used_orders.items():
+                #    if not radial_mask[o_id].all():
+                #        qmask = radial_mask[o_id]
+                #        first_unmasked = np.argmin(~qmask)+1
+                #        #xprint(first_unmasked)
+                #        Il = projected_intensity_coefficients.lm[l]
+                #        signs_ref = np.sign((Il@Il[first_unmasked].conj()).real)
+                #        signs = np.sign((Il@Il[~qmask].T.conj()).real)
+                #        metrics = np.sum(np.abs(signs-signs_ref[:,None]),axis =0)>np.sum(np.abs(-signs-signs_ref[:,None]),axis =0)
+                #        tmp = Il[~qmask]
+                #        #xprint([metrics.shape,tmp.shape])
+                #        ##assert metrics.shape == tmp.shape[0], 'fuu'
+                #        tmp[metrics]*=-1
+                #        Il[~qmask]=tmp
+                #        #Il[l][(~qmask)&metrics]*=-1
+                #        #xprint(metrics.any())
                 return projected_intensity_coefficients
         return fixed_projection
 
@@ -917,9 +939,10 @@ class ReciprocalProjection:
                 np.sqrt(temp,out = intensity_multipliers)
                 intensity_multipliers[~non_zero_mask] = 0            
                 mult(reciprocal_density ,intensity_multipliers,out = new_reciprocal_density)
+                
                 #log.info("old intesity sum = {} new intensity sum = {}".format(np.sum(square),np.sum(new_intensity)))
                 #log.info('nans = {} infs = {}'.format(np.isnan(new_reciprocal_density),np.isinf(new_reciprocal_density)))
-                #new_reciprocal_density = reciprocal_density * sqrt(new_intensity.real/(reciprocal_density*reciprocal_density.conj()).real)            
+                #new_reciprocal_density = reciprocal_density * sqrt(new_intensity.real/(reciprocal_density*reciprocal_density.conj()).real)                
                 return new_reciprocal_density
         else:
             new_intensity2 = self._fixed_intensity

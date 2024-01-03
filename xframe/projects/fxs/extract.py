@@ -2,6 +2,7 @@ import logging
 import sys
 import os
 import numpy as np
+import scipy as sp
 import traceback
 from scipy.stats import unitary_group
 file_path = os.path.realpath(__file__)
@@ -21,12 +22,16 @@ from xframe.library.gridLibrary import SampledFunction,NestedArray,GridFactory
 from xframe.library.mathLibrary import nearest_positive_semidefinite_matrix
 from xframe.library.pythonLibrary import xprint
 from xframe.library.mathLibrary import polar_spherical_dft_reciprocity_relation_radial_cutoffs,distance_from_line_2d
+from xframe.library.math_transforms import get_harmonic_transform
 from xframe.interfaces import ProjectWorkerInterface
 from xframe import database,settings
 from xframe.library.mathLibrary import SampleShapeFunctions
 from .projectLibrary.misk import _get_reciprocity_coefficient
 from xframe import Multiprocessing
 from xframe.library.mathLibrary import spherical_to_cartesian
+CC = i_tools.CC
+CCN = i_tools.CCN
+Deg2Invar = i_tools.Deg2Invar
 log=logging.getLogger('root')
 
 #class Worker(RecipeInterface):
@@ -78,6 +83,7 @@ class InvariantExtractor:
         self.b_coeff={'I1I1':False}
         self.b_coeff_masks={'I1I1':False}
         self.b_coeff_q_id_limits = {'I1I1':False}
+        self.ccn = {'I1I1':False}
         self.data_projection_matrices_masks = {'I1I1':False}
         self.data_projection_matrices_q_id_limits = {'I1I1':False}
         self.data_projection_matrix_error_estimates={'I1I1':False}
@@ -117,7 +123,107 @@ class InvariantExtractor:
             log.warning(e)
             max_order = max_theoretical_order
         self.max_order = max_order
+        
+        cc_arrays = ccd.pop('cross_correlation')
+        for dset_name,dopt in opt.cross_correlation.datasets.items():
+            if isinstance(opt.cross_correlation.datasets_to_process,(list,tuple)):
+                if not (dset_name in opt.cross_correlation.datasets_to_process):
+                    continue
+            if dset_name in cc_arrays:
+                ## Cross Correlation
+                xprint('\t Modifying Cross Correlation ... ',end='\r')
+                cc = cc_arrays.pop(dset_name)
+                cc,_ = CC.modify(cc,actions=dopt.modify_cc,average_intensity = self.data_average_intensity)
+                xprint('\t Modifying Cross Correlation ... done.')
+                ## Cross Correlation harmonic coefficients
+                xprint('\t Computing harmonic coefficients CCN ... ',end='\r')
+                cht = get_harmonic_transform(len(self.data_angular_points)//2,dimensions=2)
+                ccn = cht.forward_real(cc)[...,:self.max_order+1].copy()
+                del(cc)
+                del(_)
+                xprint('\t Computing harmonic coefficients CCN ... done.')
+                if dopt.denoise_ccn.use:
+                    xprint('\t Denoising CCN ... ',end='\r')
+                    #xprint(f'Mask type = {dopt.denoise_ccn.mask.type}')
+                    if dopt.denoise_ccn.mask.type!='none':
+                        datadict={**dopt,**ccd}
+                        if  dopt.denoise_ccn.mask.type=='custom':
+                            path = dopt.denoise.mask.custom.path
+                            mask = db.load(path)['mask'][:]
+                            data_dict['mask'] = mask
+                        ccn_mask = i_tools.CCN_mask(self.data_radial_points,self.max_order,self.data_angular_points,{**dopt,**ccd})
+                        ccn_mask=list(np.moveaxis(ccn_mask,-1,0))
+                    else:
+                        ccn_mask=None
+                    #xprint(f'Mask dtype = {type(ccn_mask)}')
+                    weights = dopt.denoise_ccn.tv_weights
+                    n_iterations = dopt.denoise_ccn.tv_iterations
+                    mask_iter = dopt.denoise_ccn.mask_iterations
+                    mask_feedback = dopt.denoise_ccn.mask_feedback
+                    rescaling_sigma = dopt.denoise_ccn.rescaling_sigma
+                    ccn_mod = CCN.modify(ccn,actions=['denoise_tv'],masks = ccn_mask,weights = weights,n_iterations=n_iterations,mask_iterations=mask_iter,mask_feedback=mask_feedback,skip_odd_orders = False,rescaling_sigma=rescaling_sigma)
+                    xprint('\t Denoising CCN ... done.')
+                else:
+                    ccn_mod = ccn
+                ## Invariant extraction
+                xprint('\t Solving linear system for invariants Bl|Bn ... ',end='\r')
+                b_coeff = Deg2Invar.from_ccn(ccn_mod,dim=self.dimensions,mode=dopt.invariant_extraction.method,xray_wavelength = self.xray_wavelength,max_order = self.max_order,qs = self.data_radial_points,assume_zero_odd_orders = dopt.invariant_extraction.assume_zero_odd_orders)                
+                mask,q_id_limits = self.calc_deg_2_invariant_masks(dopt,b_coeff.shape)
+                self.b_coeff_masks[dset_name] = mask
+                self.b_coeff_q_id_limits[dset_name] = q_id_limits
+                self.b_coeff[dset_name] = b_coeff
+                self.ccn[dset_name] = {"data":ccn,"modified":ccn_mod}
+                xprint('\t Solving linear system for invariants Bl|Bn ... done.')
+        if ('I2I1' in self.b_coeff) and ('I1I1' in self.b_coeff) and ('I2I2' in self.b_coeff) :
+            n_q1 = self.b_coeff_masks["I1I1"].shape[0]
+            min_q2 = self.b_coeff_masks["I1I1"].any(axis = -1)
+            combined_mask = self.b_coeff_masks["I1I1"].any(axis = 1)[:,None,:]*self.b_coeff_masks["I2I2"].any(axis = 2)[:,:,None]
+            q_id_mins = np.concatenate((self.b_coeff_q_id_limits['I2I2'][:,0,None,:],self.b_coeff_q_id_limits['I1I1'][:,0,None,:]),axis = 1)
+            self.b_coeff_masks['I2I1'] = combined_mask
+            self.b_coeff_q_id_limits['I2I1'] = q_id_mins
+            b3 = self.b_coeff['I2I1']
+            for o,b in enumerate(b3):
+                #enforce that b3 is of the form A*B^dagger where A and B are of shape (Nq,2*o+1)
+                u,s,vh = np.linalg.svd(b)
+                num_o = 2*o+1
+                #eig,_ = np.linalg.eig(b)
+                #log.info(np.sort(eig)[::-1])
+                b[:] = (u[:,:num_o]*s[:num_o])@vh[:num_o,:]
+        if 'subtract_average_intensity' in opt.cross_correlation.datasets.I1I1.modify_cc:
+            if self.dimensions==3:
+                # since the spherical harmonic of degree 0 is  Y^0_0 = 1/(2*np.sqrt(np.pi))
+                # Another way to look at it is that 4*pi is the total angular surface of a unit sphere 
+                factor = 4*np.pi
+            elif self.dimensions ==2:
+                factor = 1 # 2*np.pi
+            self.b_coeff['I1I1'][0]=average_intensity[:,None]*average_intensity[None,:]*factor
+            
+    def extract_bl_from_cc_old(self):
+        log.info('Computing degree 2 invariants from cross-correlation data:')
+        db = database.project
+        ccd = db.load('ccd')
+        log.info('loaded ccd')                
+        log.info(f'ccd shape = {ccd["cross_correlation"]["I1I1"].shape}')
+        opt = settings.project
+        average_intensity = ccd.get('average_intensity',False)
 
+        self.average_intensity = average_intensity
+        self.data_average_intensity = np.array(average_intensity.data)
+        self.xray_wavelength = ccd['xray_wavelength']
+        self.data_radial_points = ccd['radial_points']
+        self.data_max_q = np.max(self.data_radial_points)
+        self.data_min_q = np.min(self.data_radial_points)
+        self.data_angular_points = ccd['angular_points']
+        
+        max_theoretical_order = len(self.data_angular_points)//2 #max_order_from_n_angular_steps(self.dimensions,len(self.data_angular_points),anti_aliazing_degree = 1)
+        max_order = opt.max_order
+        try:
+            assert max_theoretical_order >= max_order , 'Violation of:  max specified harmonic order ({})<{} for the given number of angular points {}. Continue with max harmonic order = '.format(max_order,max_theoretical_order,len(self.data_angular_points),max_theoretical_order)
+        except AssertionError as e:
+            log.warning(e)
+            max_order = max_theoretical_order
+        self.max_order = max_order
+        
         cc_arrays = ccd.pop('cross_correlation')
         for dset_name,dopt in opt.cross_correlation.datasets.items():
             if isinstance(opt.cross_correlation.datasets_to_process,(list,tuple)):
@@ -137,7 +243,7 @@ class InvariantExtractor:
                 del(cc)
                 #log.info(f"b coeff shape  =  {b_coeff.shape}")
                 #log.info(dopt)
-                mask,q_id_limits = self.calc_deg_2_invariant_masks(dopt,b_coeff.shape,q_mask)
+                mask,q_id_limits = self.calc_deg_2_invariant_masks(dopt,b_coeff.shape)
                 self.b_coeff_masks[dset_name] = mask
                 self.b_coeff_q_id_limits[dset_name] = q_id_limits
                 self.b_coeff[dset_name] = self.apply_invariant_constraints(dopt,b_coeff,q_id_limits)
@@ -326,10 +432,12 @@ class InvariantExtractor:
         self.success =True
 
         
-    ###########################################################
-    ###    PSD constraint + Projection matrix extraction    ###
+    ##################################################################
+    ###  Projection matrix extraction| Invariant regularization    ###
 
-    def calc_deg_2_invariant_masks(self,dopt,bl_shape,q_mask):
+    def calc_deg_2_invariant_masks(self,dopt,bl_shape,q_mask=None):
+        if not isinstance(q_mask,np.ndarray):
+            q_mask = np.ones(bl_shape[1:],dtype=bool)
         min_type =  dopt.bl_q_limits.min.type
         max_type =  dopt.bl_q_limits.max.type
 
@@ -383,6 +491,11 @@ class InvariantExtractor:
         for order,lims in lim_dict.items():
             order = int(order)
             if upper_limit:
+                max_q = qs.max()
+                if not isinstance(lims[0],(float,int)):
+                    lims[0]= max_q+1
+                if not isinstance(lims[1],(float,int)):
+                    lims[1]=max_q+1
                 m1 = qs<lims[0]
                 m2 = qs<lims[1]
                 mask[order] = m1[:,None]&m2[None,:]
@@ -392,6 +505,10 @@ class InvariantExtractor:
                 if m2.all():
                     q_id_lims[order,1]=Nq
             else:
+                if not isinstance(lims[0],(float,int)):
+                    lims[0]=0
+                if not isinstance(lims[1],(float,int)):
+                    lims[1]=0
                 m1 = qs>=lims[0]
                 m2 = qs>=lims[1]
                 mask[order] = m1[:,None]&m2[None,:]
@@ -457,33 +574,24 @@ class InvariantExtractor:
         #log.info(f'mask any = {mask.any()} mask all = {mask.all()}')
         return mask,q_id_limits
 
-
-    def apply_invariant_constraints(self,dopt,b_coeff,q_id_limits):
-        b_coeff_out = b_coeff.copy()
-        if dopt.bl_enforce_psd:
-            try:
-                assert (q_id_limits[:,0,:]==q_id_limits[:,1,:]).all(),'Trying to compute projection matrices from non-square submatrix of deg2 invariants specified. That makes no sense since projection matrices are theoretically given by eig values of a positive semidefinite matrix. Continue using the q1_id_limits also for q2 to make the selection square.'
-            except AssertionError as e:
-                log.info(e)
-                q_id_limits[:,1]=q_id_limits[:,0]
-            for o in range(len(b_coeff)):
-                q_slice = slice(*q_id_limits[o,0])
-                b_coeff_out[o,q_slice,q_slice] = nearest_positive_semidefinite_matrix(b_coeff[o,q_slice,q_slice],low_positive_eigenvalues_to_zero=False)
-        eig,_=np.linalg.eigh(b_coeff_out[2])
-        xprint(f'min eigenvalue after corrections = {np.sort(eig)[::-1][:30]}')
-        return b_coeff_out
-    
-
     def calc_projection_matrices(self):
         log.info('Extracting projection matrices:')
-        log.info('Processing I1I1 ...')
-        if settings.project.bl_eig_sort_mode == 'median_of_scaled_eigenvector':            
+        log.info('Processing I1I1 ... ',end='')
+        pmopt = settings.project.invariant_regularization
+        if pmopt.eigenvalue_sort_mode == 'median_of_scaled_eigenvector':            
             sort_mode = 1
         else:
             sort_mode = 0
+        rescale = pmopt.method=='rescale_sign_loss'
+        extend_above_q_limit = pmopt.extend_above_max_bl_q_limit
         
-        temp = i_tools.deg2_invariant_to_projection_matrices(self.dimensions,self.b_coeff['I1I1'],q_id_limits=self.b_coeff_q_id_limits['I1I1'],sort_mode = sort_mode)
-        self.data_projection_matrices['I1I1'],eig_I1I1 = temp
+        Vs,new_q_id_limits = Deg2Invar.regularize(self.b_coeff['I1I1'],dim = self.dimensions,q_id_limits=self.b_coeff_q_id_limits['I1I1'],sort_mode = sort_mode,rescale=rescale,extend_above_q_limit=extend_above_q_limit)
+        self.b_coeff_q_id_limits['I1I1'][:,0,:]=new_q_id_limits
+        self.b_coeff_q_id_limits['I1I1'][:,1,:]=new_q_id_limits
+        
+        self.data_projection_matrices['I1I1'] = Vs
+        #xprint([type(V) for V in Vs])
+        eig_I1I1 = [sp.linalg.eigh(V@V.conj().T,driver='ev')[1][::-1] for V in Vs]
         self.data_projection_matrices_masks['I1I1'] = self.b_coeff_masks['I1I1'].sum(axis = 2)
         self.data_projection_matrix_error_estimates['I1I1'] = i_tools.calc_projection_matrix_error_estimate(self.b_coeff["I1I1"],self.data_projection_matrices['I1I1'])
         
@@ -496,8 +604,11 @@ class InvariantExtractor:
             
         if 'I2I2' in self.b_coeff:
             log.info('Processing I2I2 ...')
-            temp = i_tools.deg2_invariant_to_projection_matrices(self.dimensions,self.b_coeff['I2I2'],q_id_limits = self.b_coeff_q_id_limits['I2I2'],sort_mode = sort_mode)
-            self.data_projection_matrices['I2I2'],eig_I2I2 = temp
+            Vs,new_q_id_limits = Deg2Invar.regularize(self.b_coeff['I2I2'],dim = self.dimensions,q_id_limits=self.b_coeff_q_id_limits['I2I2'],sort_mode = sort_mode,rescale=rescale,extend_above_q_limit=extend_above_q_limit)
+            self.b_coeff_q_id_limits['I2I2'][:,0,:]=new_q_id_limits
+            self.b_coeff_q_id_limits['I2I2'][:,1,:]=new_q_id_limits
+            eig_I2I2 = [sp.linalg.eigh(V@V.conj().T,driver='ev')[1][::-1] for V in Vs]
+            self.data_projection_matrices['I2I2'] = Vs
             self.data_projection_matrices_masks['I2I2'] = self.b_coeff_masks['I2I2'].sum(axis = 2)
             self.data_projection_matrix_error_estimates['I2I2'] = i_tools.calc_projection_matrix_error_estimate(self.b_coeff["I2I2"],self.data_projection_matrices['I2I2'])
             if 'I2I1' in self.b_coeff:
@@ -545,27 +656,25 @@ class InvariantExtractor:
         
         try:
             #this extracts the invariants
-            xprint('Extracting invariants')
+            xprint('Extracting invariants ...')
             self.extraction_routines[mode].__func__(self)
-            xprint('done.\n')
         except KeyError as e:
             traceback.print_exc()
             log.error(' Extraction mode {} not known. Known modes are "{}"'.format(mode,self.extraction_routines.keys()))
             raise e
-
-        xprint('\nComputing projection matrices Vl|vn')
+        xprint('Computing projection matrices Vl|vn ...',end='\r')
         self.calc_projection_matrices()
-        xprint('done.\n')
+        xprint('Computing projection matrices Vl|vn ... done.')
 
-        xprint('Computing total intensity.')
+        xprint('Computing total intensity ... ', end = '\r')
         if opt.dimensions==3:
             self.integrated_intensity = np.trapz(self.average_intensity.data * self.data_radial_points**2 , x = self.data_radial_points,axis = 0)*4*np.pi
         elif opt.dimensions==2:
             self.integrated_intensity = np.trapz(self.average_intensity.data * self.data_radial_points , x = self.data_radial_points,axis = 0)*4*np.pi
-        xprint('done.\n')
+        xprint('Computing total intensity ... done.\n')
         
         for key,value in self.b_coeff_q_id_limits.items():
-            self.data_projection_matrices_q_id_limits[key]=value[:,0]
+            self.data_projection_matrices_q_id_limits[key]=value[:,0]                
 
         if self.dimensions==3:            
             low_res_Ilm = self.calc_low_resolution_intensity_coefficients()    

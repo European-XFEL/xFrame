@@ -63,7 +63,33 @@ class HIOProjection:
             return new_input
         return hybrid_input_output
 
-    
+
+class DRSProjection:
+    '''Final step in Douglas-Rachford Splitting:'''
+    def __init__(self,_lambda):
+        self._lambda = [_lambda]
+        self.projection = self.generate_DRS()
+    @property
+    def lamb(self):
+        return self._lambda[0]
+    @lamb.setter
+    def lamb(self,value):
+        self._lambda[0] = value
+
+    def generate_DRS(self):
+        _lambda = self._lambda
+        
+        def DRS_output(_input,without_projection,projection_out):
+            invalid_mask = False
+            for m in without_projection[1].values():
+                invalid_mask |= m
+            drs_next =  _input + _lambda[0]*(projection_out-without_projection[0])
+            drs_hio = np.where(invalid_mask,drs_next,projection_out)
+            #return drs_next #projection_out
+            return drs_hio
+        return DRS_output
+ 
+
 def error_reduction(out_without_projection,out,_input):
     return np.array(out[0])
 

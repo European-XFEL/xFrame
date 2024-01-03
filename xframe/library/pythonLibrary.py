@@ -20,9 +20,9 @@ log=logging.getLogger('root')
 
 doublePrecision=1e-16
 
-def xprint(txt):
+def xprint(txt,**kwargs):
     if log.level > logging.INFO:
-        print(txt)
+        print(txt,**kwargs)
     log.info(txt)
     
     

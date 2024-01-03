@@ -1,0 +1,341 @@
+settings_version:
+  _value: 0.02
+  
+dimensions:
+  _value: 3
+  _possible_values: [3,2]
+  _description: Assumed sample dimension.
+  
+structure_name:
+  _value: default
+  
+max_order:
+  _value: 69
+  _description: Maximal harmonic order for which to calculate FXS invariants
+  _possible_values:
+    command: '[int]'
+
+
+extraction_mode:
+  _value: 'cross_correlation'
+  _possible_values: ['cross_correlation','shapes']
+  _describtion: Select mode for FXS invariant generation
+
+invariant_regularization:
+  _descriptions: "Options that influence the projection matrix extraction Vl|vn from extracted Bl|Bn. More sphecifically they regulate how the rank constraint on Bl,Bn is enforced (rank Bl = 2*l+1 rank Bn = 1)."
+  eigenvalue_sort_mode:
+    _value: 'eigenvalues'
+    _possible_values: ['eigenvalues','median_of_scaled_eigenvector']
+    _description: "Determines method for selection of eigenvector eigenvalue pairs from the degree two invariant (q1,q2) matrices Bl,Bn. By standard the required number of eigenvectors are picked by the magnitude of their eigenvalue from high to low ('eigenvalue'). If 'median_of_scaled_eigenvector' is specified the median of the corresponding eigenvector times its eigenvalue are used for selection (sorting is from high to low values.)"
+  method:
+    _value: "rescale_sign_loss"
+    _possible_values: ['simple','rescale_sign_loss']
+    _description: ["'simple':Cut eigendecomposition to the highest <rank> positive eigenvalues. Negative eigenvalues are set to 0.","'rescale_sign_loss': Tackles regularization from noisy Bl. The simple method over emphasizes low q area of B_l because of its  exponentially fast decay towards higher q values. This method tries to correct for that as follows. Choose v,lamb to be the highest eigenvalue of Bl|Bn. Choose lamb to be the highest positive eigenvalue with v being its eigenvector. Let P_sigma denote gaussian smoothing. Define w = abs(v)*np.sqrt(lamb) and the matrix M_sigma=P_sigma(w)P_sigma(w)^T. Apply simple method to (Bl|Bn)/M_sigma (This removes the strong decay component in Bl before eigenvalue decomposition), rescale the result by multiplying M_sigma. Let us call the result of this procedure A_sigma.  Find the optimal smoothing parameter sigma such that the following Frobenius Norm is minimal: ||sign(B_l|B_n) - sign(A_sigma)||_f.We chose this metric since we heuristically observed that the sign of experimentally computed Bl it less prone to noise. ", 'For noise free Bl|bn both methods give the same result.']
+  extend_above_max_bl_q_limit:
+    _value: True
+    _description: "First compute Regularized invariant in unmasked area, i.e. Bl(q1,q2) = V(q1)@V(q1).T for unmasked q1,q2. Then extend V to q values higher than unmasked values by finding V0 s.th. concatenate W = (V,V0) with W@W.T = Bl(q1,q2) if one of the q values is masked and the other unmasked (Linear algebra, left inverse of V is used)."
+  
+cross_correlation:
+  _only_if:
+    x: extraction_mode
+    condition: 'x =="cross_correlation"'
+  _description: Settings for extracting degree 2 invariants from cross-correlation input data.
+  assume_poisson_noise:
+    _value: False
+  datasets_to_process:
+    _value: ['I1I1']
+  datasets:
+    I1I1:
+      _description: Extraction Settings for <I,I> correlations.
+      modify_cc:
+        _value: ['subtract_average_intensity','force_even']
+        _possible_values: ['cc_symmetry,force_even,pi_periodicity,pi_periodicity_diag,subtract_average_intensity']
+        _desrcipton:
+          - 'List of modifications to be applied to input CC. Application order is as specified in the proveded list.'
+          - 'cc_symmetry: Enforces CC(q1,q2,phi)=CC[q2,q1,-phi] Must be true for any CrossCorrelation'
+          - 'force_even: Enforces CC(q1,q2,phi)=CC[q1,q2,-phi] MUst be True for averaged CrossCcorrelation in FXS'
+          - 'pi_periodicity: Enforces CC(q1,q2,phi)=CC[q1,q2,phi+pi] by only using values of phi ie (pi/2, 3/2*pi] to define CC. This symmetry only holds in small scattering angle approximation.'
+          - 'pi_periodicity_diag: Same as pi_periodicity but only modifies the diagonal of CC since CC is typicallycontains strong noise/ artefacts at q1=q2 and phi=0.'
+          - 'subtract_average_intensity: subtracts <I>[:,None,None]*<I>[:,None,None] from CC '
+
+      denoise_ccn:
+        _description: 'Can be time consuming! Performs total variantion denoising on the harmonic coefficients of CC. This step also allows for "masked" areas in the CCn. TV denoising finds argmin_V ||d/dx V||_1+1/(2*weight)*||I-V||_2^2'
+        use:
+          _value: False
+        tv_iterations:
+          _value: 70
+          _possible_values: 'Int,[Int,Int,...]: A single integer or a list of itegers one for each harmonic coefficient of CC'
+        tv_weights:
+          _value: 0.001
+          _possible_values: 'Int,[Int,Int,...]: A single integer or a list of itegers one for each harmonic coefficient of CC'
+          _description: 'The higher the weight the more noise (total variation) is suppressed at the cost of bigger differences from the original input. For gaussian white noise the optimal wheight is believed to be sigma*log(N^2) where sigma is the variance of the noise and NxN is the image dimension.'
+        rescaling_sigma:
+          _value: None
+          _possible_values: 'Int,Float: If value is nether int nor float no regularization is used.'
+          _description: 'For each fixed order n divide ccn by gaussian_filter(abs(ccn),sigma=sigma) in order to not bias the denoising routine towards high values for low momentum transfer values.'
+        mask_iterations:
+          _value: 20
+          _possible_values: 'Int,[Int,Int,...]: A single integer or a list of itegers one for each harmonic coefficient of CC'
+          _description: "If a mask is supplied. Denoising is separated in mask_iterations many individual TV denoising steps. In the first Iteration No mask is applied. The next iteration starts with the original image whose masked area is substituted by the out put of the previouse iteration."
+        mask_feedback:
+          _value: 1e-16
+          _possible_values: 'float,[float,float,...]: A single integer or a list of itegers one for each harmonic coefficient of CC'
+          _description: 'In TV iteration. Masked areas are replaced by previouse_outcome+mask_feedback*original_data.'
+        mask:
+          type:
+            _value: 'none'
+            _possible_values: ['none','diag','pixel_arc','custom']
+          diag:
+            _only_if:
+              x: type
+              condition: 'x=="diag"'
+            _description: Masks point pairs q1,q2 that lie in the specifiend number of diagonals. Main diagonal only <=> 0, Tri diagonal part <=> 1 and so on.
+            ndiagonals:
+              _value: 0
+          custom:
+            _only_if:
+              x: type
+              condition: 'x=="custom"'
+            _description: Loads mask from a h5 file that contains a dataset mask at its root level.
+            path:
+              _value: empty
+          pixel_arc:
+            _only_if:
+              x: type
+              condition: 'x=="pixel_arc"'
+            _description: Masks point pairs q1,q2 that have contributions from distances on the ewald's sphere that are lower than a threshold value.
+            pixel_size:
+              _value: 2000
+              _description: Distance threshold in Angstroem.
+            
+      invariant_extraction: 
+        method:
+          _value: 'back_substitution'
+          _possible_values: ['back_substitution','lstsq','legendre']
+          _description: "Selects extraction method for invariants. back_substitution: Uses harmonic coefficients of the cross-correlation and solves for Bl using back substitution. lstsq: Works on the level of cross-correlation and uses least square methods to solve for Bl. legendre: Assumes a flat ewaldssphere and combutes Bl as legendre series coefficients of the cross-correlation."
+        assume_zero_odd_orders:
+          _value: True        
+      bl_q_limits:
+        min:
+          type:
+            _value: 'none'
+            _possible_values: ['none','line']
+            line:
+              _description: Defines a mask for the degree 2 invariant by specifing start and stop points according to (start_order,sart_q)-(stop_order,stop_q).
+              _only_if:
+                x: type
+                condition: 'x =="line"'
+                _value: [[4,0.004],[70,0.34]]
+        max:
+          _copy: min
+    I2I1:
+      _description: Extraction Settings for <I2,I> correlations.
+      modify_cc:
+        _value: []
+
+      denoise_cnn:
+        use:
+          _value: False          
+      invariant_extraction: 
+        method:
+          _value: 'back_substitution'
+        assume_zero_odd_orders:
+          _value: True        
+        bl_q_limits:
+          min:
+            type:
+              _value: 'none'
+          max:
+            _copy: min
+    I2I2:
+      _copy: I1I1
+
+
+optimize_projection_matrices:
+  _description: "The raw projection matrices Vlm computed out of eigenvalues of the degree2 invariants don't satisfy the condition that they should be computable by a spherical harmonic transform of some real positive intensity. This method Iteratively changes "
+  use:
+    _value: False
+  n_iterations:
+    _value: 1000
+  error_change_limit:
+    _value: 1e-5
+low_resolution_intensity_approximation:
+  _description: "The raw projection matrices Vlm computed out of eigenvalues of the degree2 invariants don't satisfy the condition that they should be computable by a spherical harmonic transform of some real positive intensity. This method Iteratively changes "
+  max_order:
+    _value: 20
+    _description: 'Has to be smaller than max_order.'
+  n_iterations:
+    _value: 1000
+  error_change_limit:
+    _value: 1e-5
+
+I2I1_unknown_tranrform_extraction_method:
+  _value: 'procrustes'
+  _possible_values: ['procrustes','direct']
+  _description: 'Method for extracting the W matrix connecting the Unknowns of I1I1 correlations to those of I2I2 correlations.'
+  
+unitary_transform:
+  enforce_unitarity:
+    _value: False
+    _description: In chase I1I1 I2I2 and I2I1 deg2 coefficients could be computed. This allows to calculate a relation between the Unknowns in I^2 and I this relation should be a unitary matrix, if it is not, we can use the closest unitary appriximation to it, which can be calculated using singular-value decomposition. If this option is true the closes unitary matrix is used otherwise we just run with what ever we computed for the unitary transform.
+    
+  
+shapes:
+  _only_if:
+    x: extraction_mode
+    condition: 'x=="shapes"'
+  _description: Settings for extracting degree 2 invariants from predefined 2d/3d shapes.
+  shapes:
+    _description: Specefications for the considered density parts.
+    types:
+      _value:
+        command: '["sphere"]*6'
+      _possible_values: ['sphere,thetrahedron,qube']
+    centers:
+      _value:
+        command: "[(0,0,0)] + [(140.0,np.pi/2,phi*2*np.pi/5) for phi in range(5) ]"
+      _description: 'Center positions of the different shapes given in polar/spherical coordinates.'
+    sizes:
+      _value:
+        command: '[70]*6'
+      _descripton: 'Sizes of the specified shapes'
+    densities:
+      _value: [25,50,25,50,25,50]
+      _descripton: 'Density values of the specified shapes'
+      _possible_values:
+        command: '[np.number]'
+    random_orientation:
+      _value:
+        command: '[False]*6'
+      _description: Whether or not to randomly rotate each shape
+  n_particles:
+    _description: Assumed number of particles per difrraction pattern.
+    _value: 1
+    _possible_values:
+      command: '[int]'
+  fourier_transform:
+    type:
+      _value: 'midpoint'
+      _possible_values: ['midpoint','zernike']
+      _description: Choose midpoint rule or zernike approximation for the hankel transform inside used to calculate the fourier transform
+    reciprocity_coefficient:
+      _value:
+        command: 'np.pi'
+      _description: 'Reciprocity relation is Q R = x N where Q,R are the radial limits in real an d reciprocal space and N is the number of radial steps of the grid (n_radial_point). The reciprocity coefficient is x. For x = pi this relation mimics the corresponding relation of cartesian grids used in Fast Fourier Transforms. Lowering x while keeping Q fixed effectively causes a smoothening of the real space density.'
+    allow_weight_calculation:
+      _value: True
+      _description: 'Whether or not to allow on-the-fly calculation of hankel transform weights.'
+    allow_weight_saving:
+      _value: True
+      _description: 'Whether or not to allow calculated hankel transform weights to be saved for future use.'
+      _from_file: fourier_transform
+  grid:
+    max_q:
+      _value: False
+      _description: Sets the maximal radial mometumtransver value resolved in the reciprocal grid.
+    #oversampling:
+    #  _value: 4
+    #  _description: defines max_q if max_q is set to False
+    max_order:
+      _value: 63
+    n_phi:
+      _value: 0
+      _desctipton: 'Number of azimutal angular grid points in [0,2pi) has to obey: n_phi >= 2*(max_order+1).'
+    n_theta:
+      _value: 0
+      _desctipton: 'Number of polar angular grid points in [0,pi) has to obey: n_phi >= (max_order+1)'
+    n_radial_points:
+      _value: 256
+      _from_file: fourier_transform
+  GPU:
+    use:
+      _value: True
+    n_gpu_workers:
+      _only_if:
+        x: use
+        condition: 'x'
+      _value: 1
+  save_vtk_density:
+    _value: True
+  save_vtk_intensity:
+    _value: False
+    
+IO:
+  _description: Standard Files
+  folders:
+    base:
+      _value:
+        command: 'xframe_opt.IO.folders.home'
+    data:
+      base:
+        _value: 'data/fxs/'
+    ccd:
+      data:
+        _value: "ccd/"
+    invariants:
+      data:
+        _value: 'invariants/'
+    invariants_archive:
+      invariants:
+        _value: 'archive/{dimensions}d_{structure_name}/{date}/run_{run}/'
+    ft_weights:
+      data:
+        _value: 'ft_weights/'
+  files:
+    ccd:
+      name:
+        _value: '3d_tutorial.h5'
+      folder:
+        _value: 'ccd'
+      options:
+        type:
+          _value: 'direct'
+    invariants:
+      name:
+        _value: 'proj_data.h5'
+      folder:
+        _value: 'invariants_archive'
+      options:
+        create_symlink:
+          _value: True # crating a symlink will make the projection data available for reconstructions
+        plot_first_invariants:
+          _value: True        
+        save_invariant:
+          _value: True  # whether or not to save deg2 invariant $B_l$ in addition to the projection matrices which satisfy $B_l=V_l V_l^/dagger$
+        plot_first_ccn:
+          _value: False
+        plot_first_invariants_from_proj_matrices:
+          _value: True
+        plot_first_projection_matrix_error_estimates:
+          _value: False
+        save_intensity_vtk:
+          _value: False
+    invariant_symlink:
+      name:
+        _value: '{dimensions}d_{structure_name}.h5'
+      folder:
+        _value: 'invariants'
+    ft_weights:
+      _only_if:
+        x: '../../extraction_mode'
+        condition: 'x == "shapes"'
+      name:
+        _value: 'weights{postfix}_{type}.h5'
+      folder:
+        _value: 'ft_weights'
+    model_density:
+      _only_if:
+        x: '../../extraction_mode'
+        condition: 'x == "shapes"'
+      name:
+        _value: '{name}_density_model.vts'
+      folder:
+        _value: 'ccd'
+    model_intensity:
+      _only_if:
+        x: '../../extraction_mode'
+        condition: 'x == "shapes"'
+      name:
+        _value: '{name}_intensity_model.vts'
+      folder:
+        _value: 'ccd'      

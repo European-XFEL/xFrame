@@ -59,6 +59,8 @@ class vtkSaver(VTKInterface):
     @staticmethod
     def generate_spherical_writer( datasets, grid=default_grid, dset_names=dset_names_default):
         for n,data in enumerate(datasets):
+            if data.dtype == bool:
+                data = data.astype(int)
             new_data = np.zeros((data.shape[0],)+(data.shape[1]+2,)+(data.shape[-1]+1,))
             new_data[:,1:-1,:-1] = data
             new_data[:,1:-1,-1] = data[:,:,0]

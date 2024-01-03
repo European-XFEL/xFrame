@@ -52,7 +52,7 @@ from .projectLibrary.fxs_Projections import generate_fix_point_inversion
 from .projectLibrary.fxs_Projections import RealProjection
 from .projectLibrary.fxs_invariant_tools import generate_estimate_number_of_particles_new,generate_estimate_number_of_particles_new_2
 from .projectLibrary.fxs_IO_methods import generate_error_routines
-from .projectLibrary.fxs_IO_methods import HIOProjection
+from .projectLibrary.fxs_IO_methods import HIOProjection,DRSProjection
 from .projectLibrary.fxs_IO_methods import generate_main_error_routine
 from .projectLibrary.fxs_IO_methods import error_reduction
 from .projectLibrary.harmonic_transforms import HarmonicTransform
@@ -292,8 +292,8 @@ class MTIP:
         transforms,grid_pair,max_order,transform_objects=self.assemble_transform_op_and_grid()
         self.transform_objects = transform_objects
         reciprocal_projection,rp_obj=self.assemble_reciprocal_projection_op(grid_pair,max_order)
-        real_projections,hio_projection,real_projection_obj,shrink_wrap_obj=self.assemble_real_projection_op(grid_pair,rp_obj,transforms)
-        self.projection_objects = {'reciprocal':rp_obj,'hio':hio_projection,'real':real_projection_obj,'sw':shrink_wrap_obj}
+        real_projections,IO_projections,real_projection_obj,shrink_wrap_obj=self.assemble_real_projection_op(grid_pair,rp_obj,transforms)
+        self.projection_objects = {'reciprocal':rp_obj,'real':real_projection_obj,'sw':shrink_wrap_obj,**IO_projections}
         orientation_fixing=self.assemble_orientation_fixing_op(grid_pair)
         errors = self.assemble_error_routines(grid_pair)
         misk = self.assemble_misk_oppesators(grid_pair)
@@ -403,13 +403,14 @@ class MTIP:
         #hio = generate_HIO(r_opt['HIO'])
         hio_opt = r_opt.HIO
         hio = HIOProjection(hio_opt.beta[0],considered_projections=hio_opt.get('considered_projections',['all']))
+        drs = DRSProjection(hio_opt.beta[0])
         #hio = generate_HIO({'beta':self.beta})
         
         #real_projection_op={'real_support_projection':real_support_projection,'other_real_projections':other_real_projections,'multiply_ft_gaussian':multiply_ft_gaussian,'calculate_support_mask':calculate_support_mask,'hybrid_input_output':hio.projection,'real_projection':real_projection_obj.projection}
         
-        real_projection_op={'multiply_ft_gaussian':multiply_ft_gaussian,'calculate_support_mask':calculate_support_mask,'hybrid_input_output':hio.projection,'error_reduction':error_reduction,'real_projection':real_projection_obj.projection}
+        real_projection_op={'multiply_ft_gaussian':multiply_ft_gaussian,'calculate_support_mask':calculate_support_mask,'hybrid_input_output':hio.projection,'error_reduction':error_reduction,'real_projection':real_projection_obj.projection,'douglas_rachford_output':drs.projection}
         
-        return real_projection_op,hio,real_projection_obj,sw_obj
+        return real_projection_op,{'hio':hio,'drs':drs},real_projection_obj,sw_obj
     
     def assemble_orientation_fixing_op(self,grid_pair):
         ft_opt=opt['fourier_transform']
@@ -560,6 +561,33 @@ class MTIP:
             routine_sketches[name]=sketch
             routine_sketches[name+'_ft_stab']=sketch_ft_stab
 
+        def gps_PI_input(real_projected,real_input):
+            #print(real_input.shape)
+            return 2*real_projected[0]-real_input
+        
+        self.process_factory.addOperators({'gps_reciprocal_input':gps_PI_input})
+        routine_sketches['DRS']=[
+            [(1,1),['copy','real_projection']],
+            [(0,1,1,0,0,1),['id','id','gps_reciprocal_input','calc_real_errors']],
+            [(0,1,2),['id','id','fourier_transform']],
+            [(0,1,2,2),['id','id','MTIP_start']],
+            [(0,1,2,2),['id','id','inverse_fourier_transform','id']],
+            [(0,1,2,3),['douglas_rachford_output','copy']],
+            [(1,0),['id','id']]
+            ]
+
+        
+        routine_sketches['DRS_ftstab']=[
+            [(1,1),['copy','real_projection']],
+            [(0,1,1,0,1,0),['id','id','gps_reciprocal_input','calc_real_errors']],
+            [(0,1,2),['id','id','fourier_transform']],
+            [(0,1,2,2,2,2),['id','id','MTIP_start','inverse_fourier_transform','id']],
+            [(0,1,2,2,3,4),['id','id','inverse_fourier_transform','diff','id']],
+            [(0,1,2,3,4),['id','id','add_above_zero_index','id']],
+            [(0,1,2,3),['douglas_rachford_output','id']],
+            [(1,0),['id','id']]
+            ]
+            
         routine_sketches['SW']=[
             'copy',
             ['abs_value','copy'],
@@ -876,6 +904,7 @@ class MTIP:
                             errs={}
                             for i in range(repeats):
                                 self.projection_objects['hio'].beta = hio_beta_ramp.eval(step)
+                                self.projection_objects['drs'].lamb = hio_beta_ramp.eval(step)
                                 #log.info(f'beta value = {self.projection_objects["hio"].beta}')
                                 hist = state['density_pair_history']
                                 # Break loop if relative error limits are breached. Start new loop with best known reconstruction.

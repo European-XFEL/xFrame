@@ -573,7 +573,11 @@ class ProjectWorker(ProjectWorkerInterface):
         xprint('allignment errors are = {}\n'.format(np.sort(errors)))
             
         #average = [np.mean(d,axis = 0) for d in zip(*aligned_reconstr)]
-        average = np.squeeze(np.mean(aligned_reconstr,axis = 0))
+        #xprint([type(r) for r in aligned_reconstr])
+        #xprint([len(r) for r in aligned_reconstr])
+        #xprint([r[1].shape for r in aligned_reconstr])
+        average = [np.mean([r[0] for r in aligned_reconstr],axis = 0),np.mean([r[1] for r in aligned_reconstr],axis = 0)]
+        
         aligned_ft_reconstr_ftd = [fft(r[0]) for r in aligned_reconstr]
         intensity_from_ft_density = np.mean([(r[1]*r[1].conj()).real for r in aligned_reconstr], axis = 0)
         intensity_from_density= np.mean([(r*r.conj()).real for r in aligned_ft_reconstr_ftd], axis = 0)
@@ -585,7 +589,6 @@ class ProjectWorker(ProjectWorkerInterface):
         average_normalization_min = opt.get('average_normalization_min',False)
 
         xprint('calculating resolution metrics.')
-        resolution_metrics = {}
         resolution_metrics = {}
         if opt.resolution_metrics.get('PRTF',False):
             prtf = PRTF_fxs(fft(average[0]),intensity_from_density,averaged_projected_scattering_amplitude=average[1],averaged_projected_intensity=intensity_from_ft_density)
@@ -705,6 +708,7 @@ class ProjectWorker(ProjectWorkerInterface):
                         error = value['error_dict'][error_metric][-1]
                         if error < error_limit:
                             reconstr = (value['last_real_density'][:],value['last_reciprocal_density'][:])
+                            #print(reconstr[0].shape,reconstr[1] .shape)
                             if self.valid_maximal_density(reconstr[0].real.max()):
                                 errors.append(error)
                                 reconstruction_keys[num][key] = len(reconstructions)
@@ -796,6 +800,8 @@ class Alignment():
                 settings.general.n_control_workers = self.r_opt['GPU'].get("n_gpu_workers",4)
                 Multiprocessing.comm_module.restart_control_worker()
         self.ft_grids = self.r_opt.internal_grid
+        self.rs = self.ft_grids['real'][:,0,0,0]
+        self.qs = self.ft_grids['reciprocal'][:,0,0,0]
         self.dimension = self.ft_grids['real'][:].shape[-1]
         
         self.max_q = self.ft_grids['reciprocal'].__getitem__((slice(None),)+(0,)*self.dimension).max()+self.ft_grids['reciprocal'].__getitem__((slice(None),)+(0,)*self.dimension).min()
@@ -823,8 +829,7 @@ class Alignment():
             self.rotate_by = self.assemble_rotate_by()
             self.align = self.assemble_align()
             self.apply_to = self.generate_alignment_loop()
-        
-
+    
     @property
     def reference_reconstruction(self):
         return self._reference_reconstruction
@@ -957,7 +962,24 @@ class Alignment():
             calc_mean_C = self.soft.calc_mean_C
         lm_split_ids = self.lm_split_ids
         angle_grid = self.soft_grid
-        r_limit_ids = self.opt['find_rotation'].get('r_limit_ids', [0,self.ft_grids['real'].shape[0]])
+
+        r_limit_ids = np.arange(0,len(self.rs))
+        r_limits = self.opt['find_rotation'].get('r_limits',None)
+        if r_limits is not None:
+            r_min,r_max = r_limits
+            r_min_id =0
+            r_max_id = len(self.rs)-1
+            if (self.rs<r_min).any():
+                r_min_id = np.argmin(self.rs<r_min)
+            if (self.rs>r_max).any():
+                r_max_id = np.argmax(self.rs>r_max)
+            r_limit_ids = np.arange(r_min_id,r_max_id+1)
+        else:
+            r_limit_ids = self.opt['find_rotation'].get('r_limit_ids', np.arange(0,len(self.rs)))
+        #xprint(f'limit ids = {r_limit_ids}')
+        #xprint(f'limits = {r_limits}')
+        #xprint(f'min max = {self.rs.min()},{self.rs.max()}')
+        #sys.exit()
         self.beta = 0
         def find_rotation(ref_lm_coeff,lm_coeff):            
             #ref_lm_coeff = np.concatenate(ref_lm_coeff,axis = 1).copy()

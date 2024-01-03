@@ -17,7 +17,7 @@ from xframe.settings import general as xframe_opt
 
 # Custom data types that may need to be saved #
 from xframe.library.gridLibrary import NestedArray
-from xframe.library.pythonLibrary import FTGridPair,DictNamespace
+from xframe.library.pythonLibrary import FTGridPair,DictNamespace,xprint
 
 # Interfaces that the default DB should satisfy #
 from xframe.interfaces import DatabaseInterface
@@ -487,9 +487,12 @@ class SettingsLoader:
             default_version = False
             settings_path = direct_path
             default_path = ''
+            
         load_sub_defaults = self.generate_load_sub_defaults(default_version)
         settings['_settings_path']=settings_path
         settings['_default_settings_path']=default_path
+        xprint(f'Paresed settings file: {op.basename(settings_path)}')
+        xprint(f'Using Defaults: {op.basename(default_path)}')
         return settings,default_settings,load_sub_defaults
 
 class SettingsParser:

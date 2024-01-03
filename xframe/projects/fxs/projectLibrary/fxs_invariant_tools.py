@@ -16,8 +16,11 @@ import xframe.library.mathLibrary as mLib
 from xframe.library.mathLibrary import nearest_positive_semidefinite_matrix
 from scipy.signal import butter,sosfilt
 from scipy.interpolate import interp1d
-from scipy.optimize import root_scalar
+from scipy.optimize import root_scalar,minimize_scalar
 from scipy.linalg import solve_triangular
+from scipy.ndimage import gaussian_filter1d,gaussian_filter
+
+
 from .harmonic_transforms import HarmonicTransform
 log=logging.getLogger('root')
 
@@ -220,7 +223,7 @@ def custom_cc_mask(data_grid,datadict):
     return datadict['mask']
 
 def cross_correlation_mask(data_grid,datadict):
-    known_mask_types={'direct':custom_cc_mask,'none':true_cc_mask,'pixel_arc':pixel_arc_cc_mask,'pixel_flat':pixel_flat_cc_mask,'pixel_custom':pixel_custom_cc_mask}
+    known_mask_types={'custom':custom_cc_mask,'none':true_cc_mask,'pixel_arc':pixel_arc_cc_mask,'pixel_flat':pixel_flat_cc_mask,'pixel_custom':pixel_custom_cc_mask}
     given_type = datadict['cc_mask']['type']
     generator=known_mask_types.get(given_type,False)
     if isinstance(generator,bool):
@@ -230,6 +233,39 @@ def cross_correlation_mask(data_grid,datadict):
         mask = generator(data_grid)
     else:
         mask = generator(data_grid,{**datadict['cc_mask'][given_type],**datadict})
+    return mask
+
+
+def true_ccn_mask(qs,max_order,*args,**kwqargs):
+    N = len(qs)
+    return np.ones((N,N,max_order+1),dtype=bool)
+def pixel_arc_ccn_mask(qs,max_order,phis,*args,**kwargs):
+    wavelength = kwargs['xray_wavelength']
+    thetas = ewald_sphere_theta_pi(wavelength,qs)
+    cc_mask = pixel_arc_cc_mask({'qs':qs,'phis':phis,'thetas':thetas},kwargs)
+    ccn_mask_q = np.prod(cc_mask,axis = -1)
+    ccn_mask = np.concatenate((ccn_mask_q[...,None],),axis = -1)
+    return ccn_mask
+def diag_ccn_mask(qs,max_order,*args,**kwargs):
+    ndiagonals = kwargs['ndiagonals']
+    Nq = len(qs)
+    ccn_mask_q = np.eye(Nq,dtype = bool)
+    for i in range(ndiagonals): 
+        ccn_mask_q |= np.eye(Nq,k=i,dtype = bool) | np.eye(Nq,k=-i,dtype = bool)
+    ccn_mask = np.concatenate((ccn_mask_q[...,None],),axis = -1)
+    return ccn_mask    
+def CCN_mask(qs,max_order,phis,datadict):
+    known_mask_types={'custom':custom_cc_mask,'none':true_ccn_mask,'pixel_arc':pixel_arc_ccn_mask,'diag':diag_ccn_mask}
+    given_type = datadict['denoise_ccn']['mask']['type']
+    generator=known_mask_types.get(given_type,False)
+    if isinstance(generator,bool):
+        e = AssertionError('Given CCN mask type "{}" not known. Known types are {}'.format(given_type,known_mask_types.keys()))
+        raise e
+    else:
+        datadict.pop('qs',None)
+        datadict.pop('max_order',None)
+        datadict.pop('phis',None)
+        mask = generator(qs,max_order,phis,**{**datadict['denoise_ccn']['mask'][given_type],**datadict})
     return mask
 
 
@@ -501,11 +537,15 @@ class CCN:
                 arg = tuple(arg)+(arg[-1],)*(n_orders-n_args)
         return arg    
     @staticmethod
-    def mod_denoise_tv(ccn,weights = 0.1,masks=None,n_iterations=70,mask_iterations=10,mask_feedback=0.25,skip_odd_orders = False,n_processes = False,use_multi_processing=True,**kwargs):
+    def mod_denoise_tv(ccn,weights = 0.1,masks=None,n_iterations=70,mask_iterations=10,mask_feedback=0.25,skip_odd_orders = False,n_processes = False,rescaling_sigma=None,use_multi_processing=True,**kwargs):
         ccn_out = np.array(ccn)
         shape = ccn.shape
         n_orders = int((shape[-1]+1*skip_odd_orders)/(1+skip_odd_orders)) # if skip_odd_orders:  number of even orders else: shape[-1]
         argument_step = int(skip_odd_orders)+1
+        
+        #xprint(masks.shape)
+        #xprint(ccn.shape)
+        #sys.exit()
         
         weights = CCN._read_denoise_argument(n_orders,weights)
         masks = CCN._read_denoise_argument(n_orders,masks)
@@ -518,16 +558,32 @@ class CCN:
                 out = np.zeros((len(orders),)+shape[:-1],dtype=ccn.dtype)
                 for o_id,o in enumerate(orders):
                     arg_id = o//argument_step
-                    out[o_id]=denoise_tv_chambolle(ccn[...,o],lamb = weights[arg_id],n_iterations = n_iterations[arg_id])
+                    cco = ccn[...,o]
+                    if isinstance(rescaling_sigma,(int,float)):
+                        S = gaussian_filter(np.abs(cco),sigma=rescaling_sigma)
+                    else:
+                        S=1
+                    out[o_id]= denoise_tv_chambolle(cco/S,lamb = weights[arg_id],n_iterations = n_iterations[arg_id])*S
+                    #out[o_id]= denoise_tv_chambolle(ccn[...,o],lamb = weights[arg_id],n_iterations = n_iterations[arg_id])             
                 return out
         else:
             def denoiser(orders,**kwargs):
                 out = np.zeros((len(orders),)+shape[:-1],dtype=ccn.dtype)
                 for o_id,o in enumerate(orders):
                     arg_id = o//argument_step
-                    out[o_id],_=denoise_tv_chambolle_masked(ccn[...,o],masks[arg_id],lamb = weights[arg_id],n_iterations = n_iterations[arg_id],mask_iterations = mask_iterations[arg_id],mask_sigma=mask_feedback[arg_id])
+                    cco = ccn[...,o]
+                    if isinstance(rescaling_sigma,(int,float)):
+                        S = gaussian_filter(np.abs(cco),sigma=rescaling_sigma)
+                    else:
+                        S = 1
+                    tmp,_=denoise_tv_chambolle_masked(cco/S,masks[arg_id],lamb = weights[arg_id],n_iterations = n_iterations[arg_id],mask_iterations = mask_iterations[arg_id],mask_sigma=mask_feedback[arg_id])
+                    out[o_id] = tmp*S
+                    #out[o_id]=S
+                    #out[o_id],_=denoise_tv_chambolle_masked(ccn[...,o],masks[arg_id],lamb = weights[arg_id],n_iterations = n_iterations[arg_id],mask_iterations = mask_iterations[arg_id],mask_sigma=mask_feedback[arg_id])
+
                 return out
         if use_multi_processing:
+            #print(f"nprocesses = {n_processes}, orders = {np.arange(0,ccn.shape[-1],argument_step)}")
             denoised_ccn = Multiprocessing.process_mp_request(denoiser,input_arrays=[np.arange(0,ccn.shape[-1],argument_step)],call_with_multiple_arguments=True,n_processes = n_processes)
         else:
             denoised_ccn = denoiser(np.arange(shape[-1]))
@@ -586,7 +642,7 @@ class _Conversion2Dim:
         return ccn
 class _Conversion3DimFromCCN:
     @staticmethod
-    def back_substitution(ccn,xray_wavelength,momentum_transfer_points,max_order=None,assume_zero_odd_orders = False):
+    def back_substitution(ccn,xray_wavelength,momentum_transfer_points,max_order=None,assume_zero_odd_orders = False,**kwargs):
         '''
         Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta).
         Uses 
@@ -606,6 +662,7 @@ class _Conversion3DimFromCCN:
         :return: $B_l$ coeff.
         :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
         '''
+        #log.info(f'max_order = {max_order}')
         # Get Pl arguments 
         qs = momentum_transfer_points
         thetas = ewald_sphere_theta_pi(xray_wavelength,qs)
@@ -621,6 +678,7 @@ class _Conversion3DimFromCCN:
             #lazy back substitution + least squares 
             # reversed orders shoud be decreasing L,L-1,... or L,L-2,...
             for l in orders[::-1]:
+                #xprint(l)
                 last_triangular_matrix_column = ccd_associated_legendre_matrices_single_l(thetas,l,l)
                 # least squares step
                 a = (last_triangular_matrix_column[...,-2:]**2).sum(axis=-1)
@@ -632,6 +690,7 @@ class _Conversion3DimFromCCN:
             #lazy back substitution
             # reversed orders shoud be decreasing L,L-1,... or L,L-2,...
             for l in orders[::-1]:
+                #xprint(l)
                 last_triangular_matrix_column = ccd_associated_legendre_matrices_single_l(thetas,l,l)
                 bl[...,l]= ccn[...,-1]/last_triangular_matrix_column[...,-1]
                 ccn = ccn[...,:-1]-bl[...,l,None]*last_triangular_matrix_column[...,:-1]
@@ -649,7 +708,7 @@ class _Conversion3DimFromCCN:
         b_coeff = np.array(tuple(np.linalg.lstsq(leg_matrix,cc_subpart,rcond=None)[0] for leg_matrix,cc_subpart in zip(legendre_matrices,cc_part)))               
         return b_coeff
     @staticmethod
-    def least_squares(ccn,xray_wavelength,momentum_transfer_points,max_order=None,assume_zero_odd_orders=False):
+    def least_squares(ccn,xray_wavelength,momentum_transfer_points,max_order=None,assume_zero_odd_orders=False,**kwargs):
         '''
         Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta) using
         $CC=\sum F_l B_l$.
@@ -711,7 +770,7 @@ class _Conversion3DimFromCCN:
             bl_part[n] = leg_coeff
         return bl_part
     @staticmethod
-    def legendre(ccn,xray_wavelength,momentum_transfer_points,max_order=None):
+    def legendre(ccn,xray_wavelength,momentum_transfer_points,max_order=None,**kwargs):
         # Get Fl arguments 
         qs = momentum_transfer_points
         
@@ -760,18 +819,156 @@ class _Conversion:
     dim3 = _Conversion3Dim
     
 class _Regularization:
+    eigh = sp.linalg.eigh
     @staticmethod
-    def dim2():
-        pass
+    def _invariant_eigenvalues(b_matrix,sort_mode = 0):
+        # Calculates the eigenvalue/eignvector pairs and sorts them.
+        # Assumes input matrix to be hermitian
+        # sort_mode can be 0 or 1
+        # case sort_mode == 0: eigenvectors and eigenvalues are sorted by eigenvalues
+        # case sort_mode == 1: eigenvectors and eigenvalues are sorted by median of the product of sqrt(eigenvalue)*eigenvector
+    
+        # Comment In some 2d examples sorting purely by eigenvalue(sort_mode == 0) has failed due to a verry small associated eigenvetor (which was almost everywhere 0)                
+        eig_vals,eig_vect = _Regularization.eigh(b_matrix,driver = 'ev')
+        if sort_mode == 0:
+            sort_metric = eig_vals
+            sorted_ids = slice(None,None,-1)
+            #log.info('yay')
+        elif sort_mode == 1:
+            sort_metric = np.median(np.abs(eig_vect*np.sqrt(np.abs(eig_vals))),axis = 0)*np.sign(eig_vals)
+            sorted_ids=np.argsort(sort_metric)[::-1]
+        eig_vals = eig_vals[sorted_ids]
+        eig_vect = eig_vect[:,sorted_ids]
+        return eig_vals,eig_vect
+        
     @staticmethod
-    def dim3():
-        pass
+    def _enforce_rank_of_b_matrix_scaled(sigma,s,b_matrix,rank,return_decomposition=False,sort_mode=0):
+        '''
+        first regularizes B_l by a smoothed version of s(abs value of highest eigenvalue)
+        and projects the result to its Eigendecomposition using the first 2*order+1 positive eigenvalues. 
+        This is done to enforce that b_matrix is a rank 2*order+1 matrix of the form b_matrix =VV^\dagger.
+        '''
+        s = gaussian_filter1d(s,sigma=sigma)
+        S = s[:,None]*s[None,:]
+        # b_matrix is supposed to be hermitian => use hermitian part.
+        b_matrix_symmetrized = (b_matrix + b_matrix.T.conj())/2 
+        b_matrix_scaled =   b_matrix_symmetrized/S
+        
+        eig_vals,eig_vect = _Regularization._invariant_eigenvalues(b_matrix_scaled,sort_mode = sort_mode)
+        eig_vals = eig_vals[:rank]
+        # b_matrix is supposed to be positive definite => setting neg eigenvalues to zero.
+        eig_vals[eig_vals<0]=0
+        eig_vect = eig_vect[:,:rank]
+        new_scaled_b_matrix = (eig_vect*eig_vals)@eig_vect.T.conj()
+        new_b_matrix = new_scaled_b_matrix*S
+        if return_decomposition:
+            # V s.t.: new_b_matrix = V@V.T
+            V = eig_vect*s[:,None]*np.sqrt(eig_vals)
+            V_left_inv = (eig_vect/(s[:,None]*np.sqrt(eig_vals)[None,:])).T
+            return new_b_matrix, V, V_left_inv
+        else:
+            return new_b_matrix
+
+    @staticmethod
+    def _sign_loss_of_regularized_b_matrix(sigma,s,b_matrix,rank,sort_mode):
+        '''
+        Computes for a given smothing sigma (gaussian sigma)
+        the sign loss of the regularized b_matrix which we defined by the following frobenius norm
+        || sgn(B_l) - sgn(P_r,sigma(B_l)||_F
+        here P_r,sigma first regularizes B_l by a smoothed version of v(abs value of highest eigenvalue)
+        and projects the result to its Eigendecomposition using the first 2*order+1 positive eigenvalues. 
+        This is done to enforce that b_matrix is a rank 2*order+1 matrix of the form b_matrix =VV^\dagger.
+        '''
+        new_b_matrix = _Regularization._enforce_rank_of_b_matrix_scaled(sigma,s,b_matrix,rank,sort_mode=0)
+        loss = np.linalg.norm(np.sign(b_matrix)-np.sign(new_b_matrix))
+        return loss
+    @staticmethod
+    def _regularize(b_matrix,order,q_id_limit,dim=3,rescale=False,sort_mode=0,extend_above_q_limit = True,**kwargs):
+        # Calculates the eigenvalue/eignvector pairs and sorts them.
+        # Assumes input matrix to be hermitian
+        # sort_mode can be 0 or 1
+        # case sort_mode == 0: eigenvectors and eigenvalues are sorted by eigenvalues
+        # case sort_mode == 1: eigenvectors and eigenvalues are sorted by median of the product of sqrt(eigenvalue)*eigenvector
+        full_b_matrix = (b_matrix + b_matrix.T.conj())/2
+        q_slice = slice(*q_id_limit)
+        Nq = b_matrix.shape[-1]
+        b_matrix=b_matrix[q_slice,q_slice]
+    
+        # Comment In some 2d examples sorting purely by eigenvalue(sort_mode == 0) has failed due to a verry small associated eigenvetor (which was almost everywhere 0)
+        if dim == 2:
+            rank=1
+        else:
+            rank = min(len(b_matrix),2*order+1)
+            
+        b_matrix = (b_matrix + b_matrix.T.conj())/2
+        is_zero = np.isclose(b_matrix,0).all()
+        if is_zero:
+            full_V = np.zeros((Nq,rank),dtype = b_matrix.dtype)
+            return [full_V,q_id_limit]
+        
+        eig_vals,eig_vect =  _Regularization._invariant_eigenvalues(b_matrix,sort_mode=sort_mode)
+        if rescale:
+            max_id=np.argsort(eig_vals)[-1]
+            s = np.sqrt(np.abs(eig_vals[max_id]))*np.abs(eig_vect[:,max_id])
+        
+            sigma_optimal = minimize_scalar(_Regularization._sign_loss_of_regularized_b_matrix,args=(s,b_matrix,rank,sort_mode),bounds = [1,len(b_matrix)],method='Bounded').x
+            #sigma_optimal = 18
+            new_b_matrix,V,V_inv = _Regularization._enforce_rank_of_b_matrix_scaled(sigma_optimal,s,b_matrix,rank = rank,sort_mode = sort_mode,return_decomposition=True)
+        else:
+            eig_vals[eig_vals<0]=0
+            V=eig_vect[:,:rank]*np.sqrt(eig_vals[:rank])
+            V_inv = (eig_vect[:,:rank]/np.sqrt(eig_vals[:rank])).T
+            
+        full_V = np.zeros((Nq,rank),dtype = V.dtype)
+        if extend_above_q_limit:
+            n_v = len(V)
+            b_lower = full_b_matrix[q_id_limit[0]:,q_id_limit[0]:]
+            V_rest=(V_inv@b_lower[:n_v,n_v:]).T
+            V = np.concatenate((V,V_rest),axis=0)
+            full_V[q_id_limit[0]:] = V
+            q_id_limit[1]=Nq
+        else:
+            full_V[q_slice] = V
+        out = [full_V,q_id_limit]
+        #xprint(f'len out = {len(out)}, order ={order}')
+        return out
+        
 class Deg2Invar:
     conversion = _Conversion
     regularization = _Regularization
     @staticmethod
-    def from_ccn():
-        pass
+    def from_ccn(ccn,dim = 3,**metadata):
+        '''
+        Routine that distributes requests for deg2_invariants to the respective routines in the 2 and 3 dimensional case.
+        :param cc: cross-correlation data
+        :type complex ndarray: shape $= (n_q(q),n_q(qq),n_\Delta)$
+        :param dim: Dimension of MTIP algorithm for which deg2 invariants will be extracted (2 or 3)
+        :type int: 2 or 3    
+        '''
+        #log.info(metadata.keys())        
+        max_order = metadata['max_order']
+        momentum_transfer_points = metadata['qs']
+        assume_zero_odd_orders = metadata['assume_zero_odd_orders']
+        
+        if dim == 2:
+            b_coeff = np.zeros((max_order+1,)+cc_mask.shape[:2],dtype = complex)
+            stride = int(assume_zero_odd_orders)+1
+            b_coeff[::stride,...] = np.moveaxis(ccn[...,:max_order+1:stride],-1,0) 
+    
+        elif dim == 3:
+            #b_coeff = np.zeros((len(order_mask),)+cc_mask.shape[:2],dtype = complex)
+            xray_wavelength = metadata['xray_wavelength']
+            mode = metadata.get('mode','back_substitution')
+            #log.info('start extraction in mode = {}'.format(mode_specified))
+            try:
+                extractor = getattr(Deg2Invar.conversion.dim3.from_ccn,mode)
+            except AttributeError as e:
+                known_modes = [key for key in _Conversion3DimFromCCN.__dict__.keys() if key[0]!='_']
+                log.warning(f'Bl extraction mode {mode} not known, known modes are {known_modes}. Defaulting to "back_substitution".')
+                extractor = Deg2Invar.conversion.dim3.from_cnn.back_substitution
+                
+            b_coeff = extractor(ccn,xray_wavelength,momentum_transfer_points,max_order=max_order,assume_zero_odd_orders = assume_zero_odd_orders)
+        return b_coeff
     @staticmethod
     def to_ccn():
         pass
@@ -782,8 +979,40 @@ class Deg2Invar:
     def from_intensity_coeff():
         pass
     @staticmethod
-    def regularize():
-        pass
+    def regularize(b_matrices,dim=3,q_id_limits=None,sort_mode=0,rescale=False,extend_above_q_limit = True,n_processes = False):
+        '''
+        Enforces that B_l = V_l V_l^\dagger and B_n = v_n v_n^\dagger 
+        :param dim: Dimension
+        :type int: 2 or 3
+        :param b_coeff:
+        :type real nd_array: shape= (n_orders,q_1,q_2)
+        :param sort_mode: sort_mode for eigenvalu/eigenvector sorting of deg2_invariants see function deg2_invariant_eigenvalues for details deg2_invariant_eigenvalues
+        :type int: 0 or 1
+        :return proj_matrices:
+        :type real nd_array: shape= (n_orders,q)
+        '''    
+        if not isinstance(q_id_limits,np.ndarray):
+            q_id_limits = np.zeros((b_matrices.shape[0],)+(2,2),dtype = int)
+            q_id_limits[...,1]=b_matrices.shape[-1]
+        try:
+            assert (q_id_limits[:,0,:]==q_id_limits[:,1,:]).all(),'Trying to compute projection matrices from non-square submatrix of deg2 invariants specified. That makes no sense since projection matrices are theoretically given by eig values of a positive semidefinite matrix. Continue using the q1_id_limits also for q2 to make the selection square.'
+        except AssertionError as e:
+            log.info(e)
+        q_id_limits=q_id_limits[:,0,:]
+        
+        orders = np.arange(len(b_matrices))
+        
+        def worker(b_matrix,order,q_id_limit,**kwargs):
+            tmp = _Regularization._regularize(b_matrix,order,q_id_limit,dim = dim,rescale = rescale,extend_above_q_limit = extend_above_q_limit, sort_mode=sort_mode)
+            return tmp
+        temp = Multiprocessing.comm_module.request_mp_evaluation(worker,input_arrays=(b_matrices,orders,q_id_limits),split_together=True,n_processes = n_processes)
+        #print(temp[0].shape)
+        
+        #xprint(f'len mp out = {len(temp)}')
+        proj_matrices = [p[0] for p in temp] #tuple(p for p in temp)
+        new_q_id_limits = np.array([p[1] for p in temp])
+        #eigen_values = tuple(eig for p,eig in temp)
+        return proj_matrices,new_q_id_limits
     @staticmethod
     def mod_enforce_psd():
         pass
@@ -1794,7 +2023,8 @@ def calc_projection_matrix_error_estimate(deg2_invariant,proj_matrices):
         if pr.ndim ==1:
             pr = pr[:,None]
         non_zero_mask = (b != 0)
-        e[non_zero_mask] = np.abs(b[non_zero_mask]-(pr@pr.conj().T)[non_zero_mask])/np.abs(b[non_zero_mask])
+        if non_zero_mask.any():
+            e[non_zero_mask] = np.abs(b[non_zero_mask]-(pr@pr.conj().T)[non_zero_mask])/np.abs(b[non_zero_mask])
     return errors
 
 ######## projection pmatrices ########

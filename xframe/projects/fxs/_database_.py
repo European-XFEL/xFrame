@@ -222,11 +222,13 @@ class ProjectDB(DefaultDB,DatabaseInterface):
 
         if options['plot_average_bl']:
             I = data['average']['intensity_from_densities']
-            I2 = data['average']['intensity_from_ft_densities'] 
+            I2 = data['average']['intensity_from_ft_densities']
+            #xprint(I.shape)
             bl = intensity_to_deg2_invariant(I)
             ft_bl = intensity_to_deg2_invariant(I2)
-            self._save_first_invariants(bl,qs,run_path,options,name='average_')
-            self._save_first_invariants(ft_bl,qs,run_path,options,name='average_ft_')
+            self._save_first_invariants(bl.real,qs,run_path,options,name="average_".format(key),scale='symlog',cmap='RdBu',plot_abs = False)
+            self._save_first_invariants(bl.real,qs,run_path,options,name="average_ft_".format(key),scale='symlog',cmap='RdBu',plot_abs = False)
+            #self._save_first_invariants(ft_bl,qs,run_path,options,name='average_ft_')
         if options['plot_average_cn']:
             if not options['plot_average_bl']:
                 I = data['average']['intensity_from_densities'] 
@@ -388,7 +390,8 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                     #xprint(f'bl shape {Bls.shape}')
                     #xprint(f'bl shape {Bls[0].shape}')
                     log.info("last deg2 invariant shape = {}".format(Bls.shape))
-                    self._save_first_invariants(Bls,q_radial_points,run_path,options,name="{}_out_".format(key))
+                    self._save_first_invariants(Bls.real,q_radial_points,run_path,options,name="{}_out_".format(key),scale='symlog',cmap='RdBu',plot_abs = False)
+                    #self._save_first_invariants(Bls,q_radial_points,run_path,options,name="{}_out_".format(key))
 
 
                     #thetas = ewald_sphere_theta_pi(data['configuration']['xray_wavelength'],q_radial_points)
@@ -409,7 +412,8 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                 #C0 = np.abs(Bls[0]-value['last_deg2_invariant'][0])**2/np.abs(Bls[0])**2
                 #log.info('B[0] errors mean = {} = {}'.format(np.mean(C0),C0))
                 #self._save_C0(C0,q_radial_points,run_path,options,name="Bl0_")
-                self._save_first_invariants(Bls,q_radial_points,run_path,options,name="first_")               
+                self._save_first_invariants(Bls.real,q_radial_points,run_path,options,name="first_",scale='symlog',cmap='RdBu',plot_abs = False)
+                #self._save_first_invariants(Bls,q_radial_points,run_path,options,name="first_")               
         except Exception as e:
             log.warning(f"Failed to save initial invariant plots with error {e}")
             log.info(traceback.print_exc())
@@ -420,7 +424,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         settings, raw_settings = self.load('settings',direct_path=path)
         return settings
     
-    def _save_first_invariants(self,bls,radial_points,base_path,options,name='',mask = True,cmap='plasma',scale = 'log',plot_abs = True):
+    def _save_first_invariants(self,bls,radial_points,base_path,options,name='',type_name='Bl',mask = True,cmap='plasma',scale = 'log',plot_abs = True):
         bls = bls.copy()
         if isinstance(mask,np.ndarray):
             bls[~mask]=0
@@ -447,6 +451,8 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             vmin,vmax = options.get('plot_range',[max_value*10**(-orders//2),max_value])
             #log.info(f'vmin vmax = {vmin},{vmax}')
         #log.info(f'vmin vmax = {vmin}, {vmax} median = {median_value} max = {max_value}')
+                
+            
         
         grid = GridFactory.construct_grid('uniform',[radial_points,radial_points])
         order_ids = [0,2,4,6,8]
@@ -477,9 +483,11 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                     
             layouts.append(layout_part)
             plot_data.append(plot_data_part)
-                                                    
-        fig_bl_masks = heat2D_multi.get_fig(plot_data,scale = scale,layout = layouts,grid =grid[:],shape = shape,size = (30,shape[0]*5),vmin= vmin, vmax = vmax,cmap=cmap)
-        bl_path = base_path +name+'Bl.matplotlib'
+        if scale=='symlog':                                            
+            fig_bl_masks = heat2D_multi.get_fig(plot_data,scale = scale,layout = layouts,grid =grid[:],shape = shape,size = (30,shape[0]*5),vmin= -vmax, vmax = vmax,cmap=cmap,symlog_thresh=vmin)
+        else:
+            fig_bl_masks = heat2D_multi.get_fig(plot_data,scale = scale,layout = layouts,grid =grid[:],shape = shape,size = (30,shape[0]*5),vmin= vmin, vmax = vmax,cmap=cmap)
+        bl_path = base_path +name+f'{type_name}.matplotlib'
         self.save(bl_path,fig_bl_masks,dpi = 300)
     def _save_C0(self,c0,radial_points,base_path,options,name=''):
         max_value = np.abs(c0).max()
@@ -682,6 +690,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             data_dict['data_projection_matrix_error_estimates'] = proj_class.data_projection_matrix_error_estimates
         data_dict['data_projection_matrices_q_id_limits']=proj_class.data_projection_matrices_q_id_limits
         data_dict['max_order'] = proj_class.max_order
+        #data_dict['ccn']=proj_class.ccn
         #data_dict['pi_in_q'] = int(proj_class.pi_in_q)
         data_dict['number_of_particles'] = int(proj_class.number_of_particles)
         if options.get('save_invariant',False):
@@ -704,11 +713,11 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                 for key,bls in proj_class.b_coeff.items():
                     bl_args = np.angle(bls)
                     mask = proj_class.b_coeff_masks[key]
-                    self._save_first_invariants(bls,proj_class.data_radial_points,data_folder,options,name="first_{}_".format(key))
+                    self._save_first_invariants(bls.real,proj_class.data_radial_points,data_folder,options,name="first_{}_".format(key),scale='symlog',cmap='RdBu',plot_abs = False)
                     arg_opt = {'plot_range':[0,np.pi]}
                     #xprint(f"bl args minmax = {[bl_args.min(),bl_args.max()]}")
                     self._save_first_invariants(bl_args,proj_class.data_radial_points,data_folder,arg_opt,scale = 'lin',cmap='coolwarm',name="first_arg_of_{}_".format(key))
-                    self._save_first_invariants(bls,proj_class.data_radial_points,data_folder,options,name="mask_of_{}_".format(key),mask = mask)
+                    self._save_first_invariants(bls.real,proj_class.data_radial_points,data_folder,options,name="mask_of_{}_".format(key),mask = mask,scale='symlog',cmap='RdBu',plot_abs = False)
         except Exception as e:
             log.info('Plotting first invariants failed !')
             traceback.print_exc()
@@ -725,36 +734,13 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             traceback.print_exc()
         try:
             if options.get('plot_first_ccn',False) and (proj_class.dimensions == 3):
-                for key,bls in proj_class.b_coeff.items():        
-                    cns = deg2_invariant_to_cn_3d(bls,proj_class.data_radial_points,proj_class.xray_wavelength)
-                    #log.info('bcoeff dtype = {}'.format(bls.dtype))
-                    cns = np.moveaxis(cns,-1,0)
-                    max_value = np.max(tuple(np.abs(cn).max() for cn in cns))
-                    vmin,vmax = options.get('plot_range',[max_value*1e-12,max_value])            
-                    if [vmin,vmax] == [None,None]:
-                        vmin,vmax = [max_value*1e-12,max_value]
-        
-                    grid = GridFactory.construct_grid('uniform',[proj_class.data_radial_points,proj_class.data_radial_points])
-                    order_ids = [0,2,4,6,8]
-    
-                    shape = [2,len(order_ids)]
-                    layouts = []
-                    for i in range(shape[0]):
-                        layout_part = []
-                        orders = np.arange(10*i,10*i+len(order_ids)*2,2)
-                        for o in orders:
-                            layout = {'title':'$B_{'+'{}'.format(o)+'}$',
-                                      'x_label':'$q_1$',
-                                      'y_label':'$q_2$'
-                                      }
-                            layout_part.append(layout)
-                        layouts.append(layout_part)
-
-            
-                    fig_bl_masks = heat2D_multi.get_fig([[np.abs(cns[n]) for n in order_ids],[np.abs(cns[10+n]) for n in order_ids] ],scale = 'log',layout = layouts,grid =grid,shape = shape,size = (30,10),vmin= vmin, vmax = vmax,cmap='plasma')
-
-                    bl_path = data_folder+'first_{}_CCn.matplotlib'.format(key)
-                    self.save(bl_path,fig_bl_masks,dpi = 500)
+                for key,ccn in proj_class.ccn.items():
+                    cns = np.moveaxis(ccn['data'],-1,0)
+                    cns_mod =np.moveaxis(ccn['modified'],-1,0)
+                    self._save_first_invariants(cns.real,proj_class.data_radial_points,data_folder,options,name="first_{}_".format(key),type_name='CCn',mask = mask,scale='symlog',cmap='RdBu',plot_abs = False)
+                    self._save_first_invariants(cns_mod.real,proj_class.data_radial_points,data_folder,options,name="first_modified_{}_".format(key),type_name='CCn'.format(key),mask = mask,scale='symlog',cmap='RdBu',plot_abs = False)
+                    #cns_ = deg2_invariant_to_cn_3d(bls,proj_class.data_radial_points,proj_class.xray_wavelength)
+                    #log.info('bcoeff dtype = {}'.format(bls.dtype))                    
         except Exception as e:
             log.info('Plotting first CCn failed !')
             traceback.print_exc()
@@ -774,7 +760,8 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                 for key,bls in bls2.items():
                     if not key == 'I2I1':
                         #log.info(f'bls shape = {bls.shape}')
-                        self._save_first_invariants(bls,proj_class.data_radial_points,data_folder,options,name="first_{}_proj_matrices_to_".format(key))
+                        self._save_first_invariants(bls.real,proj_class.data_radial_points,data_folder,options,name="first_{}_proj_matrices_to_".format(key),scale='symlog',cmap='RdBu',plot_abs = False)
+                        #self._save_first_invariants(bls.real,proj_class.data_radial_points,data_folder,options,name="mask_of_{}_".format(key),mask = mask,scale='symlog',cmap='RdBu',plot_abs = False)
         except Exception as e:
             log.info("Plotting Bl from projection matrices failed!")
             traceback.print_exc()
