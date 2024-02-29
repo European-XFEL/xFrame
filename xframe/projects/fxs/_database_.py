@@ -424,7 +424,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         settings, raw_settings = self.load('settings',direct_path=path)
         return settings
     
-    def _save_first_invariants(self,bls,radial_points,base_path,options,name='',type_name='Bl',mask = True,cmap='plasma',scale = 'log',plot_abs = True):
+    def _save_first_invariants(self,bls,radial_points,base_path,options,name='',type_name='Bl',mask = True,cmap='plasma',scale = 'log',plot_abs = True,ticks_from_zero=False):
         bls = bls.copy()
         if isinstance(mask,np.ndarray):
             bls[~mask]=0
@@ -484,9 +484,9 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             layouts.append(layout_part)
             plot_data.append(plot_data_part)
         if scale=='symlog':                                            
-            fig_bl_masks = heat2D_multi.get_fig(plot_data,scale = scale,layout = layouts,grid =grid[:],shape = shape,size = (30,shape[0]*5),vmin= -vmax, vmax = vmax,cmap=cmap,symlog_thresh=vmin)
+            fig_bl_masks = heat2D_multi.get_fig(plot_data,scale = scale,layout = layouts,grid =grid[:],shape = shape,size = (30,shape[0]*5),vmin= -vmax, vmax = vmax,cmap=cmap,symlog_thresh=vmin,ticks_from_zero=ticks_from_zero)
         else:
-            fig_bl_masks = heat2D_multi.get_fig(plot_data,scale = scale,layout = layouts,grid =grid[:],shape = shape,size = (30,shape[0]*5),vmin= vmin, vmax = vmax,cmap=cmap)
+            fig_bl_masks = heat2D_multi.get_fig(plot_data,scale = scale,layout = layouts,grid =grid[:],shape = shape,size = (30,shape[0]*5),vmin= vmin, vmax = vmax,cmap=cmap,ticks_from_zero=ticks_from_zero)
         bl_path = base_path +name+f'{type_name}.matplotlib'
         self.save(bl_path,fig_bl_masks,dpi = 300)
     def _save_C0(self,c0,radial_points,base_path,options,name=''):
@@ -713,11 +713,11 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                 for key,bls in proj_class.b_coeff.items():
                     bl_args = np.angle(bls)
                     mask = proj_class.b_coeff_masks[key]
-                    self._save_first_invariants(bls.real,proj_class.data_radial_points,data_folder,options,name="first_{}_".format(key),scale='symlog',cmap='RdBu',plot_abs = False)
+                    self._save_first_invariants(bls.real,proj_class.data_radial_points,data_folder,options,name="first_{}_".format(key),scale='symlog',cmap='RdBu',plot_abs = False,ticks_from_zero=True)
                     arg_opt = {'plot_range':[0,np.pi]}
                     #xprint(f"bl args minmax = {[bl_args.min(),bl_args.max()]}")
-                    self._save_first_invariants(bl_args,proj_class.data_radial_points,data_folder,arg_opt,scale = 'lin',cmap='coolwarm',name="first_arg_of_{}_".format(key))
-                    self._save_first_invariants(bls.real,proj_class.data_radial_points,data_folder,options,name="mask_of_{}_".format(key),mask = mask,scale='symlog',cmap='RdBu',plot_abs = False)
+                    self._save_first_invariants(bl_args,proj_class.data_radial_points,data_folder,arg_opt,scale = 'lin',cmap='coolwarm',name="first_arg_of_{}_".format(key),ticks_from_zero=True)
+                    self._save_first_invariants(bls.real,proj_class.data_radial_points,data_folder,options,name="mask_of_{}_".format(key),mask = mask,scale='symlog',cmap='RdBu',plot_abs = False,ticks_from_zero=True)
         except Exception as e:
             log.info('Plotting first invariants failed !')
             traceback.print_exc()
@@ -760,7 +760,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                 for key,bls in bls2.items():
                     if not key == 'I2I1':
                         #log.info(f'bls shape = {bls.shape}')
-                        self._save_first_invariants(bls.real,proj_class.data_radial_points,data_folder,options,name="first_{}_proj_matrices_to_".format(key),scale='symlog',cmap='RdBu',plot_abs = False)
+                        self._save_first_invariants(bls.real,proj_class.data_radial_points,data_folder,options,name="first_{}_proj_matrices_to_".format(key),scale='symlog',cmap='RdBu',plot_abs = False,ticks_from_zero=True)
                         #self._save_first_invariants(bls.real,proj_class.data_radial_points,data_folder,options,name="mask_of_{}_".format(key),mask = mask,scale='symlog',cmap='RdBu',plot_abs = False)
         except Exception as e:
             log.info("Plotting Bl from projection matrices failed!")

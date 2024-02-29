@@ -20,17 +20,25 @@ class pltWrapper:
 class locatorWrapper:
     def __getattr__(self,key):
       return globals()['mpl_toolkits'].axes_grid1.inset_locator.__getattribute__(key)
+class dividerWrapper:
+    def __getattribute__(self,key):
+        return globals()['mpl_toolkits'].axes_grid1.axes_divider.__getattribute__(key)
+#plt = matplotlib.pyplot
+#inset_locator = mpl_toolkits.axes_grid1.inset_locator
 plt = pltWrapper()
 inset_locator = locatorWrapper()
+axes_divider = dividerWrapper()
 
 def depencency_injection_hook_mpl():
     matplotlib.rcParams['text.usetex'] = True
     module = sys.modules[__name__]
-    module.plt = matplotlib.pyplot
+    #module.plt = matplotlib.pyplot
 
 def dependency_injection_hook_mpl_toolkits():
-    module = sys.modules[__name__]
-    module.inset_locator = mpl_toolkits.axes_grid1.inset_locator
+    pass
+    #module = sys.modules[__name__]
+    #module.inset_locator = mpl_toolkits.axes_grid1.inset_locator
+    #module.make_axes_locatable = mpl_toolkits.axes_grid1.axes_divider.make_axes_locatable
 
 
 from xframe.library import mathLibrary as mLib
@@ -394,7 +402,7 @@ class heat2D:
 
 class heat2D_multi(Plotter):
     @classmethod
-    def get_fig(cls,datasets,grid=False,layout={},scale='lin',shape=(1,1),size = False,vmin = None,vmax =None,cmap = 'inferno',symlog_thresh=1e-8):
+    def get_fig(cls,datasets,grid=False,layout={},scale='lin',shape=(1,1),size = False,vmin = None,vmax =None,cmap = 'inferno',symlog_thresh=1e-8,ticks_from_zero=False):
         cmap=plt.get_cmap(cmap).copy()
         if isinstance(size,bool):
             size = tuple(9*i for i in shape[::-1])
@@ -423,6 +431,8 @@ class heat2D_multi(Plotter):
             y=np.swapaxes(y,0,1)
             #log.debug('r shape = {} phi shape={}'.format(x.shape,y.shape))
             #        plt.pcolormesh(th, r, z)
+        xmax = x.max()
+        ymax =y.max()
         heatmaps = []
         if scale=='log' or scale == 'symlog':
             cmap.set_bad(cmap(0))
@@ -439,7 +449,10 @@ class heat2D_multi(Plotter):
                     #    vmax = data.min()
                     heatmap_row.append(ax.pcolormesh(x,y,data,norm=norm,cmap=cmap,shading='auto'))
                     ax.set_aspect('equal')
-                heatmaps.append(heatmap_row)
+                    if ticks_from_zero:
+                        ax.set_xticks(np.linspace(0,xmax,5))
+                        ax.set_yticks(np.linspace(0,ymax,5))
+                heatmaps.append(heatmap_row)                
             
         else:
             for ax_row,dataset_row in zip(axes,datasets):
@@ -579,7 +592,7 @@ class agipd_heat():
             circ.set_fill(True)
             ax.add_patch(circ)
         apply_layout_to_ax(ax,layout)
-        divider = make_axes_locatable(ax)
+        divider = axes_divider.make_axes_locatable(ax)
         cax = divider.append_axes("right", size="5%", pad=0.05)
         bar = fig.colorbar(ax.collections[0],cax =cax)
         apply_layout_to_figure(fig,layout)
@@ -622,7 +635,7 @@ class centering_heat:
         fig.suptitle(layout_conv["sup_title"],fontsize = 24)
         apply_layout_to_ax(ax_conv,layout_conv)
         apply_layout_to_ax(ax_mask,layout_mask)
-        divider = make_axes_locatable(ax_conv)
+        divider = axes_divider.make_axes_locatable(ax_conv)
         cax = divider.append_axes("right", size="5%", pad=0.05)
         bar = fig.colorbar(ax_conv.collections[0],cax =cax)
         apply_layout_to_figure(fig,layout_conv)

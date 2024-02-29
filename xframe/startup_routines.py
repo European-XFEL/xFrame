@@ -71,7 +71,7 @@ def create_dependency_dict():
                   (('cv_plugin','CV_Plugin','opencv-python'),('xframe.presenters.openCVPresenter','CV_Plugin'),())],
         ###### presenter plugins ######        
         'matplotlib':[(('matplotlib_plugin','matplotlib','matplotlib'),('xframe.presenters.matplotlibPresenter','matplotlib'),('xframe.presenters.matplotlibPresenter.depencency_injection_hook_mpl',))],
-        'matplotlib_toolkit':[(('mpl_toolkits_plugin','mpl_toolkits','matplotlib'),('xframe.presenters.matplotlibPresenter','matplotlib'),('xframe.presenters.matplotlibPresenter.dependency_injection_hook_mpl_toolkits',))],
+        'matplotlib_toolkit':[(('mpl_toolkits_plugin','mpl_toolkits','matplotlib'),('xframe.presenters.matplotlibPresenter','mpl_toolkits'),('xframe.presenters.matplotlibPresenter.dependency_injection_hook_mpl_toolkits',))],
         ###### cmd ######
         'click':[(('click_plugin','ClickPlugin','click'),(False,False,'as_object'),())],
     }

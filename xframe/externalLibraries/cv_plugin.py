@@ -1,7 +1,7 @@
 import cv2 as cv
 import numpy as np
 from xframe.database.interfaces import OpenCVInterface
-from xframe.presenters.openCVPresenter import OpenCVInterface as PresenterInterface
+from xframe.presenters.interfaces import OpenCVInterface as PresenterInterface
 
 class CV_Plugin(OpenCVInterface,PresenterInterface):
     colormaps={

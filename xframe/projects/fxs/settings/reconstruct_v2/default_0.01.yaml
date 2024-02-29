@@ -122,6 +122,8 @@ projections:
         _description: 'Cutoff value relative to the maximal value in the blurred density. Can be varied by defining a linear ramp, default is constant'
         _value:
           command: '[[0.08,[0,0],0],[0.08,[0,0],0]]'
+      force_connected:
+        _value: False
     HIO:
       beta:
         _value:

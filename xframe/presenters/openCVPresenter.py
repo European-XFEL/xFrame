@@ -1,8 +1,8 @@
 import logging
 log = logging.getLogger('root')
-from xframe.presenters.interfaces import OpenCVInterface
+from xframe.presenters.interfaces import OpenCVDependency
 
-CV_Plugin=OpenCVInterface
+CV_Plugin=OpenCVDependency
 
 class Polar2D:
     @staticmethod

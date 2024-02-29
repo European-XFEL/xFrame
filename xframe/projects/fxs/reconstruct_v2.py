@@ -392,7 +392,7 @@ class MTIP:
         real_projection_obj = RealProjection(r_opt.projections,metadata)
 
         sw_opt=r_opt['shrink_wrap']
-        sw_obj = ShrinkWrapParts(r_grid,q_grid,real_projection_obj.initial_support)
+        sw_obj = ShrinkWrapParts(r_grid,q_grid,real_projection_obj.initial_support,options=sw_opt)
         #real_support_projection=generate_real_support_projection(initial_support_mask)
         
         #other_real_projections=generate_other_real_projections(r_opt.non_support_projections,metadata)
@@ -826,7 +826,7 @@ class MTIP:
             else:
                 enforce_initial_support_error_limit=[np.inf]
 
-            def change_to_ft_stab(process_opt,process_name,enforce_initial_support_list):
+            def change_to_ft_stab(process_opt,process_name,enforce_initial_support_list,loop_iteration):
                 apply_ft_stabilization = False
                 process_not_ft_stabilized = (process_name[-8:]!='_ft_stab')
                 if process_not_ft_stabilized:
@@ -839,6 +839,11 @@ class MTIP:
                                 enforced_support_in_last_iterations = (np.array(enforce_initial_support_list[-delay:])==True).any()
                                 #log.info(f'support_enforced_list = {enforce_initial_support_list}')
                                 apply_ft_stabilization = not enforced_support_in_last_iterations
+                        elif process_opt.ft_stab == 'delayed':
+                            delay = max(int(process_opt.ft_stab_delay),1)                            
+                            apply_ft_stabilization = loop_iteration>delay
+                            #xprint(f'ftstab: {apply_ft_stabilization}|{loop_iteration}')
+                        
                 #log.info(f'apply_ft_stabilization = {apply_ft_stabilization}')
                 #if process_name[:2]=="ER":
                 #    xprint(f'apply_ft_stabilization = {apply_ft_stabilization}')
@@ -898,7 +903,7 @@ class MTIP:
                             else:
                                 latest_intensity = False                        
                                 
-                            if change_to_ft_stab(process_opt,key,enforce_initial_support_list):
+                            if change_to_ft_stab(process_opt,key,enforce_initial_support_list,iteration):
                                 #log.info('\n\n changing to ft stab \n')
                                 process = routines[key+'_ft_stab']
                             errs={}

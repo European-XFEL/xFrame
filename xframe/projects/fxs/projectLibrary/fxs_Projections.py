@@ -1,6 +1,7 @@
 import numpy as np
 import time
 from scipy.optimize import minimize_scalar
+from scipy import ndimage
 import logging
 
 
@@ -188,7 +189,8 @@ class ShrinkWrapParts():
         
         dimension = real_grid[:].shape[-1]
         
-        threshold = options.get('thresholds',[0.06])[0]
+        threshold = options['thresholds'][0]
+        force_connected = options['force_connected']
         #log.info(f'threshold = {threshold}')
         if dimension == 2:
             self.default_sigma = np.pi/(reciprocal_grid[:,0,0].max())
@@ -211,6 +213,7 @@ class ShrinkWrapParts():
         
         self._threshold = [threshold]
         self._gaussian_sigma = [gaussian_sigma]
+        self.force_connected = force_connected
         self.gaussian_values = gaussian_fourier_transformed_spherical(self.reciprocal_grid,self._gaussian_sigma[0])
         
         self.get_new_mask = self.mode_routines[self.mode]()
@@ -258,6 +261,11 @@ class ShrinkWrapParts():
             min_value= convolution_data.real.min()
             diff = max_value-min_value
             new_mask = convolution_data >= min_value + threshold[0]*diff
+            if self.force_connected:
+                connected_components,_ = ndimage.label(new_mask)
+                component_names,counts = np.unique(connected_components[connected_components>0],return_counts=True)
+                largest_component_id = np.argmax(counts)
+                new_mask = (connected_components == component_names[largest_component_id])
             return new_mask
         return get_new_mask
     
