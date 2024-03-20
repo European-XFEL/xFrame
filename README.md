@@ -37,4 +37,9 @@ please make sure that the following libraries are installed on your system befor
 
 # Citation
 If you find this piece of software usefull for your scientific project consider citing the paper  
-Still in review ... :)
+
+__A workflow for single-particle structure determination via  
+iterative phasing of rotational invariants in fluctuation X-ray scattering__  
+T. Berberich, S. Molodtsov, R. Kurta  
+Journal of Applied Crystallography | Volume 57 | Part 2 | April 2024  
+(https://doi.org/10.1107/S1600576724000992)
