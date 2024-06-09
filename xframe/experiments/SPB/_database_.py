@@ -239,7 +239,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         
         with self.load('vds',path_modifiers={'run':run,'data_mode':data_mode,'module':0},as_h5_object = True) as h5_file:            
             frame_ids,n_frames = self.get_frame_ids_from_selection(frame_range,selection,good_cells,h5_file)
-            if not isinstance(n_out_frames,bool):                
+            if n_out_frames is not None:                
                 try:
                     assert (n_frames >= n_out_frames), 'Not enough frames beeing selected. Required {} frames got {} frames. Try to continue.'.format(n_out_frames,n_frames)
                 except AssertionError as e:
@@ -249,7 +249,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
                     #raise e
                 frame_ids = frame_ids[:n_out_frames]#np.random.choice(frame_ids,size = n_out_frames, replace=False)
                 #log.info('n frames after = {}'.format(len(frame_ids)))
-                n_frames= n_out_frames            
+                n_frames= len(frame_ids)           
             #log.info('frame_ids shape ={}'.format(frame_ids.shape))
             dataset = h5_file[self.data_path]
             frame_shape = dataset.shape[1:]
@@ -260,7 +260,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         #log.info('simultaneouse frames in mem = {} [MBytes]'.format(simultanous_frames_in_mem))
         #make sure all but the last chunk part are in multiples of 'in_multiples_of'
         #log.info('in multiples of = {}'.format(in_multiples_of))
-        if not isinstance(in_multiples_of,bool):
+        if in_multiples_of is not None:
             simultanous_frames_in_mem = simultanous_frames_in_mem//in_multiples_of *in_multiples_of
             #log.info('simultanous_frames_in_mem = {}'.format(simultanous_frames_in_mem))
         #log.info('n_frames = {}'.format(n_frames))
@@ -268,17 +268,21 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         #log.info('split_ids={}'.format(split_ids))
         #if last chunk part is smaller than 'in_multiples_of' combine the last two chunk parts.
         #i.e make sure that each chunk is bigger than in_multiples_of
-        if not isinstance(in_multiples_of,bool):
+        if in_multiples_of is not None:
             last_chunk_size = n_frames%simultanous_frames_in_mem
             if last_chunk_size < in_multiples_of:
                 split_ids=split_ids[:-1]
                 
-        log.info("Maximal chunk size is {} GB or {} frames".format(simultanous_frames_in_mem*frame_size_B/1024**3,simultanous_frames_in_mem))
+        #log.info("Maximal chunk size is {} GB or {} frames".format(simultanous_frames_in_mem*frame_size_B/1024**3,simultanous_frames_in_mem))
 
         if len(frame_ids) !=0:
             chunks=np.split(frame_ids,split_ids[1:-1])
+            len_chunk = len(chunks[0])
+            xprint("Chunk size is {} GB or {} frames".format(len_chunk*frame_size_B/1024**3,len_chunk))
         else:
             chunks = []
+            xprint("Chunk size is {} GB or {} frames".format(0,0))
+            
         #log.info('n frames = {}'.format(len(frame_ids)))
         #log.info('frames in chunks = {}'.format(np.sum([len(chunk) for chunk in chunks])))
         return chunks
@@ -300,6 +304,8 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
                 #log.info('out_slice shape = {}'.format(o_slice))
                 #log.info('data_slice shape = {}'.format(vds[d_slice].shape))
                 vds.read_direct(data,d_slice,(m_id,o_slice))
+                #data[m_id,o_slice]=vds[d_slice]
+                #print(data)
                 nan_mask = np.isnan(vds[d_slice])
                 if nan_mask.any():
                     log.info('module {}, slice {}, out_slice {}'.format(m,d_slice,o_slice))
@@ -309,6 +315,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
                     vds_gain.read_direct(gain,d_slice,(m_id,o_slice))
                 # inverting the mask so that unmasked values are 1/True and masked values are 0/False
                 mask[m_id,o_slice] = ~mask[m_id,o_slice]
+                
     def _load_data_chunk_worker2(self,module,module_id_lookup,run,data_slices,output_slices,data_mode,**opt):
         m = module
         for d_slice,o_slice in zip(data_slices,output_slices):

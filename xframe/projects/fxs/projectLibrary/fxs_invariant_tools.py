@@ -25,9 +25,9 @@ from .harmonic_transforms import HarmonicTransform
 log=logging.getLogger('root')
 
 def ccd_associated_legendre_matrices(thetas,l_max,m_max):
-    '''
+    r"""
     Calculates the upper triangular matrix $P^m_l(\cos(\theta_{q_1}))*P^m_l(\cos(\theta_{q_2}))*\frac{1}{\sqrt{2*l+1}}$ of schmidt semi-normalized associated spherical harmonics.
-    '''
+    """
     q_matrices = np.zeros((len(thetas),m_max+1,l_max+1))
     values,ls,ms= mLib.gsl.legendre_sphPlm_array(l_max,m_max,np.cos(thetas),return_orders = True)    
     q_matrices[:,ms,ls] = values.T
@@ -37,9 +37,9 @@ def ccd_associated_legendre_matrices(thetas,l_max,m_max):
     return qq_matrices
 
 def ccd_associated_legendre_matrices_q1q2(thetas1,thetas2,l_max,m_max):
-    '''
+    r"""
     Calculates the upper triangular matrix $P^m_l(\cos(\theta_{q_1}))*P^m_l(\cos(\theta_{q_2}))*\frac{1}{\sqrt{2*l+1}}$ of schmidt semi-normalized associated spherical harmonics.
-    '''
+    """
     q1_matrices = np.zeros((len(thetas1),m_max+1,l_max+1))
     q2_matrices = q1_matrices.copy()
     values1,ls1,ms1 = mLib.gsl.legendre_sphPlm_array(l_max,m_max,np.cos(thetas1),return_orders = True)
@@ -50,9 +50,9 @@ def ccd_associated_legendre_matrices_q1q2(thetas1,thetas2,l_max,m_max):
     q1q2_matrices = q1_matrices*q2_matrices/(2*orders+1)[None,None,:]#*1/(2*np.pi) # might be missing  here
     return q1q2_matrices
 def ccd_associated_legendre_matrices_single_m(thetas,l_max,m):
-    '''
+    r"""
     Calculates the elements of the upper triangular matrix $P^m_l(\cos(\theta_{q_1}))*P^m_l(\cos(\theta_{q_2}))*\frac{1}{\sqrt{2*l+1}}$ of schmidt semi-normalized associated spherical harmonics at a specific order $m$.
-    '''
+    """
     q_matrices = np.zeros((len(thetas),l_max+1))
     values,ls,ms= mLib.gsl.legendre_sphPlm_array_single_m(l_max,m,np.cos(thetas),return_orders = True)    
     q_matrices[:,ls] = values.T
@@ -62,9 +62,9 @@ def ccd_associated_legendre_matrices_single_m(thetas,l_max,m):
     return qq_matrices
 
 def ccd_associated_legendre_matrices_single_l(thetas,l_max,l):
-    '''
+    r"""
     Calculates the elements of the upper triangular matrix $P^m_l(\cos(\theta_{q_1}))*P^m_l(\cos(\theta_{q_2}))*\frac{1}{\sqrt{2*l+1}}$ of schmidt semi-normalized associated spherical harmonics at a specific order $m$.
-    '''
+    """
     q_matrices = np.zeros((len(thetas),l_max+1))
     values,ls,ms= mLib.gsl.legendre_sphPlm_array_single_l(l,l_max,np.cos(thetas),return_orders = True)
     #print(f"len thetas = {len(thetas)} shape values = {values.shape} q_matrix shape = { q_matrices[:,ms].shape}, l = {l} lmax = {l_max}")
@@ -78,7 +78,7 @@ def ccd_associated_legendre_matrices_single_l(thetas,l_max,l):
     return qq_matrices
     
 def ccd_legendre_matrices(q_ids, qq_ids,phis,thetas,orders,**kwargs):
-    '''
+    r"""
     Calculates the $F_l(q,qq,phi)$ coefficients in $CC=\sum F_l B_l$, where $CC$ is the cross-correlation and $B_l$ are the degree 2 invariants.
     The inputs q_ids and qq_ids have to be of tha same length since they are interpreted as pairs of ids,i.e. as zip(q_ids,qq_ids)
     :param q_ids: Id's of q values for which to calculate F_l matrices 
@@ -93,7 +93,7 @@ def ccd_legendre_matrices(q_ids, qq_ids,phis,thetas,orders,**kwargs):
     :type ndarray: shape = (n_orders)
     :return F_l:
     :rtype ndarray: shape: (N,n_phis,n_orders)
-    '''
+    """
     q_ids = q_ids.astype(int)
     qq_ids = qq_ids.astype(int)
     leg_args=np.cos(thetas)[q_ids,None]*np.cos(thetas)[qq_ids,None]+np.sin(thetas)[q_ids,None]*np.sin(thetas)[qq_ids,None]*np.cos(phis)[None,:] #Q,phi
@@ -102,13 +102,13 @@ def ccd_legendre_matrices(q_ids, qq_ids,phis,thetas,orders,**kwargs):
 
 
 def pixel_arc_cc_mask(data_grid,datadict):
-    '''
+    r"""
     Calculates mask of cross-correlation data which filters points cc values calculated for points on the ewald sphere which are close to eachother.
     Distance is measured via the arc length beetween the two points on the sphere.
     It is possible to additionally mask the area around phi = pi, i.e. Points that are close if one of their phi coordinates is inverted (phi -> phi - pi).     
     :parameter data_grid: Dictionary containing grid values for the 3 spherical axes "qs","thetas","phis"
     :parameter datadict: Dictionary containing: "xray_wavelength":double in Angstrom, 'pixel_size':double realspace size of features to mask, 'mask_at_pi':bool wether or not to also mask around phi=pi 
-    '''
+    """
     qs = data_grid['qs']
     thetas = data_grid['thetas']
     phis = data_grid['phis']
@@ -142,13 +142,13 @@ def true_cc_mask(data_grid):
     n_phis =  len(data_grid['phis'])
     return np.ones((n_qs,n_qs,n_phis),dtype = bool)
 def pixel_custom_cc_mask(data_grid,datadict):
-    '''
+    r"""
     Calculates mask of cross-correlation data which filters points cc values calculated for points on the ewald sphere which are close to eachother.
     Distance is measured via the arc length beetween the two points on the sphere.
     It is possible to additionally mask the area around phi = pi, i.e. Points that are close if one of their phi coordinates is inverted (phi -> phi - pi).     
     :parameter data_grid: Dictionary containing grid values for the 3 spherical axes "qs","thetas","phis"
     :parameter datadict: Dictionary containing: "xray_wavelength":double in Angstrom, 'pixel_size':double realspace size of features to mask, 'mask_at_pi':bool wether or not to also mask around phi=pi 
-    '''
+    """
     qs = data_grid['qs']
     thetas = data_grid['thetas']
     phis = data_grid['phis']
@@ -174,9 +174,9 @@ def pixel_custom_cc_mask(data_grid,datadict):
     
     return cc_mask
 def pixel_flat_cc_mask(data_grid,datadict):
-    '''
+    r"""
     Calculates mask of cross-correlation data which filters values around phi = 0,np.pi for which q_1\approx q_2.
-    '''
+    """
     qs = data_grid['qs']
     thetas = data_grid['thetas']
     phis = data_grid['phis']
@@ -199,13 +199,13 @@ def pixel_flat_cc_mask(data_grid,datadict):
     return mask
 
 def donatelli_cc_mask(data_grid,datadict):
-    '''
+    r"""
     Calculates mask of cross-correlation data which filters values around phi = 0,np.pi for which q_1\approx q_2.
     Treshold standard value = 0.01 (filters roughly 20% of data), negative thresholds gives a true mask.
     Formula from Donatelli PNAS 2018 Supplements.
     :parameter data_grid: Dictionary containing grid values for the 3 spherical axes "qs","thetas","phis"
     :parameter datadict: Dictionary containing "threshold":int a free parameter higher values => more maskin. 
-    '''
+    """
     qs = data_grid['qs']
     thetas = data_grid['thetas']
     phis = data_grid['phis']
@@ -270,7 +270,7 @@ def CCN_mask(qs,max_order,phis,datadict):
 
 
 def modify_cross_correlation(cc,cc_mask,phis,max_order,average_intensity=False,enforce_max_order=False, low_pass_order_in_q = False, enforce_zero_odd_harmonics = False,q1q2_symmetric=False, pi_periodicity = False, interpolate_masked=False,apply_binned_mean = False,subtract_average_intensity= False,even=False):
-    '''
+    r"""
     Imposes several constraints on the cross_correlation:
     1) enforce_max_ordes: $C_n = 0$ for $n >$ max order, since by $C_n = sum_l=|m|^\infty B_l(q_1,q_2) \overline{P}^{|m|}_l(\theta(q_1))  \overline{P}^{|m|}_l(\theta(q_2))$ they dont contribute to B_l with l<=max_order.
     2) low_pass_order_in_q: butterworth low pass filter in q1 and q2 of cc
@@ -278,7 +278,7 @@ def modify_cross_correlation(cc,cc_mask,phis,max_order,average_intensity=False,e
     4) q1q2_symmetric: enforces cc(q1,q2,\delta) = cc(q2,q1,-\delta).
     5) pi_periodicity: same as 3) but enforced directy on the CC values if number of phis is even (ONLY VALID FOR "flat" Ewalds sphere).
     6) pi_symmetric: C(q1,q2,\delta) = C(q1,q2,-\delta) is true if C was averaged over uniform distribution of sample orientations.
-    '''
+    """
     #log.info('enforce max order {}, low pass = {}, zero odd ={}, q1q2 {}, qhipi {}, interpolate {}, bunned_mean {}'.format(enforce_max_order, low_pass_order_in_q, enforce_zero_odd_harmonics, q1q2_transpose , phi_pi, interpolate_masked,apply_binned_mean))
     if subtract_average_intensity and isinstance(average_intensity,np.ndarray):
         I= average_intensity
@@ -312,7 +312,7 @@ def modify_cross_correlation(cc,cc_mask,phis,max_order,average_intensity=False,e
         cc,cc_mask,phis = binned_mean(cc_mask,cc,max_order,phis)
     if q1q2_symmetric:
         #swap angles
-        log.info('Enforce cross correlation symmetry q1q2\delta = q2q1-\delta')
+        log.info(r'Enforce cross correlation symmetry q1q2\delta = q2q1-\delta')
         cc_angle_swaped = cc.copy()
         cc_angle_swaped[...,1:] = cc[...,1:][...,::-1]
         cc_mask_angle_swaped = cc_mask.copy()
@@ -404,7 +404,7 @@ def interpolate(cc,mask,phis):
 
 
 class CC:
-    """
+    r"""
     Class that collects functions concerning the averaged FXS cross correlation function.
     """ 
     
@@ -414,7 +414,7 @@ class CC:
     @staticmethod
     def mod_cc_symmetry(cc,cc_mask=None,**kwargs):
         #swap angles
-        log.info('Enforce cross correlation symmetry q1q2\delta = q2q1-\delta')
+        log.info(r'Enforce cross correlation symmetry q1q2\delta = q2q1-\delta')
         cc_angle_swaped = cc.copy()
         cc_angle_swaped[...,1:] = cc[...,1:][...,::-1]
         if mask is None:
@@ -524,7 +524,7 @@ class CC:
         return cc,cc_mask
 
 class CCN:
-    """
+    r"""
     Class that collects functions concerning harmonic coefficients of the averaged FXS cross correlation function.
     """
     @staticmethod
@@ -603,14 +603,14 @@ class CCN:
 class _Conversion2Dim:
     @staticmethod
     def from_intensity(I,I2=None,cht=None):
-        '''
+        r"""
         B_n(q1,q2) = I_n(q_1)*I_n(q2).conj()
         Where In are circular harmonic coefficients of the Intensity I
         I and I2 are supposed to be a 2D arrays I(q,phi).
         If I is complex only its real part is used. 
         cht: if provided is a function that computes the positive harmonic coefficients of I.real
         such that cht(I) is of type (p,harmonic_orders) 
-        '''
+        """
         if not isinstance(cht,HarmonicTransform):
             cht = HarmonicTransform.from_data_array('real',I).forward
         In = cht(I.real)
@@ -624,13 +624,13 @@ class _Conversion2Dim:
         
     @staticmethod
     def from_intensity_coeff(In,In2=None):
-        '''
+        r"""
         B_n(q1,q2) = I_n(q_1)*I_n(q2).conj()
         Assumes In contain the positive frequency coefficients of the fourier series of I.
         In and In2, are 2 dimensional arrays of type (order,q).
         If In2 is given this routine returns
         B_n(q1,q2) = I_n(q_1)*I_n2(q2).conj()
-        '''
+        """
         if isinstance(In2,np.ndarray):
             Bn = In[:,:,None]*In2[:,None,:].conj()
         else:
@@ -638,12 +638,12 @@ class _Conversion2Dim:
         return Bn
     @staticmethod
     def from_ccn(ccn):
-        ''' For 2D rotations around the Xray beam axis CC_n = B_n, so there is nothing to do!'''
+        r""" For 2D rotations around the Xray beam axis CC_n = B_n, so there is nothing to do!"""
         return ccn
 class _Conversion3DimFromCCN:
     @staticmethod
     def back_substitution(ccn,xray_wavelength,momentum_transfer_points,max_order=None,assume_zero_odd_orders = False,**kwargs):
-        '''
+        r"""
         Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta).
         Uses 
         $ Cn = \sum_{l=|n|}^\infty B_l(q_1,q_2) \overline{P}^{|n|}_l(q_1) \overline{P}^{|n|}_l(q_2) $
@@ -661,7 +661,7 @@ class _Conversion3DimFromCCN:
         :type int ndarray: shape $= (n_orders)$
         :return: $B_l$ coeff.
         :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
-        '''
+        """
         #log.info(f'max_order = {max_order}')
         # Get Pl arguments 
         qs = momentum_transfer_points
@@ -699,9 +699,9 @@ class _Conversion3DimFromCCN:
         return b_coeff
     @staticmethod
     def _least_squares_worker(q_ids,qq_ids,cc,phis,thetas,orders,**kwargs):
-        '''
+        r"""
         Uses pseudoinverse of the legendre matrices (numpy internal uses a singular value decomposition)
-        '''
+        """
         legendre_matrices = ccd_legendre_matrices(q_ids,qq_ids,phis,thetas,orders)
         cc_part = cc[q_ids,qq_ids,:]
         
@@ -709,7 +709,7 @@ class _Conversion3DimFromCCN:
         return b_coeff
     @staticmethod
     def least_squares(ccn,xray_wavelength,momentum_transfer_points,max_order=None,assume_zero_odd_orders=False,**kwargs):
-        '''
+        r"""
         Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta) using
         $CC=\sum F_l B_l$.
         Currently implemented method uses pseudo inverses to invert above linear system
@@ -723,7 +723,7 @@ class _Conversion3DimFromCCN:
         :type int:
         :return: $B_l$ coeff.
         :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
-        '''
+        """
         
         # Get Fl arguments 
         qs = momentum_transfer_points
@@ -757,9 +757,9 @@ class _Conversion3DimFromCCN:
         return b_coeff
     @staticmethod
     def _legendre_worker(q_ids,qq_ids,cc,orders,**kwargs):
-        '''
+        r"""
         Uses legendre transform to compute Bl (Assumes small scattering angle approximation)
-        '''
+        """
         cc_parts=cc[q_ids,qq_ids,:]
         bl_part = np.zeros((len(q_ids),len(orders)),dtype=complex)
         leg_forward = leg_trf.forward
@@ -828,8 +828,9 @@ class _Regularization:
         # case sort_mode == 0: eigenvectors and eigenvalues are sorted by eigenvalues
         # case sort_mode == 1: eigenvectors and eigenvalues are sorted by median of the product of sqrt(eigenvalue)*eigenvector
     
-        # Comment In some 2d examples sorting purely by eigenvalue(sort_mode == 0) has failed due to a verry small associated eigenvetor (which was almost everywhere 0)                
+        # Comment In some 2d examples sorting purely by eigenvalue(sort_mode == 0) has failed due to a verry small associated eigenvetor (which was almost everywhere 0)          
         eig_vals,eig_vect = _Regularization.eigh(b_matrix,driver = 'ev')
+        
         if sort_mode == 0:
             sort_metric = eig_vals
             sorted_ids = slice(None,None,-1)
@@ -843,17 +844,17 @@ class _Regularization:
         
     @staticmethod
     def _enforce_rank_of_b_matrix_scaled(sigma,s,b_matrix,rank,return_decomposition=False,sort_mode=0):
-        '''
+        r"""
         first regularizes B_l by a smoothed version of s(abs value of highest eigenvalue)
         and projects the result to its Eigendecomposition using the first 2*order+1 positive eigenvalues. 
         This is done to enforce that b_matrix is a rank 2*order+1 matrix of the form b_matrix =VV^\dagger.
-        '''
+        """
         s = gaussian_filter1d(s,sigma=sigma)
         S = s[:,None]*s[None,:]
         # b_matrix is supposed to be hermitian => use hermitian part.
         b_matrix_symmetrized = (b_matrix + b_matrix.T.conj())/2 
         b_matrix_scaled =   b_matrix_symmetrized/S
-        
+
         eig_vals,eig_vect = _Regularization._invariant_eigenvalues(b_matrix_scaled,sort_mode = sort_mode)
         eig_vals = eig_vals[:rank]
         # b_matrix is supposed to be positive definite => setting neg eigenvalues to zero.
@@ -864,6 +865,8 @@ class _Regularization:
         if return_decomposition:
             # V s.t.: new_b_matrix = V@V.T
             V = eig_vect*s[:,None]*np.sqrt(eig_vals)
+            zero_mask = (eig_vals==0)
+            eig_vals[zero_mask]=1 # just to avoid /0 in the following line
             V_left_inv = (eig_vect/(s[:,None]*np.sqrt(eig_vals)[None,:])).T
             return new_b_matrix, V, V_left_inv
         else:
@@ -871,14 +874,14 @@ class _Regularization:
 
     @staticmethod
     def _sign_loss_of_regularized_b_matrix(sigma,s,b_matrix,rank,sort_mode):
-        '''
+        r"""
         Computes for a given smothing sigma (gaussian sigma)
         the sign loss of the regularized b_matrix which we defined by the following frobenius norm
         || sgn(B_l) - sgn(P_r,sigma(B_l)||_F
         here P_r,sigma first regularizes B_l by a smoothed version of v(abs value of highest eigenvalue)
         and projects the result to its Eigendecomposition using the first 2*order+1 positive eigenvalues. 
         This is done to enforce that b_matrix is a rank 2*order+1 matrix of the form b_matrix =VV^\dagger.
-        '''
+        """
         new_b_matrix = _Regularization._enforce_rank_of_b_matrix_scaled(sigma,s,b_matrix,rank,sort_mode=0)
         loss = np.linalg.norm(np.sign(b_matrix)-np.sign(new_b_matrix))
         return loss
@@ -915,10 +918,11 @@ class _Regularization:
             #sigma_optimal = 18
             new_b_matrix,V,V_inv = _Regularization._enforce_rank_of_b_matrix_scaled(sigma_optimal,s,b_matrix,rank = rank,sort_mode = sort_mode,return_decomposition=True)
         else:
-            eig_vals[eig_vals<0]=0
+            neg_mask = (eig_vals<=0)
+            eig_vals[neg_mask]=0
             V=eig_vect[:,:rank]*np.sqrt(eig_vals[:rank])
-            V_inv = (eig_vect[:,:rank]/np.sqrt(eig_vals[:rank])).T
-            
+            eig_vals[neg_mask]=1
+            V_inv = (V/eig_vals[:rank]).T
         full_V = np.zeros((Nq,rank),dtype = V.dtype)
         if extend_above_q_limit:
             n_v = len(V)
@@ -938,13 +942,13 @@ class Deg2Invar:
     regularization = _Regularization
     @staticmethod
     def from_ccn(ccn,dim = 3,**metadata):
-        '''
+        r"""
         Routine that distributes requests for deg2_invariants to the respective routines in the 2 and 3 dimensional case.
         :param cc: cross-correlation data
         :type complex ndarray: shape $= (n_q(q),n_q(qq),n_\Delta)$
         :param dim: Dimension of MTIP algorithm for which deg2 invariants will be extracted (2 or 3)
         :type int: 2 or 3    
-        '''
+        """
         #log.info(metadata.keys())        
         max_order = metadata['max_order']
         momentum_transfer_points = metadata['qs']
@@ -979,8 +983,8 @@ class Deg2Invar:
     def from_intensity_coeff():
         pass
     @staticmethod
-    def regularize(b_matrices,dim=3,q_id_limits=None,sort_mode=0,rescale=False,extend_above_q_limit = True,n_processes = False):
-        '''
+    def regularize(b_matrices,dim=3,q_id_limits=None,sort_mode=0,rescale=False,extend_above_q_limit = True,n_processes = False,set_nans_to_zero=False):
+        r"""
         Enforces that B_l = V_l V_l^\dagger and B_n = v_n v_n^\dagger 
         :param dim: Dimension
         :type int: 2 or 3
@@ -990,7 +994,9 @@ class Deg2Invar:
         :type int: 0 or 1
         :return proj_matrices:
         :type real nd_array: shape= (n_orders,q)
-        '''    
+        """
+                
+            
         if not isinstance(q_id_limits,np.ndarray):
             q_id_limits = np.zeros((b_matrices.shape[0],)+(2,2),dtype = int)
             q_id_limits[...,1]=b_matrices.shape[-1]
@@ -999,7 +1005,31 @@ class Deg2Invar:
         except AssertionError as e:
             log.info(e)
         q_id_limits=q_id_limits[:,0,:]
-        
+
+        try:
+            bl_nan = np.isnan(b_matrices)
+            assert (not bl_nan.any()), f'Crashed due to NaN values in Bl coefficient.'
+        except AssertionError as e:
+            log.warning("NaN values detected in Bl")
+            if set_nans_to_zero:
+                xprint("setting NaN vales to zero according to settings.")
+                b_matrices[bl_nan] = 0
+            else:
+                xprint("trying to reduce q1q2 limits to avoid NaNs.")
+                #computes the q1,q2 ids of the nan values such that all  
+                #min_nan_id = np.max(np.nonzero(bl_nan)[:2],axis = 0).min()
+                #xprint(np.nonzero(bl_nan)[1:])
+                #min_nan_id = np.max(np.nonzero(bl_nan)[1:],axis = 0).min()
+                min_nan_id = np.min(np.nonzero(bl_nan)[1:])
+                if min_nan_id==0:
+                    raise e
+                else:
+                    #tmp= q_id_limits.copy()
+                    mask = q_id_limits[:,1]>min_nan_id
+                    q_id_limits[mask,1]=min_nan_id-1
+                    #xprint(q_id_limits[:10])
+                    #xprint(tmp[:10])
+                    #xprint('\n\n')
         orders = np.arange(len(b_matrices))
         
         def worker(b_matrix,order,q_id_limit,**kwargs):
@@ -1047,13 +1077,13 @@ def get_q1q2_slices(cc_mask):
 
 
 def cross_correlation_to_deg2_invariant(cc,dim,**metadata):
-    '''
+    r"""
     Routine that distributes requests for deg2_invariants to the respective routines in the 2 and 3 dimensional case.
     :param cc: cross-correlation data
     :type complex ndarray: shape $= (n_q(q),n_q(qq),n_\Delta)$
     :param dim: Dimension of MTIP algorithm for which deg2 invariants will be extracted (2 or 3)
     :type int: 2 or 3    
-    '''
+    """
     #log.info(metadata.keys())
     cc_mask = cross_correlation_mask(metadata['data_grid'],metadata)
     orders =  metadata['orders']
@@ -1097,7 +1127,7 @@ def cross_correlation_to_deg2_invariant(cc,dim,**metadata):
     return b_coeff,qq_mask
 
 def ccd_to_deg2_invariant_3d(cc,xray_wavelength,data_grid,orders,cc_mask,mode='back_substitution'):
-    '''
+    r"""
     Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta).
     Currently implemented method uses pseudo inverses to invert above linear system
     :param cc: cross-correlation data
@@ -1110,7 +1140,7 @@ def ccd_to_deg2_invariant_3d(cc,xray_wavelength,data_grid,orders,cc_mask,mode='b
     :type int ndarray: shape $= (n_orders)$
     :return: $B_l$ coeff.
     :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
-    '''
+    """
     
     extraction_modes = {'lstsq':ccd_to_deg2_invariant_3d_least_squares,'legendre':ccd_to_deg2_invariant_3d_legendre,'back_substitution':ccd_to_deg2_invariant_3d_back_substitution,'back_substitution_real':ccd_to_deg2_invariant_3d_back_substitution_real,'back_substitution_psd':ccd_to_deg2_invariant_3d_back_substitution_psd,'back_substitution_qqsym':ccd_to_deg2_invariant_3d_back_substitution_qqsym,'back_substitution_memory_hungry':ccd_to_deg2_invariant_3d_back_substitution_memory_hungry}
 
@@ -1125,7 +1155,7 @@ def ccd_to_deg2_invariant_3d(cc,xray_wavelength,data_grid,orders,cc_mask,mode='b
     return bl,qq_mask
 
 def ccd_to_deg2_invariant_3d_least_squares(cc,xray_wavelength,data_grid,orders,cc_mask):
-    '''
+    r"""
     Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta) using
     $CC=\sum F_l B_l$.
     Currently implemented method uses pseudo inverses to invert above linear system
@@ -1139,7 +1169,7 @@ def ccd_to_deg2_invariant_3d_least_squares(cc,xray_wavelength,data_grid,orders,c
     :type int ndarray: shape $= (n_orders)$
     :return: $B_l$ coeff.
     :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
-    '''
+    """
     
     # Get Fl arguments 
     qs = data_grid['qs']
@@ -1158,9 +1188,9 @@ def ccd_to_deg2_invariant_3d_least_squares(cc,xray_wavelength,data_grid,orders,c
     return b_coeff,qq_mask
     
 def bl_3d_least_squares_worker(q_ids,qq_ids,cc,phis,thetas,orders,cc_mask,**kwargs):
-    '''
+    r"""
     Uses pseudoinverse of the legendre matrices (numpy internal uses a singular value decomposition)
-    '''
+    """
     b_shape  = (len(q_ids),len(orders))
     b_coeff = np.zeros(b_shape,dtype=complex)        
     #even_order_mask = ~np.array(orders%2,dtype = bool)
@@ -1192,7 +1222,7 @@ def bl_3d_least_squares_worker(q_ids,qq_ids,cc,phis,thetas,orders,cc_mask,**kwar
     return b_coeff
             
 def ccd_to_deg2_invariant_3d_back_substitution_memory_hungry(cc,xray_wavelength,data_grid,orders,cc_mask):
-    '''
+    r"""
     Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta).
     Uses 
     $ Cn = \sum_{l=|n|}^\infty B_l(q_1,q_2) \overline{P}^{|n|}_l(q_1) \overline{P}^{|n|}_l(q_2) $
@@ -1212,7 +1242,7 @@ def ccd_to_deg2_invariant_3d_back_substitution_memory_hungry(cc,xray_wavelength,
     :type int ndarray: shape $= (n_orders)$
     :return: $B_l$ coeff.
     :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
-    '''
+    """
     # Get Pl arguments 
     qs = data_grid['qs']
     thetas = ewald_sphere_theta_pi(xray_wavelength,qs)
@@ -1251,7 +1281,7 @@ def ccd_to_deg2_invariant_3d_back_substitution_memory_hungry(cc,xray_wavelength,
     return b_coeff,qq_mask
 
 def ccd_to_deg2_invariant_3d_back_substitution(cc,xray_wavelength,data_grid,orders,cc_mask):
-    '''
+    r"""
     Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta).
     Uses 
     $ Cn = \sum_{l=|n|}^\infty B_l(q_1,q_2) \overline{P}^{|n|}_l(q_1) \overline{P}^{|n|}_l(q_2) $
@@ -1271,7 +1301,7 @@ def ccd_to_deg2_invariant_3d_back_substitution(cc,xray_wavelength,data_grid,orde
     :type int ndarray: shape $= (n_orders)$
     :return: $B_l$ coeff.
     :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
-    '''
+    """
     # Get Pl arguments 
     qs = data_grid['qs']
     thetas = ewald_sphere_theta_pi(xray_wavelength,qs)
@@ -1319,7 +1349,7 @@ def ccd_to_deg2_invariant_3d_back_substitution(cc,xray_wavelength,data_grid,orde
     log.info(f"b coeff shape = {b_coeff.shape}")
     return b_coeff,qq_mask
 def ccd_to_deg2_invariant_3d_back_substitution_real(cc,xray_wavelength,data_grid,orders,cc_mask):
-    '''
+    r"""
     Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta).
     Uses 
     $ Cn = \sum_{l=|n|}^\infty B_l(q_1,q_2) \overline{P}^{|n|}_l(q_1) \overline{P}^{|n|}_l(q_2) $
@@ -1339,7 +1369,7 @@ def ccd_to_deg2_invariant_3d_back_substitution_real(cc,xray_wavelength,data_grid
     :type int ndarray: shape $= (n_orders)$
     :return: $B_l$ coeff.
     :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
-    '''
+    """
     # Get Pl arguments 
     qs = data_grid['qs']
     thetas = ewald_sphere_theta_pi(xray_wavelength,qs)
@@ -1387,7 +1417,7 @@ def ccd_to_deg2_invariant_3d_back_substitution_real(cc,xray_wavelength,data_grid
     log.info(f"b coeff shape = {b_coeff.shape}")
     return b_coeff.real,qq_mask
 def ccd_to_deg2_invariant_3d_back_substitution_qqsym(cc,xray_wavelength,data_grid,orders,cc_mask):
-    '''
+    r"""
     Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta).
     Uses 
     $ Cn = \sum_{l=|n|}^\infty B_l(q_1,q_2) \overline{P}^{|n|}_l(q_1) \overline{P}^{|n|}_l(q_2) $
@@ -1407,7 +1437,7 @@ def ccd_to_deg2_invariant_3d_back_substitution_qqsym(cc,xray_wavelength,data_gri
     :type int ndarray: shape $= (n_orders)$
     :return: $B_l$ coeff.
     :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
-    '''
+    """
     # Get Pl arguments 
     qs = data_grid['qs']
     thetas = ewald_sphere_theta_pi(xray_wavelength,qs)
@@ -1451,7 +1481,7 @@ def bl_3d_back_substitution_worker(q1_ids,q2_ids,cc,thetas,qq_mask,l_max,stride,
 
 
 def ccd_to_deg2_invariant_3d_back_substitution_psd(cc,xray_wavelength,data_grid,orders,cc_mask):
-    '''
+    r"""
     Calculates the degree 2 invariant $B_l=\sum_l I^l_m*I^l_m^*$ from Cross-Correlation data CC(q,qq,delta).
     Uses 
     $ Cn = \sum_{l=|n|}^\infty B_l(q_1,q_2) \overline{P}^{|n|}_l(q_1) \overline{P}^{|n|}_l(q_2) $
@@ -1471,7 +1501,7 @@ def ccd_to_deg2_invariant_3d_back_substitution_psd(cc,xray_wavelength,data_grid,
     :type int ndarray: shape $= (n_orders)$
     :return: $B_l$ coeff.
     :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
-    '''
+    """
     # Get Pl arguments 
     qs = data_grid['qs']
     thetas = ewald_sphere_theta_pi(xray_wavelength,qs)
@@ -1532,9 +1562,9 @@ def ccd_to_deg2_invariant_3d_legendre(cc,xray_wavelength,data_grid,orders,cc_mas
     #b_coeff = np.moveaxis(b_coeff,-1,0)
     return b_coeff,qq_mask
 def bl_3d_legendre_worker(q_ids,qq_ids,cc,phis,orders,qq_mask,**kwargs):
-    '''
+    r"""
     Uses pseudoinverse of the legendre matrices (numpy internal uses a singular value decomposition)
-    '''
+    """
     cc_parts=cc[q_ids,qq_ids,:]
     bl_part = np.zeros((len(q_ids),len(orders)),dtype=complex)
     q1q2_masks = qq_mask[q_ids,qq_ids]
@@ -1554,14 +1584,14 @@ def bl_3d_legendre_worker(q_ids,qq_ids,cc,phis,orders,qq_mask,**kwargs):
 
 
 def ccd_to_deg2_invariant_2d(cc,data_grid,orders,cc_mask):
-    '''
+    r"""
     Calculates the degree 2 invariant $B_m=I_m*I_m^*$ from Cross-Correlation data CC using
     $B_m = C_m$ where $C_m$ are the harmonic coefficients of CC.  
                
     :type kind: ndarray (shape = (n_q,n_q,n_delta))
     :return: B_m coeff.
     :rtype ndarray: complex, shape = ((n_orders,n_q,n_q)))
-    '''
+    """
     try:
         assert cc_mask.all(), 'B_l extraction from fourier coefficients does not support masked data parts. Modify cc by interpolating (+ binned_mean).'
     except AssertionError as e:
@@ -1602,7 +1632,7 @@ def modify_deg2_invariant(b_coeff,enforce_psd=True, psd_q_min_id=0):
     return b_coeff
 
 def deg2_invariant_apply_precision_filter(bl,precision):
-    """
+    r"""
     for each q,qq pair set values whos absolute valu is smaller than abs_max*precision to 0.
     """
     abs_bl = np.abs(bl)
@@ -1630,7 +1660,7 @@ def intensity_to_deg2_invariant(intensity,intensity2=False,cht = False):
         deg2_invariants = harmonic_coeff_to_deg2_invariants(dimensions,harm_coeff,harm_coeff2 = harm_coeff2)
     return deg2_invariants
 def density_to_deg2_invariants(density,fourier_transform,dimensions,density2 = False,cht = False):
-    '''Assumes that the density is sampled over the same grid for which the fourier_transform is defined.'''
+    r"""Assumes that the density is sampled over the same grid for which the fourier_transform is defined."""
     ftd = fourier_transform(density)
     intensity = ftd*ftd.conj()
     if isinstance(density2,bool):
@@ -1647,18 +1677,18 @@ def harmonic_coeff_to_deg2_invariants(dimensions,harm_coeff,harm_coeff2 = None):
     return deg2_invariants
 
 def harmonic_coeff_to_deg2_invariants_2d(Ims,Ims2=False):
-    '''
+    r"""
     Calculates the degree 2 invariants $B_m$ via $B_m = I_{m} I^*_{m}$.    
-    '''
+    """
     if isinstance(Ims2,bool):
         Bm = np.array(tuple(Im[:,None]*Im[None,:].conj() for Im in Ims.T))
     else:
         Bm = np.array(tuple(Im1[:,None]*Im2[None,:].conj() for Im1,Im2 in zip(Ims.T,Ims2.T)))
     return Bm
 def harmonic_coeff_to_deg2_invariants_3d(Ilm,Ilm2 = None):
-    '''
+    r"""
     Calculates the degree 2 invariants $B_l$ via $B_l = \sum_l I_{lm} I^*_{lm}$. 
-    '''
+    """
     #xprint(f"ilm1 = {Ilm}, ilm2 = {Ilm2}")
     #xprint("fu")
     #sys.exit()
@@ -1693,10 +1723,10 @@ def deg2_invariant_to_cc_2d(bl,cht):
     return cc
 
 def deg2_invariant_to_cc_3d(bl,xray_wavelength,data_grid,orders=False,mode='back_substitution',n_processes = False):
-    '''
+    r"""
     Method to recompute the averaged cross correlation $\mathcal{C}(q_1,q_2,\Delta)$ from the degree 2 invariants $B_l$, via $\mathcal{C} = \sum_l F_l B_l$
     Assumes Phi grid is uniform ranging from [0 to 2*Pi) such that Pi is contained in the grid.
-    '''
+    """
     extraction_modes = {'lstsq':cc_3d_Fl_worker,'back_substitution':cc_3d_Pl_worker,'legendre':cc_3d_legendre_worker}
     try:
         worker = extraction_modes[mode]
@@ -1744,9 +1774,9 @@ def deg2_invariant_to_cc_3d(bl,xray_wavelength,data_grid,orders=False,mode='back
     return cc
 
 def cc_3d_Fl_worker(q_ids,qq_ids,bl,phis,thetas,orders,**kwargs):
-    '''
+    r"""
     Uses  $\mathcal{C} = \sum_l F_l B_l$  to calculate the averaged cross-correlation $\mathcal{C}$.
-    '''
+    """
     legendre_matrices = ccd_legendre_matrices(q_ids,qq_ids,phis,thetas,orders)
     bl_part = np.moveaxis(bl,0,-1)[q_ids,qq_ids,:]
     #log.info('bl_shape = {}, f_l shape = {} bl_part_shape = {}'.format(bl.shape,legendre_matrices.shape,bl_part.shape))
@@ -1786,7 +1816,7 @@ def cc_3d_legendre_worker(q_ids,qq_ids,bl,**kwargs):
 
 
 def estimate_number_of_particles2(deg2_invariants,radial_points,search_space,average_intensity=False):
-    '''
+    r"""
     Routine that estimates the number of particles based on the degree 2 invariant $B_l(q_1,q_2) = \sum_{m} I_{lm}(q_1)\overline{I}_{lm}(q_2)$.
     It uses the fact that the 0 order harmonic coefficient of the cross correlation needs to be positive and that:
     $C_0(q_1,q_2) = B_0(q_1,q_2) + \sum_{l>0} B_l(q_1,q_2) P_l(\cos(q_1))P_l(\cos(q_2))$
@@ -1803,7 +1833,7 @@ def estimate_number_of_particles2(deg2_invariants,radial_points,search_space,ave
     :rtype float: 
     :return grad: Gradient of negative volume over scaling parameter (inflection point is a local extrema here)
     :rtype ndarray: 
-    '''
+    """
     max_order = len(deg2_invariants)- 1
     nq = len(radial_points)
     Us = [ np.zeros((min(nq, 2*o+1)),dtype=complex) for o in range(max_order+1)]
@@ -1831,7 +1861,7 @@ def estimate_number_of_particles2(deg2_invariants,radial_points,search_space,ave
 
 ########### deg2 invariants and reciprocal projection matrices ###########
 def deg2_invariant_to_projection_matrices(dim,b_coeff,q_id_limits=False,sort_mode=0):
-    '''
+    r"""
     Extracts projection matrices from the deg 2 invariants b_coeff.
     :param dim: Dimension
     :type int: 2 or 3
@@ -1841,7 +1871,7 @@ def deg2_invariant_to_projection_matrices(dim,b_coeff,q_id_limits=False,sort_mod
     :type int: 0 or 1
     :return proj_matrices:
     :type real nd_array: shape= (n_orders,q)
-    '''    
+    """    
     if isinstance(q_id_limits,bool):
         q_id_limits = np.zeros((b_coeff.shape[0],)+(2,2),dtype = int)
         q_id_limits[...,1]=b_coeff.shape[-1]
@@ -1990,7 +2020,7 @@ def eig_to_projection_matrices_3d(eig_vals,eig_vect,order,**kwargs):
     return proj_matrix
 
 def projection_matrices_to_deg2_invariant_3d(projection_matrices):
-    '''
+    r"""
     Uses the $(N_q,min(2*l+1),N_q)$ shaped proj_matrices $V_l$ and computes the deg2 invariants $B_l$ by:
     $B_l= V_l V_l^\dagger$
     Where $N_q$ is the number of radial sampling points and $l$ is the spherical harmonic order.
@@ -1998,11 +2028,11 @@ def projection_matrices_to_deg2_invariant_3d(projection_matrices):
     :type list: 
     :return B_l: array of the deg2 invariants
     :rtype ndarray: shape: (L_max,N_p,N_p)
-    '''
+    """
     return spherical_harmonic_coefficients_to_deg2_invariant(projection_matrices)
 
 def spherical_harmonic_coefficients_to_deg2_invariant(I_coeff):
-    '''
+    r"""
     Uses the $(N_q,2*l+1)$ shaped intensity harmonic coefficients $I_l$ and computes the deg2 invariants $B_l$ by:
     $B_l= I_l I_l^\dagger = \sum_m I_{lm} \overline{I}_{lm}$
     Where $N_q$ is the number of radial sampling points and $l$ is the spherical harmonic order.
@@ -2010,7 +2040,7 @@ def spherical_harmonic_coefficients_to_deg2_invariant(I_coeff):
     :type list: 
     :return B_l: array of the deg2 invariants
     :rtype ndarray: shape: (L_max,N_p,N_p)
-    '''
+    """
     B_l = np.array(tuple(I_l @ I_l.conj().T for I_l in I_coeff)).real
     return B_l
 
@@ -2069,9 +2099,9 @@ def calc_unknown_unitary_transform_worker(o,P,Vl2,**kwargs):
     return w
     
 def calc_unknown_unitary_transform_procrustes(proj_I1I1,eig_I1I1,proj_I2I2,eig_I2I2,b_coeff_I2I1,radial_grid_points,q_id_limits = False):
-    '''
+    r"""
     This caclulates a unitary matrix that transforms the unknowns coming from the deg two invariant of I with the ones of I^2
-    '''
+    """
     # B = b_coeff_I2I1 is Nq,Nq matrix, harmonic coeffs I_l are Nq,N matrices then we have:
     # B = I_{l,2} I_{l}^\dagger
     # I_ls are given by the projection matrices V (Nq,N) and an unknown matrix U (N,N) as I_l = V_lU_l
@@ -2133,9 +2163,9 @@ def calc_unknown_unitary_transform_procrustes(proj_I1I1,eig_I1I1,proj_I2I2,eig_I
     return W,errors
 
 def calc_unknown_unitary_transform_direct(proj_I1I1,eig_I1I1,proj_I2I2,eig_I2I2,b_coeff_I2I1,radial_grid_points,q_id_limits = False):
-    '''
+    r"""
     This caclulates a unitary matrix that transforms the unknowns coming from the deg two invariant of I with the ones of I^2
-    '''
+    """
     # B = b_coeff_I2I1 is Nq,Nq matrix, harmonic coeffs I_l are Nq,N matrices then we have:
     # B = I_{l,2} I_{l}^\dagger
     # I_ls are given by the projection matrices V (Nq,N) and an unknown matrix U (N,N) as I_l = V_lU_l
@@ -2195,7 +2225,7 @@ def calc_unknown_unitary_transform_direct(proj_I1I1,eig_I1I1,proj_I2I2,eig_I2I2,
     
     
 def rank_projection_matrices(dimensions,projection_matrices,orders,radial_points,radial_high_pass=0.15):
-    '''ranks the projection matrices by the radial part of the L2 norm.'''
+    r"""ranks the projection matrices by the radial part of the L2 norm."""
     if dimensions == 2:
         ranked_ids,ranked_orders,metric = rank_projection_matrices_2d(projection_matrices,orders,radial_points,radial_high_pass=radial_high_pass)
     elif dimensions == 3:
@@ -2283,7 +2313,7 @@ def rank_projection_matrices_3d(projection_matrices,orders,radial_points,radial_
 
 #################### number of particles estimation not working ##############
 def estimate_number_of_particles(projection_matrices,radial_points,search_space,average_intensity=False,n_orders=False,radial_mask=True):
-    '''
+    r"""
     Routine that estimates the number of particles based on the projection_matrices calculated from the deg2 invariants.
     It assumes that the unknowns are Identity matrices and computes the volume of negative Intensity valus as function of a scaling parameter $s$,
     which is applied to the 0'th intensity harmonic coefficient like $I_(0,0)/s$.
@@ -2300,7 +2330,7 @@ def estimate_number_of_particles(projection_matrices,radial_points,search_space,
     :rtype float: 
     :return grad: Gradient of negative volume over scaling parameter (inflection point is a local extrema here)
     :rtype ndarray: 
-    '''
+    """
     if projection_matrices[2].ndim>1:
         dimensions = 3
     else:
@@ -2346,7 +2376,7 @@ def estimate_number_of_particles(projection_matrices,radial_points,search_space,
     return n_particles,grad,neg_volumes
 
 def estimate_number_of_particles_I(I,I00,radial_points,search_space,projection_matrices):
-    '''
+    r"""
     Routine that estimates the number of particles based on the projection_matrices calculated from the deg2 invariants.
     It assumes that the unknowns are Identity matrices and computes the volume of negative Intensity valus as function of a scaling parameter $s$,
     which is applied to the 0'th intensity harmonic coefficient like $I_(0,0)/s$.
@@ -2363,7 +2393,7 @@ def estimate_number_of_particles_I(I,I00,radial_points,search_space,projection_m
     :rtype float: 
     :return grad: Gradient of negative volume over scaling parameter (inflection point is a local extrema here)
     :rtype ndarray: 
-    '''
+    """
     
     max_order = len(projection_matrices)-1
     nq = len(radial_points)
@@ -2403,7 +2433,7 @@ def estimate_number_of_particles_worker3(I,scales,I00y00,**kwargs):
 
 
 def generate_estimate_number_of_particles_new(rp,I00,grid,N_space):
-    '''
+    r"""
     Routine that estimates the number of particles based on the projection_matrices calculated from the deg2 invariants.
     It assumes that the unknowns are Identity matrices and computes the volume of negative Intensity valus as function of a scaling parameter $s$,
     which is applied to the 0'th intensity harmonic coefficient like $I_(0,0)/s$.
@@ -2420,7 +2450,7 @@ def generate_estimate_number_of_particles_new(rp,I00,grid,N_space):
     :rtype float: 
     :return grad: Gradient of negative volume over scaling parameter (inflection point is a local extrema here)
     :rtype ndarray: 
-    '''
+    """
     radial_mask=rp.radial_mask
     proj_matrices = rp.projection_matrices
     I00 = np.abs(proj_matrices[0].flatten().real)
@@ -2454,7 +2484,7 @@ def estimate_number_of_particles(I,summands,Ns,n_pixels,radial_mask=True):
     del(scaled_I)
     return n_particles,grads,new_I
 def generate_number_of_particles_projection(rp,I00,grid,N_space):
-    '''
+    r"""
     Routine that estimates the number of particles based on the projection_matrices calculated from the deg2 invariants.
     It assumes that the unknowns are Identity matrices and computes the volume of negative Intensity valus as function of a scaling parameter $s$,
     which is applied to the 0'th intensity harmonic coefficient like $I_(0,0)/s$.
@@ -2471,7 +2501,7 @@ def generate_number_of_particles_projection(rp,I00,grid,N_space):
     :rtype float: 
     :return grad: Gradient of negative volume over scaling parameter (inflection point is a local extrema here)
     :rtype ndarray: 
-    '''
+    """
     radial_mask=rp.radial_mask
     proj_matrices = rp.projection_matrices
     I00 = np.abs(proj_matrices[0].flatten().real)
@@ -2497,7 +2527,7 @@ def generate_number_of_particles_projection(rp,I00,grid,N_space):
 
 
 def generate_estimate_number_of_particles_new_2(rp,grid,N_space):
-    '''
+    r"""
     Routine that estimates the number of particles based on the projection_matrices calculated from the deg2 invariants.
     It assumes that the unknowns are Identity matrices and computes the volume of negative Intensity valus as function of a scaling parameter $s$,
     which is applied to the 0'th intensity harmonic coefficient like $I_(0,0)/s$.
@@ -2514,7 +2544,7 @@ def generate_estimate_number_of_particles_new_2(rp,grid,N_space):
     :rtype float: 
     :return grad: Gradient of negative volume over scaling parameter (inflection point is a local extrema here)
     :rtype ndarray: 
-    '''
+    """
     projection_matrices = rp.projection_matrices
     I00 = np.abs(projection_matrices[0]).real.flatten()
     integrate = mLib.SphericalIntegrator(grid[:]).integrate
@@ -2554,7 +2584,7 @@ def generate_estimate_number_of_particles_new_2(rp,grid,N_space):
     def estimate_number_of_particles_alt(Ilm):
         #n_particles,grad,neg_volumes = estimate_number_of_particles(projection_matrices,radial_points,N_space_sqrt,average_intensity=False,n_orders=np.array((20,50,99)),I=I)
         n_particles,grad,neg_volumes = estimate_number_of_particles(Ilm,radial_points,N_space_sqrt,average_intensity=False,n_orders=np.array((20,50,99)),radial_mask=radial_mask)        
-        layout = {'title':'Gradient of the Volume of negative Intensity \n Number of particles $= {}$ '.format(n_particles),'x_label':'square root of the number of particles $\sqrt{x}$ as in $I_{0,0}/\sqrt{x}$', 'y_label':'Gradient of Volume of negative Intensity','text_size':10}
+        layout = {'title':'Gradient of the Volume of negative Intensity \n Number of particles $= {}$ '.format(n_particles),'x_label':r'square root of the number of particles $\sqrt{x}$ as in $I_{0,0}/\sqrt{x}$', 'y_label':'Gradient of Volume of negative Intensity','text_size':10}
         fig = plot1D.get_fig(grad,grid = np.linspace(*N_space),x_scale='lin',layout = layout)
         ax = fig.get_axes()[0]
         #ax.vlines(np.sqrt(n_particles),grads.min(),grads.max())

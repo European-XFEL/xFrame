@@ -168,8 +168,6 @@ class ShSmall:
         return GridFactory.construct_grid('uniform',(self.thetas,self.phis))
 
 
-
-
 class sh(SphericalHarmonicTransformInterface):
     # want to use r,theta,phi type of data
     # l indexed coeff are f_{l,:} = coeff[l] 0<=l<=L_max of size: 2*l+1

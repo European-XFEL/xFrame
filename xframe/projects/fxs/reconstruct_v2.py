@@ -327,7 +327,12 @@ class MTIP:
             ht_forward,ht_inverse = ht.forward_real,ht.inverse_real
         elif self.dimensions == 3:
             ht = sft.harm
-            ht_forward,ht_inverse = cht_forward,cht_inverse = sft.harm.forward_cmplx, sft.harm.inverse_cmplx        
+            cht_forward,cht_inverse = sft.harm.forward_cmplx, sft.harm.inverse_cmplx 
+            if settings.project.projections.reciprocal.use_real_spherical_harmonics:
+                ht_forward,ht_inverse = sft.harm.forward_real, sft.harm.inverse_real
+            else:
+                ht_forward,ht_inverse = cht_forward,cht_inverse
+                   
         grid_pair={'real':sft.real_grid,'reciprocal':sft.reciprocal_grid}
         ft_forward,ft_inverse=sft.forward_cmplx,sft.inverse_cmplx
         
@@ -366,7 +371,7 @@ class MTIP:
         # create autocorrelation
         pr = rp_obj.full_projection_matrices
         harm_obj = self.transform_objects['harmonic_transform']
-        icht = transforms['inverse_harmonic_transform']
+        icht = transforms['complex_inverse_harmonic_transform']
         ift = transforms['inverse_fourier_transform']
         #log.info(f'len pr = {len(rp_obj.used_orders)}')
         #log.info(f'pr shapes = {[p.shape for p in pr]}')
@@ -594,7 +599,8 @@ class MTIP:
             [(0,1),['fourier_transform','id']],
             [(0,1),['multiply_ft_gaussian','id']],
             [(0,1),['inverse_fourier_transform','id']],
-            [(0,1),['calculate_support_mask']]
+            [(0,1),['calculate_support_mask']],
+            
         ]
         routine_sketches['SW_center']=[
             [(0,0,0),['copy','fourier_transform','copy']],
@@ -821,6 +827,7 @@ class MTIP:
             #log.info(f'{loop_name} : threshold = {sw_threshold} from thresholds = {sw_opt.thresholds}')
             # support #
             enforce_initial_support_opt = supp_opt.enforce_initial_support
+            enforce_initial_support_delay=enforce_initial_support_opt['delay']
             if enforce_initial_support_opt.apply:
                 enforce_initial_support_error_limit=[enforce_initial_support_opt['if_error_bigger_than']]
             else:
@@ -876,10 +883,15 @@ class MTIP:
                         #log.info('Loop:{} Running {} steps of {} with error_limit {}:'.format(iteration,repeats,key,relative_error_limit))
                         if key=='SW':
                             support = process.run(state['density_pair_history'][-1][1])
-                            enforce_initial_support = error_dict['main'][-1:]>enforce_initial_support_error_limit
+                            support_real = inverse_fourier_transform(fourier_transform(support.astype(complex)))
+                            support_real[support_real>1]=1
+                            support_real[support]=1
+                            
+                            enforce_initial_support = error_dict['main'][-1:]>enforce_initial_support_error_limit or (iteration<enforce_initial_support_delay)
+                            xprint(f'enforce_initial_support = {enforce_initial_support}')
                             enforce_initial_support_list.append(enforce_initial_support)
                             real_pr.enforce_initial_support = enforce_initial_support
-                            real_pr.support = support
+                            real_pr.support = support_real
                             state['mask'] = real_pr.support #mask #mask
                             sw_step+=1
                             update_shrink_wrap(sw_step,loop_number)

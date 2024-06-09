@@ -30,7 +30,7 @@ class DataSelection(DictNamespace):
     '''
     def __init__(self,
                  run : int,
-                 frame_range=slice(None),cells=slice(None),cells_mode='relative',pulses=slice(None),pulses_mode='relative',trains=slice(None),trains_mode='relative',modules = np.arange(16,dtype=int),n_frames=20000,good_cells=np.arange(1,202),in_multiples_of=False):
+                 frame_range=slice(None),cells=slice(None),cells_mode='relative',pulses=slice(None),pulses_mode='relative',trains=slice(None),trains_mode='relative',modules = np.arange(16,dtype=int),n_frames=None,good_cells=np.arange(1,202),in_multiples_of=None):
         super().__init__()
         frame_range = self.apply_int_format(frame_range)
         cells = self.apply_int_format(cells)
@@ -47,9 +47,16 @@ class DataSelection(DictNamespace):
                                   )
         self['selection'] = selection
         self['modules'] = modules
-        self['n_frames'] = int(n_frames)
+        if n_frames is not None:
+            self['n_frames'] = int(n_frames)
+        else:
+            self['n_frames'] = n_frames
         self['good_cells'] = good_cells
-        self['in_multiples_of'] = in_multiples_of
+        if in_multiples_of is not None:
+            self['in_multiples_of'] = int(in_multiples_of)
+        else:
+            self['in_multiples_of'] = in_multiples_of
+
     def apply_int_format(self,val):
         if isinstance(val,np.ndarray):
             val = val.astype(int)
@@ -367,7 +374,7 @@ class ExperimentWorker(ExperimentWorkerInterface):
         n_processes = ex_opt.n_processes
         
         if self.opt['data_mode'] == 'proc':
-            def mp_process_data(c_id,chunk):                
+            def mp_process_data(c_id,chunk):
                 frame_mask = chunked_metadata[c_id]['good_frames_mask']
                 xprint('Loading data chunk {} of {} with {} patterns'.format(c_id+1,len(chunks),len(chunk)))                
                 chunk_shape = (len(modules),len(chunk))+data_shape[1:]
@@ -380,7 +387,7 @@ class ExperimentWorker(ExperimentWorkerInterface):
                 output_shapes =  [chunk_shape,chunk_shape,chunk_shape,(len_chunk,)]
                 output_dtypes = [np.dtype('float32'),np.dtype('bool'),np.dtype('uint8'),np.dtype('bool')] 
                 mp_mode = Multiprocessing.MPMode_SharedArray(output_shapes,output_dtypes)
-                data,mask,gain,filtered_mask= self.comm_module.request_mp_evaluation(self._process_data_chunk_worker,mp_mode,input_arrays = [modules,np.arange(len(frame_slices))], const_inputs = [run,frame_slices,out_slices,self.data_mode,apply_filter_sequence,custom_mask,frame_mask,module_id_lookup], call_with_multiple_arguments = True, split_mode = 'modulus', n_processes = n_processes)
+                data,mask,gain,filtered_mask= self.comm_module.request_mp_evaluation(self._process_data_chunk_worker,mp_mode,input_arrays = [modules], const_inputs = [np.arange(len(frame_slices)),run,frame_slices,out_slices,self.data_mode,apply_filter_sequence,custom_mask,frame_mask,module_id_lookup], call_with_multiple_arguments = True, n_processes = n_processes)
                 #data,mask,gain,filtered_mask= self.comm_module.request_mp_evaluation(self._process_data_chunk_worker2,mp_mode,input_arrays = [modules], const_inputs = [run,frame_slices,out_slices,self.data_mode,apply_filter_sequence,custom_mask,frame_mask,module_id_lookup], call_with_multiple_arguments = True, split_mode = 'modulus', n_processes = n_processes)                
                 data = data.swapaxes(0,1)
                 mask = mask.swapaxes(0,1)

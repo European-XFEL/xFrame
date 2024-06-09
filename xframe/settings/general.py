@@ -41,7 +41,7 @@ load_projects = 'all' # or list of project names
 load_experiments = 'all' # or list of experiment names
 
 project_folders=['projects','install_projects']
-experiment_folders=['experiments','install_experiments']
+experiment_folders=['install_experiments','experiments']
 
 log_file = os.path.join(home_folder,'log.txt')
 IO = {"folders":

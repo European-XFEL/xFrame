@@ -165,6 +165,8 @@ class InvariantExtractor:
                     xprint('\t Denoising CCN ... done.')
                 else:
                     ccn_mod = ccn
+
+                
                 ## Invariant extraction
                 xprint('\t Solving linear system for invariants Bl|Bn ... ',end='\r')
                 b_coeff = Deg2Invar.from_ccn(ccn_mod,dim=self.dimensions,mode=dopt.invariant_extraction.method,xray_wavelength = self.xray_wavelength,max_order = self.max_order,qs = self.data_radial_points,assume_zero_odd_orders = dopt.invariant_extraction.assume_zero_odd_orders)                
@@ -591,7 +593,7 @@ class InvariantExtractor:
         
         self.data_projection_matrices['I1I1'] = Vs
         #xprint([type(V) for V in Vs])
-        eig_I1I1 = [sp.linalg.eigh(V@V.conj().T,driver='ev')[1][::-1] for V in Vs]
+        #eig_I1I1 = [sp.linalg.eigh(V@V.conj().T,driver='ev')[1][::-1] for V in Vs]
         self.data_projection_matrices_masks['I1I1'] = self.b_coeff_masks['I1I1'].sum(axis = 2)
         self.data_projection_matrix_error_estimates['I1I1'] = i_tools.calc_projection_matrix_error_estimate(self.b_coeff["I1I1"],self.data_projection_matrices['I1I1'])
         

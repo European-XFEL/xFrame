@@ -15,24 +15,6 @@ class SphericalHarmonicTransformInterface(abc.ABC):
     Interface for the external library shtns which supplies spherical harmonic transforms
     '''
     _external_dependency_name_ = 'shtns'
-    @abc.abstractmethod
-    def phi(self):
-        pass
-    @abc.abstractmethod
-    def theta(self):
-        pass
-    @abc.abstractmethod
-    def forward_l(self):
-        pass
-    @abc.abstractmethod
-    def forward_m(self):
-        pass
-    @abc.abstractmethod
-    def inverse_m(self):
-        pass
-    @abc.abstractmethod
-    def inverse_l(self):
-        pass
 
 class SphericalHarmonicTransformDependency(SphericalHarmonicTransformInterface,metaclass=DependencyMeta):
     pass

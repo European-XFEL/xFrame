@@ -1,4 +1,8 @@
+import logging
+log = logging.getLogger('pygsl')
+log.setLevel(logging.CRITICAL)
 import pygsl.testing.sf as sf
+log.setLevel(logging.WARNING)
 import numpy as np
 from xframe.library.interfaces import GSLInterface
 

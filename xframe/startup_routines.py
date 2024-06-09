@@ -50,11 +50,15 @@ def startup_imports():
 
 
 def create_dependency_dict():
+    '''
+    dependency dict etries have are of the form 
+    dependency_name: ((module name,class that is instaciated,external python package import name),(variable in xframe to store the dependency,None or specific object from dependency module to store),(function to be executed after import))
+    '''
     external_dependency_dict = {
         ##### math stuff #####
         'gsl':[(('gsl_plugin','GSLPlugin','pygsl'),('xframe.lib.math','gsl'),())],
         'flt':[(('flt_plugin','LegendreTransform','flt'),('xframe.lib.math','leg_trf'),())],
-        'shtns':[(('shtns_plugin','sh','shtns'),('xframe.lib.math','shtns'),())],
+        'shtns':[(('shtns_plugin2','sh','shtns'),('xframe.lib.math','shtns'),())],
         'persistent_homology':[(('persistent_homology','PersistentHomologyPlugin','None'),('xframe.lib.math','PeakDetector'),())],
         'pysofft':[(('soft_plugin','Soft','pysofft'),('xframe.lib.math','Soft'),())],
         ##### multiprocessing & GPU #####

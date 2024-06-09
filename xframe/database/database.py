@@ -414,13 +414,15 @@ class SettingsLoader:
             if pexists(path):
                 settings_path = path                
                 break
-        
         if isinstance(settings_path,bool):
-            message = f'Non of the possible possible settings files exist! They are {settings_paths}'
-            if self.ignore_file_not_found:
-                message+='Try to start with unchanged default settings.'
+            if pexists(settings_file_name):
+                settings_path = settings_file_name
             else:
-                raise FileNotFoundError(message)
+                message = f'Non of the possible possible settings files exist! They are {settings_paths+[settings_file_name]}'
+                if self.ignore_file_not_found:
+                    message+='Try to start with unchanged default settings.'
+                else:
+                    raise FileNotFoundError(message)
         return settings_path,folder
     
     def get_default_settings_path(self,folder,input_version=False,name = '',warn = False):

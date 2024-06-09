@@ -38,7 +38,9 @@ class RealProjection:
         self.auto_correlation = metadata.get('auto_correlation',False)
         self.metadata = metadata
         self._initial_mask = ~self.generate_initial_support_mask()
+        self._initial_support = (~self._initial_mask).astype(float)
         self._mask = [self._initial_mask.copy()]
+        self._support = [self._initial_support.copy()]
         self._random_mask = (np.random.rand(*self._initial_mask.shape)>0.9)
         self.projection = self.assemble_projection()
             
@@ -58,9 +60,11 @@ class RealProjection:
     @support.setter
     def support(self,support):
         if self.enforce_initial_support:
-            self._mask[0] = self._initial_mask | (~support)
+            self._support[0] = self._initial_support * support
+            self._mask[0] = self._initial_mask | (support<1)
         else:
-            self._mask[0] = ~support        
+            self._support[0] = support
+            self._mask[0] = (support<1)        
     
     @property
     def mask(self):
@@ -76,12 +80,17 @@ class RealProjection:
             
     def generate_support_projection(self):
         mask = self._mask
+        support = self._support
         def support_projection(density):
             #log.info('fu')
             #log.info('\n initial mask type = {} \n'.format(type(self.initial_mask)))
             #log.info(mask[0][:10,0])
-            m= mask[0]
-            density[m]=0
+            if True:
+                density*=support[0]
+                m=(support[0]<1)
+            else:
+                m= mask[0]
+                density[m]=0
             return [density,m]
         return support_projection
 
@@ -483,13 +492,25 @@ class ReciprocalProjection:
     def __init__(self,grid,data,max_order):
         #xprint(f"max_order = {max_order}")
         self.load_data(data)
+        opt = settings.project.projections.reciprocal
+        self.opt = opt
         if self.dimensions==2:
             self.integrated_intensity = midpoint_rule(self.average_intensity.data * self.data_radial_points , self.data_radial_points,axis = 0)*2*np.sqrt(np.pi)
         else:
             #xprint(f'aint shape = {self.average_intensity.data.shape} data points shape = {self.data_radial_points.shape}')
             self.integrated_intensity = midpoint_rule(self.average_intensity.data * self.data_radial_points**2 , self.data_radial_points,axis = 0)*2*np.sqrt(np.pi)
-        opt = settings.project.projections.reciprocal
-        self.opt = opt
+            if opt.use_real_spherical_harmonics:
+                temp = np.empty(len(self.data_projection_matrices),object)
+                for tid,p in enumerate(self.data_projection_matrices):
+                    temp[tid]=p.real
+                #self.data_projection_matrices=np.array(tuple(d.real for d in self.data_projection_matrices),dtype=object)
+                self.data_projection_matrices = temp
+                #xprint(self.data_projection_matrices[0].dtype)
+            else:
+                for p in self.data_projection_matrices:
+                    p.imag =0
+                #self.data_projection_matrices=np.array(tuple(d.real for d in self.data_projection_matrices),dtype=object)
+            #xprint(f'data prolection_matrices = {[d.dtype for d in self.data_projection_matrices]}')
         self.grid=grid        
         self.radial_points=grid.__getitem__((slice(None),)+(0,)*self.dimensions) # expression is just grid[:,0,0,0] in 3D case ans grid[:,0,0] in 2D
         self.max_q = np.max(self.radial_points)
@@ -517,8 +538,9 @@ class ReciprocalProjection:
         
         self.projection_matrices = pm
         nq = self.grid.shape[0]
-        if self.dimensions ==3:
-            self.full_projection_matrices = [np.zeros((nq,min(nq,2*o+1)),dtype=complex) for o in range(max_order+1)]
+        if self.dimensions ==3:            
+            self.full_projection_matrices = [np.zeros((nq,min(nq,2*o+1)),dtype=float) for o in range(max_order+1)]
+            self.use_real_spherical_harmonics = opt.use_real_spherical_harmonics
         elif self.dimensions == 2:
             self.full_projection_matrices = np.zeros((max_order+1,nq),dtype=complex)
         for oid,pm in zip(self.used_order_ids,self.projection_matrices):
@@ -688,6 +710,7 @@ class ReciprocalProjection:
                     data_low_res = self.data_low_resolution_intensity_coefficients
                     low_res = tuple(ReGrider.regrid(data_low_res[o_id],data_r_pt,'cartesian',r_pt,'cartesian',options={'apply_over_axis':1,'fill_value': 0.0,'interpolation':interpolation_type}) for o_id in np.arange(len(data_low_res)))
                 #xprint(f'low res contains nans = {[np.isnan(p).any() for p in low_res]}')
+                #xprint(f'data proj dtype = {[d.dtype for d in projection_matrices]}')
                     
         #log.info('regrided projection matrices shape = {}'.format(projection_matrices[-1].shape))
         return projection_matrices,low_res
@@ -778,7 +801,10 @@ class ReciprocalProjection:
             svd=np.linalg.svd
             determinant = np.linalg.det
             n_orders = len(PDs)
-            unknowns = tuple(np.eye(2*o+1,dtype = complex) for PD,o in zip(PDs,used_orders))
+            if self.use_real_spherical_harmonics:
+                unknowns = tuple(np.eye(2*o+1,dtype = float) for PD,o in zip(PDs,used_orders))
+            else:
+                unknowns = tuple(np.eye(2*o+1,dtype = complex) for PD,o in zip(PDs,used_orders))
             unknowns = tuple(u[:len(PD),:] for PD,u in zip(PDs,unknowns))
             PDs=tuple(pd[:,mask] for pd,mask in zip(PDs,radial_mask))
             def approximate_unknowns(intensity_harmonic_coefficients):
@@ -786,6 +812,7 @@ class ReciprocalProjection:
                 for unknown,PD,oid,l,qmask in zip(unknowns,PDs,order_ids,used_orders,radial_mask):
                     I = intensity_harmonic_coefficients.lm[l]
                     #xprint(f'PD contains Nans : {np.isnan(PD).any()}')
+                    #xprint(f'unknown dtype = {unknown.dtype}, PD dtype = {PD.dtype}, coeff dtype = {I[qmask].dtype}')
                     matmul(*svd(PD @ (I[qmask]),full_matrices=False)[::2],out = unknown)  # PD @ Intensity is  B^\dagger A in a Procrustres Problem min|A-BR|
                 #log.info('unknowns shape ={}'.format(unknowns[-1].shape))
                 return unknowns

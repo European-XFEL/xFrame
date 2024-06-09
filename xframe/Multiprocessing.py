@@ -124,6 +124,49 @@ class MPProcess:
         self.queue = queue
         self.events = events # dict of Events 
 
+class SharedArray(SharedMemory):
+    def __init__(self,name=None,create=False,dtype=float,shape=(0,)):
+        self.dtype = dtype
+        self.shape = shape
+        self._array_undefined_value = False
+        self.array = self._array_undefined_value
+        self.creating_instance = False
+        if create:
+            self.creating_instance = True
+        size = int(np.dtype(self.dtype).itemsize * np.prod(self.shape))
+        super(SharedArray,self).__init__(name=name,create = create,size = size)
+        self.array = np.ndarray(self.shape, dtype=self.dtype, buffer=self.buf)
+        
+    def close(self):
+        del(self.array)
+        self.array=self._array_undefined_value
+        super(SharedArray,self).close()
+    def unlink(self):
+        if isinstance(self.array,np.ndarray):
+            self.close()
+        super(SharedArray,self).unlink()
+
+class SharedArrayManager:
+    def __init__(self):
+        self.shared_arrays = {}
+    def create(self,name=None,dtype=float,shape=(0,)):        
+        sha = SharedArray(name=name,create=True,dtype=dtype,shape=shape)
+        self.shared_arrays[sha.name]=sha
+        return sha
+    def bind(self,name):
+        shm = self.shared_arrays[name]
+        new_shm = SharedArray(name=shm.name,shape =shm.shape,dtype=shm.dtype)
+        return new_shm
+    def unlink(self,name):
+        self.shared_arrays[name].unlink()
+        self.shared_arrays.pop(name)
+    def shutdown(self):
+        for sha in self.shared_arrays.values():
+            sha.unlink()
+        del(self.shared_arrays)
+        self.shared_arrays = {}
+
+shared_array_manager = SharedArrayManager()
 daemon_termination_queue = get_Queue()
 master_process = MPProcess(queue = daemon_termination_queue,events={'gpu':get_Event()})
 
@@ -285,8 +328,32 @@ def get_from_gpu_queue(process_name,timeout = None):
 
             
 
-#################################
-## Shared Memory (SharedArray) ##
+#################################################
+## Shared Memory (SharedArray/multiprocessing) ##
+
+#def delete_shared_arrays():
+#    shared_array_manager.shutdown()
+#    #global sa    
+    #shared_arrays = sa.list()
+    #for array in shared_arrays:
+    #    sa.delete(array.name.decode('utf-8'))        
+#
+#def create_shared_arrays(shapes,dtypes):
+#    #global sa
+#    names = []
+#    shared_outputs = []
+#    #log.info('all output dtypes in Shared array = {}'.format(out_dtypes))
+#    for i,shape,dtype in zip(np.arange(len(shapes)),shapes,dtypes):
+#        sha = shared_array_manager.create(shape = shape,dtype = dtype)
+#        names.append(sha.name)
+#        shared_outputs.append(sha.array)
+#        # The probability of identical hashes from hash(np.random.rand()) should be low enough to not care about it :p 
+#        #name = 'shared_output_'+ str(hash(np.random.rand()))
+#        #names.append(name)
+#        #log.info('output dtypes in Shared array = {}'.format(out_dtype))
+#        #shared_outputs.append(sa.create('shm://'+name,int(np.prod(shape)),dtype).reshape(shape))
+#    return shared_outputs, names
+
 
 def delete_shared_arrays():
     global sa    
@@ -306,7 +373,6 @@ def create_shared_arrays(shapes,dtypes):
         #log.info('output dtypes in Shared array = {}'.format(out_dtype))
         shared_outputs.append(sa.create('shm://'+name,int(np.prod(shape)),dtype).reshape(shape))
     return shared_outputs, names 
-
 
 #############################
 ##  Multiprocessing modes  ##
@@ -544,6 +610,8 @@ class MPMode_SharedArray(MPMode):
         if self.reduce_arguments:
             new_shapes = [(n_processes,)+shape for shape in self._initial_output_shapes]
             self.output_shapes = new_shapes
+            
+        
                 
         self.shared_outputs,self.output_names = create_shared_arrays(self.output_shapes,self.output_dtypes)
         self.pre_processed = True
@@ -579,8 +647,11 @@ class MPMode_SharedArray(MPMode):
         function = mp_arguments.function
         
         if mp_arguments.call_with_multiple_arguments:        
-            def mp_function():            
+            def mp_function():
                 output_files = [sa.attach('shm://'+ o_name).reshape(o_shape) for o_name,o_shape in zip(output_names,output_shapes)]
+                #output_files = [shared_array_manager.bind(o_name).array for o_name in output_names]
+                #output_files = [shared_array_manager.shared_arrays[o_name].array for o_name in output_names]
+                
                 additional_kwargs['outputs'] = output_files
                 additional_kwargs['output_ids'] = output_indices
                 # in this function output have to be placed in outputs[i][output_ids]
@@ -588,6 +659,9 @@ class MPMode_SharedArray(MPMode):
         else:
             def mp_function():
                 output_files = [sa.attach('shm://'+o_name).reshape(o_shape) for o_name,o_shape in zip(output_names,output_shapes)]
+                #output_files = [sa.attach('shm://'+o_name).reshape(o_shape) for o_name,o_shape in zip(output_names,output_shapes)]
+                #output_files = [shared_array_manager.bind(o_name).array for o_name in output_names]
+                #output_files = [shared_array_manager.shared_arrays[o_name].array for o_name in output_names]
                 additional_kwargs['outputs'] = output_files
                 for argument,out_ids in zip(zip(*args),zip(*output_indices)):
                     additional_kwargs['output_ids'] = out_ids
@@ -828,6 +902,7 @@ def process_mp_request(function,
     n_processes = len(split_dict['arguments'])    
     log.info(f'Starting {n_processes} process{"es"*(n_processes>1)}.')
     log.debug(f'On function: {function}')
+    #xprint(f'spawning {n_processes} processes!')
 
     ## Throw warnings if active processes will use HyperThreads
     check_available_cpus_before_spawning_childs(n_processes,are_daemons=is_daemon)
@@ -935,7 +1010,7 @@ class SharedMemoryObject:
         self.name = name
         self.shape = shape
         self.dtype = dtype
-        self.nbytes = np.dtype(self.dtype).itemsize * np.prod(self.shape)
+        self.nbytes = int(np.dtype(self.dtype).itemsize * np.prod(self.shape))
         self.shm = False
         self.array = False
         self.created = False

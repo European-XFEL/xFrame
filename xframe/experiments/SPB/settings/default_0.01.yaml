@@ -99,8 +99,6 @@ runs:
     command: np.array([])
 #  command: '[108]'
 #  command: '[1]'
-#sample_distance: 215
-# starting from run 120
 sample_distance:
   _value: 285
 detector_origin:
@@ -167,8 +165,6 @@ IO:
       vds_internal_base:
         _value: blShift
     
-    #exp_data: '/gpfs/exfel/exp/SPB/202102/p002510/{data_mode}/r{run:04d}'
-    #exp_data_base: '/gpfs/exfel/theory_group/user/berberic/p2510/cm-20_20_03_4/'
     exp_data_base:
       _value: /gpfs/exfel/exp/SPB/202202/p003046/
     raw_data_base:
@@ -182,13 +178,10 @@ IO:
     run_data:
       exp_data_base:
         _value: '{data_mode}/r{run:04d}/'
-    #exp_data: '/gpfs/exfel/exp/SPB/201901/p002304/{data_mode}/r{run:04d}'
-    #exp_data: '/gpfs/exfel/exp/SPB/202130/p900201/{data_mode}/r{run:04d}'
-    #exp_data: '/gpfs/exfel/exp/SPB/201802/p002145/{data_mode}/r{run:04d}'
+        
     out_base:
       _value: 
         command: "os.path.join(xframe_opt.IO.folders.home,'data/SPB/')"
-    #/gpfs/exfel/theory_group/user/berberic/p3046/
     settings_base:
       out_base:
         _value: settings/{time}/
@@ -219,7 +212,6 @@ IO:
     vds:
       name:
         _value: vds_{data_mode}_module_{module}.h5
-      #name: 'r{run:04d}_vds_{data_mode}_0.h5'
       folder:
         _value: vds_base
       options:

@@ -112,6 +112,8 @@ projections:
             _value: True
           if_error_bigger_than:
             _value: 6e-3
+          delay:
+            _value: 0
     shrink_wrap:
       _description: 'Shrink wrap options.'
       sigmas:
@@ -168,6 +170,9 @@ projections:
     use_averaged_intensity:
       _value: True
       _description: 'Whether or not the averaged intensity is used instead of the 0-order projection vector coming from the 0th order degree 2 invariant B_0.'
+    use_real_spherical_harmonics:
+      _value: False
+      _description: 'Whether or not the use real valued Spherical harmonics. This decideds whether the unknowns $U_l$ in $I_l=V_lU_l$ are unitary (if False) or orthogonal (if True) matrices.'      
     q_mask:
       type:
         _value: 'none'
