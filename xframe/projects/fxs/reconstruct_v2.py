@@ -10,7 +10,11 @@ os.chdir(plugin_dir)
 
 from xframe.library import mathLibrary as mLib
 from xframe.library.mathLibrary import SampleShapeFunctions,ExponentialRamp,LinearRamp
-from xframe.library.math_transforms import SphericalFourierTransform,HankelTransformWeights,get_harmonic_transform
+from xframe.library.math_transforms import (SphericalFourierTransform,
+                                            HankelTransformWeights,
+                                            get_harmonic_transform,
+                                            HankelWeightStruct,
+                                            SphericalFourierTransformStruct)
 from xframe.library.gridLibrary import uniformGrid_func
 from xframe.library.gridLibrary import ReGrider
 from xframe.library.gridLibrary import NestedArray
@@ -31,7 +35,7 @@ from .projectLibrary.ft_grid_pairs import radial_grid_func_zernike
 from .projectLibrary.ft_grid_pairs import spherical_ft_grid_pair_zernike
 from .projectLibrary.ft_grid_pairs import polar_ft_grid_pair_zernike
 from .projectLibrary.ft_grid_pairs import polarFTGridPair_SinCos_new
-from .projectLibrary.fourier_transforms import generate_ft,load_fourier_transform_weights
+from .projectLibrary.fourier_transforms import load_fourier_transform_weights
 from .projectLibrary.misk import getAnalysisRecipeFacotry
 from .projectLibrary.misk import get_analysis_process_factory
 from .projectLibrary.misk import generate_calc_center
@@ -169,13 +173,14 @@ class ProjectWorker(ProjectWorkerInterface):
             errors = []
             for result_dict in processed_results_list:
                 grid_pair = result_dict.pop('grid_pair')
+                ft_struct = result_dict.pop('fourier_transform_struct')
                 errors.append(result_dict['error_dict']['main'][-1])
                 projection_matrices = result_dict.pop('projection_matrices')                
             r_ids=np.argsort(errors)
             log.info('error sorted reconstruction = {} \n errors ={}'.format(r_ids,np.array(errors)[r_ids]))
             processed_results_dict={str(_id):processed_results_list[_id] for _id in r_ids}
             reciprocity_coefficient = _get_reciprocity_coefficient(settings.project.fourier_transform)
-            data_dict={'configuration':{'internal_grid':grid_pair,'xray_wavelength':self.mtip.load_mtip_data()[0]['xray_wavelength'],'reciprocity_coefficient':reciprocity_coefficient},'reconstruction_results':processed_results_dict,'projection_matrices':projection_matrices,'stats':stats}
+            data_dict={'configuration':{'internal_grid':grid_pair,'xray_wavelength':self.mtip.load_mtip_data()[0]['xray_wavelength'],'reciprocity_coefficient':reciprocity_coefficient},'reconstruction_results':processed_results_dict,'projection_matrices':projection_matrices,'stats':stats,'fourier_transform_struct':ft_struct}
             save('reconstructions',data_dict)
         except Exception as e:
             log.info(f'Error during postprocessing / saving with message:\n {e}')
@@ -257,8 +262,16 @@ class MTIP:
         reciprocity_coefficient = opt.fourier_transform.reciprocity_coefficient
         ft_type = opt.fourier_transform.type
         n_processes = opt.multi_process.n_weight_generating_processes
-        cls.fourier_transform_weights = load_fourier_transform_weights(opt.dimensions,ft_type,max_order,n_radial_points,reciprocity_coefficient,allow_weight_saving=opt.fourier_transform.allow_weight_saving,n_processes=n_processes)
-        cls.preinit_was_called = True
+
+        hankel_struct = HankelWeightStruct(dimension = opt.dimensions,
+                                           n_radial_points = n_radial_points,
+                                           angular_bandwidth = max_order+1,
+                                           hankel_type = ft_type,
+                                           n_processes_for_weight_generation = n_processes)
+        weight_dict = load_fourier_transform_weights(hankel_struct,allow_weight_saving=opt.fourier_transform.allow_weight_saving)
+
+        cls.fourier_transform_weights = weight_dict.pop('weights')
+        cls.preinit_fourier_struct = SphericalFourierTransformStruct(**weight_dict)
             
     @classmethod
     def load_mtip_data(cls):
@@ -309,16 +322,25 @@ class MTIP:
         if not max_q_is_set:
             self.max_q = max_q = self.data_q_limits[1]
         Nr,Nq = HankelTransformWeights._read_n_points(opt.grid.n_radial_points)
-        #max_r = HankelTransformWeights._reciprocity_relation(Nq,opt.fourier_transform.reciprocity_coefficient,self.max_q)
+        
         harmonic_transform_opt = { i:opt.grid.get(i,0) for i in ['n_phi','n_theta']}
-
         max_nonzero_r = opt.grid.max_nonzero_r
         if max_nonzero_r is None:
             r_support = None
         else:
             r_support =  opt.particle_radius*max_nonzero_r
-        
-        sft = SphericalFourierTransform.from_weight_dict(self.fourier_transform_weights,q_max = max_q,r_support = r_support,use_gpu=opt.GPU.use,other = harmonic_transform_opt)
+
+
+        weights = self.fourier_transform_weights
+        struct = self.preinit_fourier_struct
+        struct.max_q = max_q
+        struct.max_nonzero_r = r_support
+        struct.use_gpu = opt.GPU.use
+        if 'n_phi' in harmonic_transform_opt:
+            struct.n_polar_angles = harmonic_transform_opt['n_phi']
+        if 'n_theta' in harmonic_transform_opt:
+            struct.n_azimutal_angles = harmonic_transform_opt['n_theta']        
+        sft = SphericalFourierTransform(struct,weights = weights)
 
         if self.dimensions == 2:
             bandwidth = self.fourier_transform_weights['bandwidth']
@@ -815,6 +837,7 @@ class MTIP:
             order = loop_opt.order
                 
             methods = {key:read_method_settings(key,loop_opt['methods'][key]) for key in order}
+            #xprint(methods)
             # HIO parameter #
             n_hio_betas = len(hio_opt.beta)
             if n_hio_betas-1 < loop_number:
@@ -827,7 +850,7 @@ class MTIP:
             #log.info(f'{loop_name} : threshold = {sw_threshold} from thresholds = {sw_opt.thresholds}')
             # support #
             enforce_initial_support_opt = supp_opt.enforce_initial_support
-            enforce_initial_support_delay=enforce_initial_support_opt['delay']
+            enforce_initial_support_delay = enforce_initial_support_opt['delay']
             if enforce_initial_support_opt.apply:
                 enforce_initial_support_error_limit=[enforce_initial_support_opt['if_error_bigger_than']]
             else:
@@ -859,40 +882,45 @@ class MTIP:
                     
                 
             def loop(state):
-                if 'SW' in methods:
-                    update_shrink_wrap(0,loop_number)                
+                if ('SW' in methods) and (max_iterations>0):
+                    update_shrink_wrap(0,loop_number)
                 error_dict = state['error_dict']
                 #log.info(f'initial error dict = \n {error_dict}')
                 hist = state['density_pair_history']
                 enforce_initial_support_list = state.get('enforce_initial_support_list',[])
                 #log.info(enforce_initial_support_list)
-                iteration = 0
                 step = 0
                 real_pr =  self.projection_objects['real']
                 copy = np.array
                 latest_intensity = False
                 sw_step = 0
-                for iteration in range(1,max_iterations+1):
+                start_iteration = state['iteration']
+                iteration = start_iteration
+                for iteration in range(start_iteration,start_iteration+max_iterations):
                     #error_target_is_reached = check_error_target(error_dict)
                     #if error_target_is_reached:
                     #    break
                     for key in order:                    
                         process=methods[key]['process']
                         repeats=methods[key]['iterations']
+                        if repeats<=0:
+                            continue
+                        #xprint(f'executing {repeats} x {key}')
                         process_opt = methods[key].get('options',{})
                         #log.info('Loop:{} Running {} steps of {} with error_limit {}:'.format(iteration,repeats,key,relative_error_limit))
                         if key=='SW':
                             support = process.run(state['density_pair_history'][-1][1])
-                            support_real = inverse_fourier_transform(fourier_transform(support.astype(complex)))
+                            support_real = inverse_fourier_transform(fourier_transform(support.astype(complex))).real
                             support_real[support_real>1]=1
                             support_real[support]=1
+                            support_real[support_real<0]=0
                             
                             enforce_initial_support = error_dict['main'][-1:]>enforce_initial_support_error_limit or (iteration<enforce_initial_support_delay)
-                            xprint(f'enforce_initial_support = {enforce_initial_support}')
                             enforce_initial_support_list.append(enforce_initial_support)
                             real_pr.enforce_initial_support = enforce_initial_support
                             real_pr.support = support_real
                             state['mask'] = real_pr.support #mask #mask
+                            #xprint(f'enforce_initial_support = {enforce_initial_support}, support type = {real_pr.support.dtype}, iteration = {iteration}')
                             sw_step+=1
                             update_shrink_wrap(sw_step,loop_number)
                         elif key == 'SW_center':
@@ -943,32 +971,39 @@ class MTIP:
                                 #        #methods['ER']['process'] = routines['ER_ft_stab']
                                 #        pass
                                 error_dict['main'].append(main_error)
-                                
-                                if  state['best_error'] > main_error:                                
+                                #xprint(f"{state['best_error'] > main_error}|{iteration+1}{loop_opt.get('best_density_not_in_first_n_iterations',np.inf)}{iteration+1>loop_opt.get('best_density_not_in_first_n_iterations',np.inf)} | error {main_error}")
+                                if  (state['best_error'] > main_error) and (iteration+1>loop_opt.get('best_density_not_in_first_n_iterations',np.inf)):                                
                                     state['best_error'] = main_error
                                     state['best_density_pair'] = copied_density_pair
                                     state['best_iteration'] = iteration
                                     state['best_mask'] = state['mask']                                
                                 step+=1                                
                             #log.info(f'{error_dict}')
-                            errs = {category+'_'+key:error_dict[category][key][-1]  for category in error_dict for key in error_dict[category] if category != 'main'}                        
-                            errs['main'] = error_dict['main'][-1]
-                            xprint('P{}: {} Loop:{} Method:{} Last Errors: \n{}  Best Error: {}\n number of particles = {}, max_density={}'.format(Multiprocessing.get_process_name(),loop_name,iteration,key,errs,state['best_error'],self.rprojection.number_of_particles,np.max(new_density_pair[1])))
+                            if repeats > 0:
+                                errs = {category+'_'+key:error_dict[category][key][-1]  for category in error_dict for key in error_dict[category] if category != 'main'}                        
+                                errs['main'] = error_dict['main'][-1]
+                                xprint('P{}:  Loop:{} Part:{} Method:{} Last Errors: \n{}  Best Error: {}\n number of particles = {}, max_density={}'.format(Multiprocessing.get_process_name(),iteration+1,loop_name,key,errs,state['best_error'],self.rprojection.number_of_particles,np.max(new_density_pair[1])))
 
                 if state['best_iteration']>loop_opt.get('best_density_not_in_first_n_iterations',np.inf):
                     log.info('Selecting density with lowest error metric and continue.')
                     state['density_pair_history']=state['density_pair_history'][1:]+(state['best_density_pair'],)
                     real_pr.support = state['best_mask']
                     state['mask']=state['best_mask']
+                state['iteration']=iteration
                 state['enforce_initial_support_list']=enforce_initial_support_list
                 return state,iteration
             return loop
         loops = [generate_loop_method(name,loop_opt.sub_loops[name],_id) for _id,name in enumerate(loop_opt.sub_loops.order) ]        
         self.loops=loops
-
+        #xprint(f'loops = {loops}')
         #### assemble main loop ####
         def create_initial_state(initial_density_pair=None,initial_support=None):
             initial_support = self.projection_objects['real'].initial_support
+            initial_support = inverse_fourier_transform(fourier_transform(initial_support.astype(complex))).real
+            initial_support[~self.projection_objects['real']._initial_mask]=1
+            initial_support[initial_support>1]=1
+            initial_support[initial_support<0]=0
+            
             if initial_density_pair is None:
                 real_density_guess = real_density_guess_method()
                 #log.info('density guess type = {}'.format(real_density_guess.dtype))
@@ -983,6 +1018,7 @@ class MTIP:
                 self.projection_objects['real'].initial_support = initial_support
                 
                 
+            
             #real_density_guess.imag = 0
             #real_density_guess[real_density_guess.real<0]=0
             #real_density_guess[~initial_support]=0
@@ -992,6 +1028,7 @@ class MTIP:
 
             #first loop
             initial_state = {
+                'iteration':0,
                 'density_pair_history':density_pairs,
                 'error_dict':error_dict,
                 'mask':initial_support,
@@ -1047,7 +1084,8 @@ class MTIP:
                         "grid_pair":{"real_grid":self.grid_pair['real'],
                                      "reciprocal_grid":self.grid_pair['reciprocal']},
                         'projection_matrices':masked_projection_matrices,
-                        'last_deg2_invariant':last_deg2_invariant}
+                        'last_deg2_invariant':last_deg2_invariant,
+                        'fourier_transform_struct':self.transform_objects['fourier_transform'].struct.__dict__}
             return resultDict
         def main_loop(*args,**kwargs):
             if 'state' in kwargs:

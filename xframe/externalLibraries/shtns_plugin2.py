@@ -31,11 +31,27 @@ def get_lm_id(l,m):
     return l*(l+1)+m
 def get_m_ids(m,l0s):
     return l0s[abs(m):]+m
+def coeff_shape_complex(bandwidth):
+    return bandwidth**2
 
 
 
 
 class ShCoeff(np.ndarray):
+    @classmethod
+    def from_bandwith_complex(cls,array,bandwidth):
+        ls = np.arange(bandwidth)
+        ms =  np.concatenate((np.arange(bandwidth,dtype=int),-np.arange(1,bandwidth,dtype=int)[::-1]))
+        n_coeff = coeff_shape_complex(bandwidth)
+        l_ids_complex = np.zeros(n_coeff,dtype = int)
+        m_ids_complex = np.zeros(n_coeff,dtype = int)
+        for l in ls:
+            for m in np.arange(-l,l+1):
+                i = get_lm_id(l,m)
+                l_ids_complex[i]=l
+                m_ids_complex[i]=m
+        return cls(array,l_ids_complex,m_ids_complex,ls = ls,ms=ms)
+    
     def __new__(cls,array,l_ids,m_ids,ls=None,ms=None,real=False):
         coeff = array.view(cls)
         coeff.ls = ls
@@ -50,7 +66,9 @@ class ShCoeff(np.ndarray):
         coeff.lm=ShCoeffView(coeff)
         return coeff
     def copy(self):
-        return ShCoeff(np.array(self),self.ls,self.ms)
+        return ShCoeff(np.array(self),self.l_ids,self.m_ids,ls = self.ls,ms = self.ms)
+    def conj(self,*args,**kwargs):
+        return ShCoeff(super().conj(*args,**kwargs),self.l_ids,self.m_ids,ls = self.ls,ms = self.ms)
         
 class ShCoeffView:
     def __init__(self,coeff:ShCoeff,mode='complex'):
@@ -102,6 +120,7 @@ class ShSmall:
         self.anti_aliazing_degree = anti_aliazing_degree        
         self.n_coeff = (bandwidth)**2
 
+        #log.info(" sh trying to create grids with n_phi= {},n_theta={}".format(n_phi,n_theta))
         thetas,phis=self._generate_grid(n_phi=n_phi,n_theta=n_theta)
         #log.info(" sh created  grids n_phi= {},n_theta={}".format(len(phis),len(thetas)))
         self.thetas=thetas
@@ -114,12 +133,15 @@ class ShSmall:
         self.ms = np.concatenate((np.arange(bandwidth,dtype=int),-np.arange(1,bandwidth,dtype=int)[::-1]))
         
         self.l_ids_complex = np.zeros(self.n_coeff,dtype = int)
+
+        # array such that np.split(coeff,self.l_split_ids_complex) returns a list in which the l'th entry contains harmonic coefficients of degree l, i.e. (I^L_m) for L=l and |m|<=l.          
         self.m_ids_complex = np.zeros(self.n_coeff,dtype = int)
         for l in self.ls:
             for m in np.arange(-l,l+1):
                 i = get_lm_id(l,m)
                 self.l_ids_complex[i]=l
                 self.m_ids_complex[i]=m
+        self.l_split_ids_complex = np.nonzero(np.roll(np.diff(self.l_ids_complex),1))[0]
         
         self.shtns_real_zero_ms = (self._sh.m==0)
         self.l_ids_real = np.concatenate((self._sh.l,self._sh.l[~self.shtns_real_zero_ms]))
@@ -133,10 +155,14 @@ class ShSmall:
         sh=self._sh
         size_dict = self.n_angular_step_from_max_order()
         #log.info('n_theta = {}, n_phi = {}'.format(n_theta,n_phi))
-        if (not isinstance(n_theta,int)) or isinstance(n_theta,bool):
+        if (not np.issubdtype(type(n_theta),np.integer)):
             n_theta=size_dict['n_theta']
-        if (not isinstance(n_phi,int)) or isinstance(n_phi,bool):
+        else:
+            n_theta=int(n_theta)
+        if (not np.issubdtype(type(n_phi),np.integer)):
             n_phi = size_dict['n_phi']
+        else:
+            n_phi = int(n_phi)
             
         #log.info(f'nlat = {n_theta} nphi = {n_phi}')
         

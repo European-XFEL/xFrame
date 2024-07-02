@@ -50,13 +50,15 @@ class RealProjection:
         return ~self._initial_mask.copy()
     @initial_support.setter
     def initial_support(self,support):
-        self._initial_mask = ~support
-        self.support = support
+        self._initial_mask = (support<1)
+        self._initial_support = support
+        self._support[0] = self._initial_support
+        self._mask[0] = self._initial_mask
 
 
     @property
     def support(self):
-        return ~self._mask[0]
+        return self._support[0]
     @support.setter
     def support(self,support):
         if self.enforce_initial_support:
@@ -498,6 +500,7 @@ class ReciprocalProjection:
             self.integrated_intensity = midpoint_rule(self.average_intensity.data * self.data_radial_points , self.data_radial_points,axis = 0)*2*np.sqrt(np.pi)
         else:
             #xprint(f'aint shape = {self.average_intensity.data.shape} data points shape = {self.data_radial_points.shape}')
+            
             self.integrated_intensity = midpoint_rule(self.average_intensity.data * self.data_radial_points**2 , self.data_radial_points,axis = 0)*2*np.sqrt(np.pi)
             if opt.use_real_spherical_harmonics:
                 temp = np.empty(len(self.data_projection_matrices),object)

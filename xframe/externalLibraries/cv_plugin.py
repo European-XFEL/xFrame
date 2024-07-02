@@ -3,6 +3,11 @@ import numpy as np
 from xframe.database.interfaces import OpenCVInterface
 from xframe.presenters.interfaces import OpenCVInterface as PresenterInterface
 
+def get_phase_and_intensity(complex_array):
+    phases = np.angle(complex_array)+np.pi
+    abs_values = np.abs(complex_array).real
+    return phases,abs_values
+
 class CV_Plugin(OpenCVInterface,PresenterInterface):
     colormaps={
         'autumn':cv.COLORMAP_AUTUMN,
@@ -192,6 +197,126 @@ class CV_Plugin(OpenCVInterface,PresenterInterface):
             pic=np.concatenate((pic,cscale),axis=0)            
         return pic
 
+
+    @classmethod
+    def get_cart_image_complex(cls,data,scale='lin',saturation=1,vmin=False,vmax=False):
+        Nx,Ny=data.shape
+        hue,intensity = get_phase_and_intensity(data)
+        n_pixels = Nx
+        use_log_scale= (scale=='log')
+        if use_log_scale:
+            intensity[intensity<=0]=1e-15
+            intensity=np.log10(intensity)         
+        
+
+        max_d = intensity.max()
+        min_d = intensity.min()
+        if isinstance(vmin,bool):
+            vmin=min_d
+        else:
+            if use_log_scale:
+                vmin=np.log10(np.abs(vmin))
+            intensity[intensity<vmin]=vmin
+            
+        if isinstance(vmax,bool):
+            vmax=max_d
+        else:
+            if use_log_scale:
+                vmax=np.log10(np.abs(vmax))
+            intensity[intensity>vmax]=vmax
+        zero_in_range= (0>=vmin) and (0<=vmax)
+        if zero_in_range:
+            bg_value = 0
+        else:
+            bg_value = vmin
+
+        pic = intensity
+        pic[pic<vmin]=vmin
+        pic[pic>vmax]=vmax
+        
+        pic-=vmin
+        pic*=255/(vmax-vmin)
+        pic=pic.astype(np.uint8)
+        saturation = np.full_like(pic,saturation*255)
+        hue*=255/(2*np.pi)
+        hsv = np.stack((hue.astype(np.uint8),saturation,pic),axis=-1)
+        out = cv.cvtColor(hsv,cv.COLOR_HSV2BGR_FULL)      
+        return out
+    
+    @classmethod
+    def get_polar_image_complex(cls,data,n_pixels=False,scale='lin',saturation=1,vmin=False,vmax=False,transparent_backgound=False):
+        Nr,Nphi=data.shape
+        hue,pdata = get_phase_and_intensity(data)
+        use_log_scale= (scale=='log')
+        if use_log_scale:
+            pdata[pdata<=0]=1e-15
+            pdata=np.log10(pdata)         
+        
+
+        max_d = pdata.max()
+        min_d = pdata.min()
+        if isinstance(vmin,bool):
+            vmin=min_d
+        else:
+            if use_log_scale:
+                vmin=np.log10(np.abs(vmin))
+            pdata[pdata<vmin]=vmin
+            
+        if isinstance(vmax,bool):
+            vmax=max_d
+        else:
+            if use_log_scale:
+                vmax=np.log10(np.abs(vmax))
+            pdata[pdata>vmax]=vmax
+        zero_in_range= (0>=vmin) and (0<=vmax)
+        if zero_in_range:
+            bg_value = 0
+        else:
+            bg_value = vmin
+
+        enlarged_Nr = int(Nr*np.sqrt(2))
+        temp_pic = np.zeros((enlarged_Nr,Nphi),dtype=float)
+        temp_hue = np.zeros_like(temp_pic)
+        temp_saturation = np.zeros_like(temp_pic)
+        bg_pic = np.zeros_like(temp_pic)
+        temp_pic[:Nr]=pdata
+        temp_pic[Nr:]=bg_value
+        temp_hue[:Nr]=hue
+        temp_saturation[:]=saturation
+        bg_pic[Nr:]=1
+
+        if isinstance(n_pixels,bool):
+            n_pixels=Nr*2
+        radius = int(n_pixels/np.sqrt(2))
+        center = (int(n_pixels//2),int(n_pixels//2))
+            
+        pic = cv.warpPolar(temp_pic.T,center=center,maxRadius=radius,dsize=(n_pixels,n_pixels),flags=cv.WARP_INVERSE_MAP + cv.WARP_POLAR_LINEAR)
+        hue_polar = cv.warpPolar(temp_hue.T,center=center,maxRadius=radius,dsize=(n_pixels,n_pixels),flags=cv.WARP_INVERSE_MAP + cv.WARP_POLAR_LINEAR)
+        saturation_polar = cv.warpPolar(temp_saturation.T,center=center,maxRadius=radius,dsize=(n_pixels,n_pixels),flags=cv.WARP_INVERSE_MAP + cv.WARP_POLAR_LINEAR)
+        bg_mask = cv.warpPolar(bg_pic.T,center=center,maxRadius=radius,dsize=(n_pixels,n_pixels),flags=cv.WARP_INVERSE_MAP + cv.WARP_POLAR_LINEAR)==1
+
+        pic[pic<vmin]=vmin
+        pic[pic>vmax]=vmax
+        
+        pic-=vmin
+        pic*=255/(vmax-vmin)
+        pic=pic.astype(np.uint8)
+        hue_polar *= 255/(2*np.pi)
+        saturation_polar *=255
+
+        hsv = np.stack((hue_polar.astype(np.uint8),saturation_polar.astype(np.uint8),pic),axis = -1)
+        out = cv.cvtColor(hsv,cv.COLOR_HSV2BGR_FULL)    
+        
+        if transparent_backgound:
+            # First create the image with alpha channel
+            pic_rgba = cv.cvtColor(out, cv.COLOR_RGB2RGBA)
+
+            # Then assign the mask to the last channel of the image
+            pic_rgba[:n_pixels, :n_pixels, 3] = ((~bg_mask).astype(np.uint8)*255)
+            out=pic_rgba.copy()
+
+        return out
+    
     @classmethod
     def save(cls,path,image):
         path=path[:-3]+'.png'

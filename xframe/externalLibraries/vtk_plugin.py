@@ -25,7 +25,7 @@ class vtkSaver(VTKInterface):
         #log.info('grid_type = {}\n path = {} \n corrected path = {} \n file_type = {}'.format(grid_type,old_path,path,file_type))
         return path
     @staticmethod
-    def save(file_path,datasets, grid=default_grid,dset_names = dset_names_default, grid_type='cartesian',**kwargs):
+    def save(file_path,datasets, grid=default_grid,names = dset_names_default, grid_type='cartesian',**kwargs):
         '''
         Saves vtk 3d models which can be opened e.g with Paraview.
         Currenty the types 'cartesian' and 'spherical' are supported.
@@ -37,7 +37,7 @@ class vtkSaver(VTKInterface):
             writer = False
             for t,get_writer in vtkSaver.writer_dict.items():
                 if t==grid_type:
-                    writer = get_writer(datasets,grid = grid,dset_names=dset_names)
+                    writer = get_writer(datasets,grid = grid,dset_names=names)
                     file_path = vtkSaver.correct_file_path_ending(file_path,grid_type=grid_type)
                     break
             assert ~isinstance(writer,bool),'grid_type {} not known. Known grid_types are {}'.format(grid_type,vtkSaver.writer_dict.keys())

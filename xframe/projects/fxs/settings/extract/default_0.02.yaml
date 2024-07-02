@@ -28,8 +28,8 @@ invariant_regularization:
     _possible_values: ['eigenvalues','median_of_scaled_eigenvector']
     _description: "Determines method for selection of eigenvector eigenvalue pairs from the degree two invariant (q1,q2) matrices Bl,Bn. By standard the required number of eigenvectors are picked by the magnitude of their eigenvalue from high to low ('eigenvalue'). If 'median_of_scaled_eigenvector' is specified the median of the corresponding eigenvector times its eigenvalue are used for selection (sorting is from high to low values.)"
   method:
-    _value: "rescale_sign_loss"
-    _possible_values: ['simple','rescale_sign_loss']
+    _value: "rescale_ruiz"
+    _possible_values: ['simple','rescale_sign_loss','rescale_ruiz']
     _description: ["'simple':Cut eigendecomposition to the highest <rank> positive eigenvalues. Negative eigenvalues are set to 0.","'rescale_sign_loss': Tackles regularization from noisy Bl. The simple method over emphasizes low q area of B_l because of its  exponentially fast decay towards higher q values. This method tries to correct for that as follows. Choose v,lamb to be the highest eigenvalue of Bl|Bn. Choose lamb to be the highest positive eigenvalue with v being its eigenvector. Let P_sigma denote gaussian smoothing. Define w = abs(v)*np.sqrt(lamb) and the matrix M_sigma=P_sigma(w)P_sigma(w)^T. Apply simple method to (Bl|Bn)/M_sigma (This removes the strong decay component in Bl before eigenvalue decomposition), rescale the result by multiplying M_sigma. Let us call the result of this procedure A_sigma.  Find the optimal smoothing parameter sigma such that the following Frobenius Norm is minimal: ||sign(B_l|B_n) - sign(A_sigma)||_f.We chose this metric since we heuristically observed that the sign of experimentally computed Bl it less prone to noise. ", 'For noise free Bl|bn both methods give the same result.']
   extend_above_max_bl_q_limit:
     _value: True

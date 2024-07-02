@@ -8,8 +8,16 @@ from xframe import Multiprocessing
 from xframe.library.physicsLibrary import ewald_sphere_theta_pi
 from xframe.library.pythonLibrary import measureTime,xprint
 from xframe.library.gridLibrary import GridFactory
-from xframe.library.mathLibrary import eval_legendre,leg_trf,spherical_to_cartesian,cartesian_to_spherical,masked_mean,denoise_tv_chambolle,denoise_tv_chambolle_masked
+from xframe.library.mathLibrary import (eval_legendre,
+                                        leg_trf,
+                                        spherical_to_cartesian,
+                                        cartesian_to_spherical,
+                                        masked_mean,
+                                        denoise_tv_chambolle,
+                                        denoise_tv_chambolle_masked,
+                                        ruiz_equalization_symmetric)
 from xframe.library.mathLibrary import RadialIntegrator,solve_procrustes_problem,psd_back_substitution,back_substitution
+from xframe.library.math_transforms import get_harmonic_transform_from_array
 from xframe.library.math_transforms import get_harmonic_transform
 from .harmonic_transforms import HarmonicTransform
 import xframe.library.mathLibrary as mLib
@@ -20,8 +28,6 @@ from scipy.optimize import root_scalar,minimize_scalar
 from scipy.linalg import solve_triangular
 from scipy.ndimage import gaussian_filter1d,gaussian_filter
 
-
-from .harmonic_transforms import HarmonicTransform
 log=logging.getLogger('root')
 
 def ccd_associated_legendre_matrices(thetas,l_max,m_max):
@@ -417,7 +423,7 @@ class CC:
         log.info(r'Enforce cross correlation symmetry q1q2\delta = q2q1-\delta')
         cc_angle_swaped = cc.copy()
         cc_angle_swaped[...,1:] = cc[...,1:][...,::-1]
-        if mask is None:
+        if cc_mask is None:
             cc = (np.swapaxes(cc_angle_swaped,0,1)+cc)/2
             return cc
         else:
@@ -663,15 +669,15 @@ class _Conversion3DimFromCCN:
         :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
         """
         #log.info(f'max_order = {max_order}')
-        # Get Pl arguments 
+        # Get Pl arguments
         qs = momentum_transfer_points
         thetas = ewald_sphere_theta_pi(xray_wavelength,qs)
         
         if max_order is None:
             max_order = ccn.shape[-1]-1
             
+        ccn = ccn[...,:max_order+1]
         bl = np.zeros(ccn.shape,dtype=complex)
-        ccn = ccn[...,:max_order+1]        
         if assume_zero_odd_orders:
             l_stride = 2
             orders = np.arange(0,max_order+1,2)
@@ -820,6 +826,7 @@ class _Conversion:
     
 class _Regularization:
     eigh = sp.linalg.eigh
+    rescale_modes = ('sign_loss','ruiz','none')
     @staticmethod
     def _invariant_eigenvalues(b_matrix,sort_mode = 0):
         # Calculates the eigenvalue/eignvector pairs and sorts them.
@@ -886,7 +893,136 @@ class _Regularization:
         loss = np.linalg.norm(np.sign(b_matrix)-np.sign(new_b_matrix))
         return loss
     @staticmethod
-    def _regularize(b_matrix,order,q_id_limit,dim=3,rescale=False,sort_mode=0,extend_above_q_limit = True,**kwargs):
+    def _sign_loss(eig_vals,eig_vect,b_matrix,rank,sort_mode):
+        max_id=np.argsort(eig_vals)[-1]
+        s = np.sqrt(np.abs(eig_vals[max_id]))*np.abs(eig_vect[:,max_id])
+        sigma_optimal = minimize_scalar(_Regularization._sign_loss_of_regularized_b_matrix,args=(s,b_matrix,rank,sort_mode),bounds = [1,len(b_matrix)],method='Bounded').x
+        #sigma_optimal = 18
+        new_b_matrix,V,V_inv = _Regularization._enforce_rank_of_b_matrix_scaled(sigma_optimal,s,b_matrix,rank = rank,sort_mode = sort_mode,return_decomposition=True)
+        return new_b_matrix,V,V_inv
+
+
+    @staticmethod
+    def _extend_above_q_limit(full_b_matrix,V,V_inv,Nq,rank,q_id_limit):
+        ## from my thesis (Tim Berberich 2024)
+        full_V = np.zeros((Nq,rank),dtype = V.dtype)
+        n_v = len(V)
+        b_lower = full_b_matrix[q_id_limit[0]:,q_id_limit[0]:]
+        V_rest=(V_inv@b_lower[:n_v,n_v:]).T
+        V = np.concatenate((V,V_rest),axis=0)
+        full_V[q_id_limit[0]:] = V
+        q_id_limit[1]=Nq
+        return [full_V,q_id_limit]
+     
+    @staticmethod
+    def _regularize_sign_loss(b_matrix,order,q_id_limit,dim=3,sort_mode=0,extend_above_q_limit = True,rescale_opt = {},**kwargs):
+        full_b_matrix = (b_matrix + b_matrix.T.conj())/2
+        q_slice = slice(*q_id_limit)
+        Nq = b_matrix.shape[-1]
+        b_matrix=b_matrix[q_slice,q_slice]
+        
+        if dim == 2:
+            rank=1
+        else:
+            rank = min(len(b_matrix),2*order+1)
+            
+        b_matrix = (b_matrix + b_matrix.T.conj())/2
+        is_zero = np.isclose(b_matrix,0).all()
+        
+        if is_zero:
+            full_V = np.zeros((Nq,rank),dtype = b_matrix.dtype)
+            return [full_V,q_id_limit]
+        
+        eig_vals,eig_vect =  _Regularization._invariant_eigenvalues(b_matrix,sort_mode=sort_mode)
+        #regularization
+        new_b_matrix,V,V_inv = _Regularization._sign_loss(eig_vals,eig_vect,b_matrix,rank,sort_mode)
+
+        #extension
+        if extend_above_q_limit:
+            full_V,q_id_limit = _Regularization._extend_above_q_limit(full_b_matrix,V,V_inv,Nq,rank,q_id_limit)
+        else:
+            full_V = np.zeros((Nq,rank),dtype = V.dtype)
+            full_V[q_slice] = V
+        return [full_V,q_id_limit]
+
+    @staticmethod
+    def _regularize_naive(b_matrix,order,q_id_limit,dim=3,sort_mode=0,extend_above_q_limit = True,rescale_opt ={},**kwargs):
+        full_b_matrix = (b_matrix + b_matrix.T.conj())/2
+        q_slice = slice(*q_id_limit)
+        Nq = b_matrix.shape[-1]
+        b_matrix=b_matrix[q_slice,q_slice]
+        
+        if dim == 2:
+            rank=1
+        else:
+            rank = min(len(b_matrix),2*order+1)
+            
+        b_matrix = (b_matrix + b_matrix.T.conj())/2
+        is_zero = np.isclose(b_matrix,0).all()
+        
+        if is_zero:
+            full_V = np.zeros((Nq,rank),dtype = b_matrix.dtype)
+            return [full_V,q_id_limit]
+        eig_vals,eig_vect =  _Regularization._invariant_eigenvalues(b_matrix,sort_mode=sort_mode)
+
+        #regularization
+        neg_mask = (eig_vals<=0)
+        eig_vals[neg_mask]=0
+        V=eig_vect[:,:rank]*np.sqrt(eig_vals[:rank])
+        eig_vals[neg_mask]=1
+        V_inv = (V/eig_vals[:rank]).T
+
+        #extension
+        if extend_above_q_limit:
+            full_V,q_id_limit = _Regularization._extend_above_q_limit(full_b_matrix,V,V_inv,Nq,rank,q_id_limit)
+        else:
+            full_V = np.zeros((Nq,rank),dtype = V.dtype)
+            full_V[q_slice] = V
+        return [full_V,q_id_limit]
+    
+    @staticmethod
+    def _regularize_ruiz(b_matrix,order,q_id_limit,dim=3,sort_mode=0,extend_above_q_limit = True,rescale_opt = {'max_iterations':100,'convergence_epsilon':1e-10} ,**kwargs):
+        full_b_matrix = (b_matrix + b_matrix.T.conj())/2
+        q_slice = slice(*q_id_limit)
+        Nq = b_matrix.shape[-1]
+        b_matrix=b_matrix[q_slice,q_slice]
+        
+        if dim == 2:
+            rank=1
+        else:
+            rank = min(len(b_matrix),2*order+1)
+            
+        b_matrix = (b_matrix + b_matrix.T.conj())/2
+        is_zero = np.isclose(b_matrix,0).all()
+        
+        if is_zero:
+            full_V = np.zeros((Nq,rank),dtype = b_matrix.dtype)
+            return [full_V,q_id_limit]
+
+        #regularization
+        scaled_bl,scaling = ruiz_equalization_symmetric(b_matrix, max_iterations = rescale_opt['max_iterations'], convergence_epsilon = rescale_opt['convergence_epsilon'])
+        eig_vals,eig_vect =  _Regularization._invariant_eigenvalues(scaled_bl,sort_mode=sort_mode)
+        neg_mask = (eig_vals<=0)
+        eig_vals[neg_mask]=0
+        V_scaled=eig_vect[:,:rank]*np.sqrt(eig_vals[:rank])
+        # xprint(f'V_scaled = {V_scaled.shape}, scaling = {scaling.shape}')
+        eig_vals[neg_mask]=1
+        V_inv_scaled = (V_scaled/eig_vals[:rank]).T
+
+        V = V_scaled/scaling[:,None]
+        V_inv = V_inv_scaled*scaling[None,:]
+        #xprint(f'V = {V.shape} V_inv = {V_inv.shape}')
+        #extension
+        if extend_above_q_limit:
+            full_V,q_id_limit = _Regularization._extend_above_q_limit(full_b_matrix,V,V_inv,Nq,rank,q_id_limit)
+        else:
+            full_V = np.zeros((Nq,rank),dtype = V.dtype)
+            full_V[q_slice] = V
+        return [full_V,q_id_limit]
+        
+        
+    @staticmethod
+    def _regularize_old(b_matrix,order,q_id_limit,dim=3,rescale='ruiz',sort_mode=0,extend_above_q_limit = True,**kwargs):
         # Calculates the eigenvalue/eignvector pairs and sorts them.
         # Assumes input matrix to be hermitian
         # sort_mode can be 0 or 1
@@ -910,20 +1046,16 @@ class _Regularization:
             return [full_V,q_id_limit]
         
         eig_vals,eig_vect =  _Regularization._invariant_eigenvalues(b_matrix,sort_mode=sort_mode)
-        if rescale:
-            max_id=np.argsort(eig_vals)[-1]
-            s = np.sqrt(np.abs(eig_vals[max_id]))*np.abs(eig_vect[:,max_id])
-        
-            sigma_optimal = minimize_scalar(_Regularization._sign_loss_of_regularized_b_matrix,args=(s,b_matrix,rank,sort_mode),bounds = [1,len(b_matrix)],method='Bounded').x
-            #sigma_optimal = 18
-            new_b_matrix,V,V_inv = _Regularization._enforce_rank_of_b_matrix_scaled(sigma_optimal,s,b_matrix,rank = rank,sort_mode = sort_mode,return_decomposition=True)
-        else:
+        if isinstance(rescale,str):
+            eig_vals,eig_vect =  _Regularization._invariant_eigenvalues(b_matrix,sort_mode=sort_mode)
+            new_b_matrix,V,V_inv = _Regularization._sign_loss(eig_vals,eig_vect,b_matrix,rank,sort_mode)                                   
+        else:            
             neg_mask = (eig_vals<=0)
             eig_vals[neg_mask]=0
             V=eig_vect[:,:rank]*np.sqrt(eig_vals[:rank])
             eig_vals[neg_mask]=1
             V_inv = (V/eig_vals[:rank]).T
-        full_V = np.zeros((Nq,rank),dtype = V.dtype)
+        
         if extend_above_q_limit:
             n_v = len(V)
             b_lower = full_b_matrix[q_id_limit[0]:,q_id_limit[0]:]
@@ -932,11 +1064,13 @@ class _Regularization:
             full_V[q_id_limit[0]:] = V
             q_id_limit[1]=Nq
         else:
+            full_V = np.zeros((Nq,rank),dtype = V.dtype)
             full_V[q_slice] = V
         out = [full_V,q_id_limit]
         #xprint(f'len out = {len(out)}, order ={order}')
         return out
-        
+
+    
 class Deg2Invar:
     conversion = _Conversion
     regularization = _Regularization
@@ -983,7 +1117,15 @@ class Deg2Invar:
     def from_intensity_coeff():
         pass
     @staticmethod
-    def regularize(b_matrices,dim=3,q_id_limits=None,sort_mode=0,rescale=False,extend_above_q_limit = True,n_processes = False,set_nans_to_zero=False):
+    def regularize(b_matrices,
+                   dim=3,
+                   q_id_limits=None,
+                   sort_mode=0,
+                   rescale_mode='ruiz',
+                   rescale_opt = {'max_iterations':100,'convergence_epsilon':1e-10},
+                   extend_above_q_limit = True,
+                   n_processes = False,
+                   set_nans_to_zero=False):
         r"""
         Enforces that B_l = V_l V_l^\dagger and B_n = v_n v_n^\dagger 
         :param dim: Dimension
@@ -1031,9 +1173,13 @@ class Deg2Invar:
                     #xprint(tmp[:10])
                     #xprint('\n\n')
         orders = np.arange(len(b_matrices))
-        
+        if not isinstance(rescale_mode,str):
+            log.warning('rescale_mode {rescale_mode} not known defaulting to "ruiz". Known modes are {_Regularization.rescale_modes}.')
+            rescale_mode = 'ruiz'
+            
+        regularization_worker = getattr(_Regularization,'_regularize_'+rescale_mode) 
         def worker(b_matrix,order,q_id_limit,**kwargs):
-            tmp = _Regularization._regularize(b_matrix,order,q_id_limit,dim = dim,rescale = rescale,extend_above_q_limit = extend_above_q_limit, sort_mode=sort_mode)
+            tmp = regularization_worker(b_matrix,order,q_id_limit,dim = dim,extend_above_q_limit = extend_above_q_limit, sort_mode=sort_mode,rescale_opt = rescale_opt)
             return tmp
         temp = Multiprocessing.comm_module.request_mp_evaluation(worker,input_arrays=(b_matrices,orders,q_id_limits),split_together=True,n_processes = n_processes)
         #print(temp[0].shape)
@@ -1642,13 +1788,12 @@ def deg2_invariant_apply_precision_filter(bl,precision):
     return bl
 
 
-def intensity_to_deg2_invariant(intensity,intensity2=False,cht = False):
-    if not isinstance(cht,HarmonicTransform):
-        cht = HarmonicTransform.from_data_array('complex',intensity)
+def intensity_to_deg2_invariant(intensity,intensity2=False):   
+    cht = get_harmonic_transform_from_array(intensity)
     dimensions = intensity.ndim
-    harm_coeff = cht.forward(intensity.astype(complex))
+    harm_coeff = cht.forward_cmplx(intensity.astype(complex))
     #print(f'cht datatype = {type(cht.data_type)}')
-    if dimensions==2 and cht.data_type=='complex':
+    if dimensions==2 :
         #print(f'intensity shape = {intensity.shape}')
         n_orders = intensity.shape[-1]//2+1
         harm_coeff = harm_coeff[...,:n_orders]
@@ -1656,7 +1801,7 @@ def intensity_to_deg2_invariant(intensity,intensity2=False,cht = False):
     if isinstance(intensity2,bool):
         deg2_invariants = harmonic_coeff_to_deg2_invariants(dimensions,harm_coeff)
     else:
-        harm_coeff2 = cht.forward(intensity2.astype(complex))
+        harm_coeff2 = cht.forward_cmplx(intensity2.astype(complex))
         deg2_invariants = harmonic_coeff_to_deg2_invariants(dimensions,harm_coeff,harm_coeff2 = harm_coeff2)
     return deg2_invariants
 def density_to_deg2_invariants(density,fourier_transform,dimensions,density2 = False,cht = False):

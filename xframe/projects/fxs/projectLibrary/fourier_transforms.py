@@ -10,22 +10,20 @@ from .hankel_transforms import generate_ht
 from .misk import _get_reciprocity_coefficient
 from .hankel_transforms import generate_weightDict
 from xframe.library.mathLibrary import SphericalIntegrator,PolarIntegrator
-from xframe.library.math_transforms import HankelTransformWeights
+from xframe.library.math_transforms import HankelTransformWeights,HankelWeightStruct
 
 from xframe import database
 
 
-def load_fourier_transform_weights(dimensions,ft_type,max_order,n_radial_points,reciprocity_coefficient,allow_weight_saving = False,n_processes = False,other = {}):
+def load_fourier_transform_weights(struct:HankelWeightStruct=HankelWeightStruct(),allow_weight_saving = False):
     db = database.project
-    name_postfix='N'+str(n_radial_points)+'max_order'+str(max_order)+'rc'+str(reciprocity_coefficient)
-    log.info(f'ft name postfix = {name_postfix}')
+    log.info(f'ft name postfix = {struct.weight_name}')
     try:
-        weights_dict = db.load('ft_weights',path_modifiers={'postfix':name_postfix,'type':ft_type+'_'+str(dimensions)+'D'})
+        weights_dict = db.load('ft_weights',path_modifiers={'name':struct.weight_name})
     except FileNotFoundError as e:
-        weights_dict = HankelTransformWeights.get_weights_dict(dimensions,ft_type,max_order+1,n_radial_points,reciprocity_coefficient,n_processes_for_weight_generation = n_processes,other=other)
+        weights_dict = HankelTransformWeights.get_weights_dict(struct)
         if allow_weight_saving:
-            db.save('ft_weights',weights_dict,path_modifiers={'postfix':name_postfix,'type':ft_type+'_'+str(dimensions)+'D'})
-                    
+            db.save('ft_weights',weights_dict,path_modifiers={'name':struct.weight_name})                    
     return weights_dict
 
 #####################################

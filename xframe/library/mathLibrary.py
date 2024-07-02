@@ -31,6 +31,15 @@ from xframe.library.interfaces import PeakDetectorDependency
 from scipy.stats import ttest_1samp
 from scipy.optimize import root_scalar as sp_root
 
+from xframe.library.math_transforms import SphericalFourierTransform, SphericalFourierTransformStruct
+
+
+######################
+## This library is a convoluted mess where half of the functions
+## are useless and nod needed anymore ... but the other half is important
+##
+## This comment seves to remind me of the dire need to clean up this file !!
+
 module_self = __import__(__name__)
 
 gsl = GSLDependency
@@ -506,9 +515,9 @@ def circularHarmonicTransform_real_inverse(data_array,size):
     real_data=np.fft.irfft(data,size)
     return real_data
 
-def get_spherical_harmonic_transform_obj(l_max,mode='complex',anti_aliazing_degree=2,n_phi=False,n_theta = False):
-    sh=shtns(l_max,mode_flag=mode,anti_aliazing_degree = anti_aliazing_degree,n_phi=n_phi,n_theta=n_theta)
-    return sh
+#def get_spherical_harmonic_transform_obj(l_max,mode='complex',anti_aliazing_degree=2,n_phi=False,n_theta = False):
+#    sh=shtns(l_max,mode_flag=mode,anti_aliazing_degree = anti_aliazing_degree,n_phi=n_phi,n_theta=n_theta)
+#    return sh
 
 def get_soft_obj(l_max):
     global Soft
@@ -902,6 +911,39 @@ def nearest_positive_semidefinite_matrix(A,low_positive_eigenvalues_to_zero = Fa
     #A2 = v @ np.diag(l) @ v.T
     return A2
 
+
+
+
+    
+def get_test_function(support=[-1,1],slope=1):
+    center = np.mean(support)
+    size = support[1]-center
+    #print('size = {}'.format(size))
+    #print('center = {}'.format(center))
+    def test_function(data):
+        non_zero = ((data>support[0]) & (data<support[1]))
+        values = np.zeros_like(data)
+        values[non_zero]=np.exp(-slope*size**2/(size**2 - (data[non_zero]-center)**2))
+        return values
+    return test_function
+
+def get_test_function2(support=[-1,-0.5,0.5,1],slope=1):
+    assert support[0]<upport[1]<upport[2]<upport[3]
+    #print('size = {}'.format(size))
+    #print('center = {}'.format(center))
+    def f(x):
+        return np.exp(-slope*(1/(1-(x-1)**2)-1))
+    def test_function(data):
+        non_zero = ((data>support[0]) & (data<support[-1]))
+        values = np.zeros_like(data)
+        x=data[non_zero]
+        values[non_zero]=f((x-support[0])/(support[1]-support[0]))*f((x-support[3])/(support[3]-support[2]))
+        return values
+    return test_function
+
+
+#############################
+## Tikhonov rugularization ##
 def approximate_tikhonov_parameters(A,b,std_noise=False):
     '''
     Chooses optimal tikhonov parameters as described in
@@ -1032,6 +1074,7 @@ def optimal_tikhonov_regularization_worker(q1s,q2s,As,bs,allow_offset = False,st
     xs,offsets = optimal_tikhonov_regularization(As,bs,allow_offset = allow_offset,std_noise = std_noise)
     return xs
 
+
 ####################
 ##   exp ramp     ##
 class Ramp(abc.ABC):
@@ -1148,22 +1191,7 @@ def distance_from_line_2d(line_points,grid):
     return dist
     
 
-############
-###statistics###
-def relMeanSquareError(expected,approximation):
-    expected=np.asarray(expected)
-    approximation=np.asarray(approximation)
-
-    absExpected=np.abs(expected)
-    divisors=np.where(absExpected<1e-15,1,np.square(np.abs(expected)))
-    differences=np.where(absExpected<1e-15,0,np.square(np.abs(expected-approximation)))
-
-    errors=(differences/divisors).flatten()
-    meanError=np.sqrt(1/len(differences)*np.sum(differences/divisors))
-    return meanError
-    
-
-###############################################
+#############@##################################
 ## Polar/Spherical FFT reciprocity relations ##
 def polar_spherical_dft_reciprocity_relation_radial_cutoffs_old(cutoff:float,n_points:int,pi_in_q = True):
     '''
@@ -1225,9 +1253,10 @@ class SphericalIntegrator():
         self.n_r,self.n_theta,self.n_phi = grid.shape[:-1]
         self.grid = grid
         self.max_r = np.max(grid[:,0,0,0])
+        self.norm_angular = 4*np.pi
         self.norm = 4/3*np.pi*self.max_r**3
         self.gauss_weights = roots_legendre(self.n_theta)[1]
-        self.integrate,self.integrate_normed = self.generate_integration_routines()
+        self.integrate,self.integrate_normed,self.integrate_angular,self.integrate_angular_normed = self.generate_integration_routines()
         
         
 
@@ -1237,15 +1266,24 @@ class SphericalIntegrator():
         rs = self.grid[:,0,0,0]
         n = self.n_theta
         norm = self.norm
-        def integrate(values):
+        norm_angular = self.norm_angular
+        def integrate_angular(values):
             w_shape = (1,) + w.shape + (1,)*(values.ndim - 3)
+            s2_int = pi/n*np.sum(w.reshape(w_shape)*np.sum(values,axis=2),axis = 1)
+            return s2_int
+        def integrate(values):
+            #s2_int = integrate_angular(values)
             rs_shape = rs.shape + (1,)*(values.ndim - 3)
+            w_shape = (1,) + w.shape + (1,)*(values.ndim - 3)
             s2_int = pi/n*np.sum(w.reshape(w_shape)*np.sum(values,axis=2),axis = 1)
             r_int = np.trapz(s2_int * (rs**2).reshape(rs_shape) , x = rs,axis = 0)
             return r_int
         def integrate_normed(values):
             return integrate(values)/norm
-        return integrate,integrate_normed
+        
+        def integrate_angular_normed(values):
+            return integrate_angular(values)/norm_angular
+        return integrate,integrate_normed,integrate_angular,integrate_angular_normed
     def L2_norm(self,values):
         return self.integrate(values*values.conj())
                 
@@ -1304,7 +1342,13 @@ class RadialIntegrator():
     def L2_norm(self,values,axis=-1):
         return self.integrate(values*values.conj(),axis = axis)        
     
-            
+
+def midpoint_rule(samples,uniform_sampling_points,**kwargs):
+    step = uniform_sampling_points[1]-uniform_sampling_points[0]
+    #N = len(uniform_sampling_points)
+    integral = step*np.sum(samples,**kwargs)
+    return integral
+
 
 ################
 ###statistics###
@@ -1393,9 +1437,7 @@ def combine_variances_ND(_vars,means,counts,axis=0):
     return combined_variance,combined_mean,combined_counts
 
 
-### Hankel Transform ###
-
-
+######################
 ### connected area ###
 #Simple algorithm to find te area of equal values in a 2d array/image
 def _get_connected_area_periodic(image,point,step,value,shape,connected_points,visited_mask,periodic_axes=(0,1)):
@@ -1454,34 +1496,10 @@ def find_connected_component(image,start,periodic_axes = tuple(),return_mask = F
     else:
         return connected_points
 
-def get_test_function(support=[-1,1],slope=1):
-    center = np.mean(support)
-    size = support[1]-center
-    #print('size = {}'.format(size))
-    #print('center = {}'.format(center))
-    def test_function(data):
-        non_zero = ((data>support[0]) & (data<support[1]))
-        values = np.zeros_like(data)
-        values[non_zero]=np.exp(-slope*size**2/(size**2 - (data[non_zero]-center)**2))
-        return values
-    return test_function
 
-def get_test_function2(support=[-1,-0.5,0.5,1],slope=1):
-    assert support[0]<upport[1]<upport[2]<upport[3]
-    #print('size = {}'.format(size))
-    #print('center = {}'.format(center))
-    def f(x):
-        return np.exp(-slope*(1/(1-(x-1)**2)-1))
-    def test_function(data):
-        non_zero = ((data>support[0]) & (data<support[-1]))
-        values = np.zeros_like(data)
-        x=data[non_zero]
-        values[non_zero]=f((x-support[0])/(support[1]-support[0]))*f((x-support[3])/(support[3]-support[2]))
-        return values
-    return test_function
 
+#################################
 #### solve procrustes problem ###
-
 def solve_procrustes_problem(V1,V2):
     '''
     Finds the unitary matrix U that minimizes ||V1-V2U||.
@@ -1489,13 +1507,6 @@ def solve_procrustes_problem(V1,V2):
     '''
     #log.info(f'trasposed shapes = {V2.T.shape} @ {V1.shape}')
     return np.matmul(*np.linalg.svd((V2.conj().T) @ V1,full_matrices = False)[::2])
-
-def midpoint_rule(samples,uniform_sampling_points,**kwargs):
-    step = uniform_sampling_points[1]-uniform_sampling_points[0]
-    #N = len(uniform_sampling_points)
-    integral = step*np.sum(samples,**kwargs)
-    return integral
-
 
 def psd_back_substitution(cn,ppm):
     bl = np.zeros(cn.shape,dtype = complex)
@@ -1506,6 +1517,17 @@ def psd_back_substitution(cn,ppm):
         cn = (cn[...,:-1]-bl[...,i,None]*pm[...,:-1,-1])
         pm = pm[...,:-1,:-1]
     return bl
+
+def back_substitution(cn,ppm):
+    bl = np.zeros(cn.shape,dtype = complex)
+    cn = cn.copy()
+    pm = ppm.copy()
+    for i in np.arange(0,cn.shape[-1])[::-1]:
+        bl[...,i] = cn[...,-1]/pm[...,-1,-1]
+        cn = (cn[...,:-1]-bl[...,i,None]*pm[...,:-1,-1])
+        pm = pm[...,:-1,:-1]
+    return bl
+
 
 def back_substitution(cn,ppm):
     bl = np.zeros(cn.shape,dtype = complex)
@@ -1730,8 +1752,6 @@ class CharFuncSO3(np.ndarray):
         scale = new_coeff[0].real*np.sqrt(2)
         so3_coeff*=scale
         self[:] = self._soft.forward_cmplx(so3_coeff.flatten())
-        
-    
         
 class CharFuncFactory:
     """
@@ -1958,4 +1978,383 @@ def denoise_tv_chambolle_masked(img,mask,lamb=0.1,tau=0.25,n_iterations=70,mask_
             f[mask]= (out[mask]+sig*f[mask])/(sig+1)
         return out,f
         
+
+
+#################
+####alignment####
+def generate_calc_center(real_grid):
+    cart_grid = spherical_to_cartesian(real_grid)
+    dim = real_grid[:].shape[-1]
+
+    if dim ==2:
+        si = PolarIntegrator(real_grid[:])
+    elif dim == 3 :
+        si = SphericalIntegrator(real_grid[:])
+        
+    def calc_center(density):            
+        density_integral = si.integrate(density.real)            
+        if density_integral==0:
+            density_integral=1
+        center = si.integrate(cart_grid[:]*density[...,None].real)/density_integral
+        center=cartesian_to_spherical(center)
+        return center        
+    return calc_center
+
+
+
+class Alignment():
+    def __init__(self,fourier_transform:SphericalFourierTransform,consider_point_inverse=False):
+        struct = fourier_transform.struct
+        self.bandwidth = struct.angular_bandwidth
+        self.dimension = struct.dimension
+
+        self._reference = [None,None]
+        self._reference_coeff = [None,None]
+        
+        self.fourier_transform = fourier_transform
+        self.hankel_transform = fourier_transform.ht
+        self.harmonic_transform = self.fourier_transform.harm
+        self.radial_sampling_points = self.fourier_transform.real_grid[:,0,0,0]
+        self.max_r = struct.max_r
+        self._radial_limit_ids = [0,len(self.radial_sampling_points)]
+        self._radial_limits = [0.0,self.max_r]
+        self._consider_point_inverse = consider_point_inverse
+        
+        
+        self.find_center = generate_calc_center(self.fourier_transform.real_grid)
+        self.shift_by = fourier_transform.shift
+        self.shift_to_center = self._assemble_shift_to_center()
+        self.center_ft_pair = self._assemble_center_fourier_pair()
+        if self.dimension ==3:
+            self.soft = get_soft_obj(self.bandwidth)
+            self.soft_grid = self.soft.make_SO3_grid()
+            self.rotate_by = self._assemble_rotate_by()
+            self.find_rotation = self._assemble_find_rotation()
+            self.find_rotation_to_reference = self._assemble_find_rotation_to_reference()
+            self.average_pair = self._assemble_average_pair()
+            self.align_to_reference = self._assemble_align_to_reference()
+
+    @classmethod
+    def from_struct(cls,init_data: SphericalFourierTransformStruct = SphericalFourierTransformStruct(), weights = None):
+        return cls(SphericalFourierTransform(init_data,weights = weights))
+    @classmethod
+    def from_kwargs(cls,**kwargs):
+        struct = SphericalFourierTransformStruct(**kwargs)
+        return cls.from_struct(struct)
+
+    @property
+    def reference(self):
+        return self._reference
+    @property
+    def reference_coeff(self):
+        return self._reference_coeff
+    @reference.setter
+    def reference(self,density_pair: list|np.ndarray) -> None:
+        if isinstance(density_pair,np.ndarray):
+            density = density_pair
+            ft_density = self.fourier_transform.forward_cmplx(density.astype(complex))
+        else:
+            density,ft_density = density_pair
+            
+        centered_reference = self.center_ft_pair(density,ft_density)
+        max_density = centered_reference[0].max()
+        ht = self.harmonic_transform.forward_cmplx
+        self._reference[0] = centered_reference[0]/max_density
+        self._reference[1] = centered_reference[1]/max_density
+        self.reference_coeff[0] = ht(self._reference[0])
+        self.reference_coeff[1] = ht(self._reference[1])
+
+
+    @property
+    def radial_limit_ids(self):
+        return self._radial_limit_ids
+    @radial_limit_ids.setter
+    def radial_limit_ids(limit_ids):
+        self._radial_limit_ids[0]=limit_ids[0]
+        self._radial_limit_ids[1]=limit_ids[1]
+        rs = self.radial_sampling_points
+        half_step = rs[0]
+        low_r = rs[limit_ids[0]]
+        high_r = rs[limit_ids[0]]
+        self._radial_limits[0] = low_r
+        self._radial_limits[1] = high_r
+        
+    @property
+    def radial_limits(self):
+        return self._radial_limits
+    @radial_limits.setter
+    def radial_limits(self,limits):
+        rs = self.radial_sampling_points
+        min_id = np.argmin(np.abs(rs - limits[0]))[0]
+        max_id = np.argmin(np.abs(rs - limits[1]))[0]
+        self.radial_limit_ids = [min_id,max_id]
+
+
+
+    @property
+    def consider_point_inverse(self):
+        return self._consider_point_inverse
+    @consider_point_inverse.setter
+    def consider_point_inverse(self,val):
+        if not val == self._consider_point_inverse:
+            self._consider_point_inverse = val
+            self.average_pair = self._assemble_average_pair()
+            self.align_to_reference = self._assemble_align_to_reference()
+            
+    def _assemble_find_rotation(self):
+        bw = self.soft.bw
+        C_shape = (2*bw,)*3
+        pi = np.pi
+        calc_int_C = self.soft.calc_int_C
+        lm_split_ids = self.harmonic_transform.l_split_ids_complex
+        angle_grid = self.soft_grid
+
+        r_limit_ids = self.radial_limit_ids
+        rs = self.radial_sampling_points
+
+        reference_coeff = self.reference_coeff
+        def find_rotation(coeff,ref_coeff,return_correlation:bool=False):            
+            #ref_lm_coeff = np.concatenate(ref_lm_coeff,axis = 1).copy()
+            #lm_coeff = np.concatenate(lm_coeff,axis = 1).copy()
+            #print('limits = {}'.format(r_limit_ids))
+            int_C = calc_int_C(coeff,ref_coeff,r_limit_ids,lm_split_ids,rs).real
+            #self.results['rotation_metrics'].append(mean_C)
+            #log.info('mean C shape = {},max = {}, min = {}'.format(mean_C.shape,np.max(mean_C),np.min(mean_C)))
+            argmax = np.argmax(int_C)
+            argmax_unraveled = np.unravel_index(argmax,C_shape)
+            euler_angles = (angle_grid[argmax_unraveled[0],argmax_unraveled[1],argmax_unraveled[2]]).copy()
+            euler_angles[0] = 2*pi - euler_angles[0]
+            euler_angles[2] = 2*pi - euler_angles[2]
+            #self.results['rotation_angles'].append(euler_angles)
+            #log.info('mean_C max ids = {},max_C = {}, min_C = {},dtype = {},mean = {},var = {}'.format(argmax,np.max(mean_C),np.min(mean_C),mean_C.dtype,np.mean(mean_C),np.median(mean_C)))
+            #log.info('calculated_rotation angle = {}'.format(euler_angles/np.pi))
+            if return_correlation:
+                return euler_angles,int_C[argmax],int_C
+            else:
+                return euler_angles,int_C[argmax]
+        return find_rotation
     
+    def _assemble_find_rotation_to_reference(self):
+        bw = self.soft.bw
+        C_shape = (2*bw,)*3
+        pi = np.pi
+        calc_int_C = self.soft.calc_int_C
+        lm_split_ids = self.harmonic_transform.l_split_ids_complex
+        angle_grid = self.soft_grid
+
+        r_limit_ids = self.radial_limit_ids
+        rs = self.radial_sampling_points
+
+        reference_coeff = self.reference_coeff
+        def find_rotation_to_reference(lm_coeff,return_correlation:bool=False):            
+            #ref_lm_coeff = np.concatenate(ref_lm_coeff,axis = 1).copy()
+            #lm_coeff = np.concatenate(lm_coeff,axis = 1).copy()
+            #print('limits = {}'.format(r_limit_ids))
+            int_C = calc_int_C(lm_coeff,reference_coeff[0],r_limit_ids,lm_split_ids,rs).real
+            #self.results['rotation_metrics'].append(mean_C)
+            #log.info('mean C shape = {},max = {}, min = {}'.format(mean_C.shape,np.max(mean_C),np.min(mean_C)))
+            argmax = np.argmax(int_C)
+            argmax_unraveled = np.unravel_index(argmax,C_shape)
+            euler_angles = (angle_grid[argmax_unraveled[0],argmax_unraveled[1],argmax_unraveled[2]]).copy()
+            euler_angles[0] = 2*pi - euler_angles[0]
+            euler_angles[2] = 2*pi - euler_angles[2]
+            #self.results['rotation_angles'].append(euler_angles)
+            #log.info('mean_C max ids = {},max_C = {}, min_C = {},dtype = {},mean = {},var = {}'.format(argmax,np.max(mean_C),np.min(mean_C),mean_C.dtype,np.mean(mean_C),np.median(mean_C)))
+            #log.info('calculated_rotation angle = {}'.format(euler_angles/np.pi))
+            if return_correlation:
+                return euler_angles,int_C[argmax],int_C
+            else:
+                return euler_angles,int_C[argmax]
+        return find_rotation_to_reference
+        
+    def _assemble_shift_to_center(self):
+        find_center = self.find_center
+        shift = self.fourier_transform.shift
+        ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
+        def center(density):
+            center = find_center(density)
+            centered_density = ift(shift(ft(density),center,opposite_direction=True))
+            return centered_density#,centered_ft_density)
+        return center
+    def _assemble_center_fourier_pair(self):
+        find_center = self.find_center
+        shift = self.fourier_transform.shift
+        ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
+        def center(density,ft_density):
+            center = find_center(density)
+            centered_density = ift(shift(ft(density),center,opposite_direction=True))
+            centered_ft_density = shift(ft_density,center,opposite_direction=True)
+            return (centered_density, centered_ft_density)
+        return center
+    def _assemble_rotate_by(self):
+        rotate_coeff = self.soft.rotate_coeff
+        lm_split_ids = self.harmonic_transform.l_split_ids_complex
+        ht = self.harmonic_transform.forward_cmplx
+        iht = self.harmonic_transform.inverse_cmplx
+        def rotate(function,euler_angles):
+            coeff = ht(function)
+            rotated_coeff = rotate_coeff(coeff,lm_split_ids,euler_angles)
+            #log.info('euler_angles = {}'.format(euler_angles))
+            #lm_coeff = np.concatenate(lm_coeff,axis = 1)
+            rotated_function = iht(rotated_coeff)
+            return rotated_function
+        return rotate
+    
+    def _assemble_average_pair(self):
+        find_rotation = self.find_rotation
+        center_ft_pair = self.center_ft_pair
+        rotate_coeff = self.soft.rotate_coeff
+        shift = self.fourier_transform.shift
+        ht,iht = self.harmonic_transform.forward_cmplx,self.harmonic_transform.inverse_cmplx
+        #ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
+        hankel,ihankel = self.hankel_transform.forward_cmplx,self.hankel_transform.inverse_cmplx
+        lm_split_ids = self.harmonic_transform.l_split_ids_complex
+
+        if self.consider_point_inverse:
+            def align(density:np.array,ft_density:np.array,ref_density:np.array,ref_ft_density:np.ndarray):
+                # centering
+                c_density,c_ft_density = center_ft_pair(density,ft_density)
+                c_ref_density,c_ref_ft_density = center_ft_pair(ref_density,ref_ft_density)
+                # normalization
+                max_density = c_density.max()
+                max_ref_density = c_ref_density.max()
+                nc_density = c_density/max_density
+                nc_ft_density = c_ft_density/max_density
+                nc_ref_density = c_ref_density/max_ref_density
+                nc_ref_ft_density = c_ref_ft_density/max_ref_density
+
+                # To threate pinv similar as normal density
+                temp = hankel(ht(nc_density))
+                coeff = ihankel(temp).copy()
+                coeff_pinv = ihankel(temp.conj())
+                
+                ref_coeff = ht(nc_ref_density)
+                ft_coeff = ht(nc_ft_density)
+            
+                euler_angles,correlation_value = find_rotation(coeff,ref_coeff)
+                euler_angles2,correlation_value2 = find_rotation(coeff_pinv,ref_coeff)
+                if correlation_value2>correlation_value:
+                    print((correlation_value2-correlation_value)/abs(correlation_value))
+                    euler_angles = euler_angles2
+                    correlation_value = correlation_value2
+                    coeff = coeff_pinv
+                    ft_coeff = ft_coeff.conj()
+                aligned_coeff = rotate_coeff(coeff,lm_split_ids,euler_angles)
+                aligned_ft_coeff = rotate_coeff(ft_coeff,lm_split_ids,euler_angles)
+            
+                average = (iht(aligned_coeff)+nc_ref_density)/2
+                ft_average = (iht(aligned_ft_coeff)+nc_ref_ft_density)/2
+                return (average, ft_average),correlation_value
+        else:
+            def align(density:np.array,ft_density:np.array,ref_density:np.array,ref_ft_density:np.ndarray):
+                # centering
+                c_density,c_ft_density = center_ft_pair(density,ft_density)
+                c_ref_density,c_ref_ft_density = center_ft_pair(ref_density,ref_ft_density)
+                # normalization
+                max_density = c_density.max()
+                max_ref_density = c_ref_density.max()
+                nc_density = c_density/max_density
+                nc_ft_density = c_ft_density/max_density
+                nc_ref_density = c_ref_density/max_ref_density
+                nc_ref_ft_density = c_ref_ft_density/max_ref_density
+
+                coeff = ht(nc_density)                
+                ref_coeff = ht(nc_ref_density)
+                ft_coeff = ht(nc_ft_density)
+            
+                euler_angles,correlation_value = find_rotation(coeff,ref_coeff)
+                aligned_coeff = rotate_coeff(coeff,lm_split_ids,euler_angles)
+                aligned_ft_coeff = rotate_coeff(ft_coeff,lm_split_ids,euler_angles)
+            
+                average = (iht(aligned_coeff)+nc_ref_density)/2
+                ft_average = (iht(aligned_ft_coeff)+nc_ref_ft_density)/2
+                return (average, ft_average),correlation_value
+        return align
+    
+    def _assemble_align_to_reference(self):
+        find_rotation = self.find_rotation_to_reference
+        center_ft_pair = self.center_ft_pair
+        rotate_coeff = self.soft.rotate_coeff
+        shift = self.fourier_transform.shift
+        ht,iht = self.harmonic_transform.forward_cmplx,self.harmonic_transform.inverse_cmplx
+        hankel,ihankel = self.hankel_transform.forward_cmplx,self.hankel_transform.inverse_cmplx
+        #ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
+        lm_split_ids = self.harmonic_transform.l_split_ids_complex
+        consider_point_inverse = self.consider_point_inverse
+
+        if self.consider_point_inverse:
+            def align_to_reference(density:np.array,ft_density:np.array):
+                #center
+                c_density,c_ft_density = center_ft_pair(density,ft_density)
+                #normalize
+                max_density = c_density.max()
+                nc_density = c_density/max_density
+                nc_ft_density = c_ft_density/max_density
+
+
+                temp = hankel(ht(nc_density))
+                coeff = ihankel(temp).copy()
+                coeff_pinv = ihankel(temp.conj())
+                ft_coeff = ht(nc_ft_density)
+                
+                euler_angles,correlation_value = find_rotation(coeff)
+                euler_angles2,correlation_value2 = find_rotation(coeff_pinv)
+                if correlation_value2>correlation_value:
+                    print((correlation_value2-correlation_value)/abs(correlation_value))
+                    euler_angles = euler_angles2
+                    coeff = coeff_pinv
+                    ft_coeff = ft_coeff.conj()
+                    correlation_value=correlation_value2
+                out_density_coeff = rotate_coeff(coeff,lm_split_ids,euler_angles)
+                out_ft_density_coeff = rotate_coeff(ft_coeff,lm_split_ids,euler_angles)
+                
+                return (iht(out_density_coeff),iht(out_ft_density_coeff)),correlation_value
+        else:
+            def align_to_reference(density:np.array,ft_density:np.array):
+                c_density,c_ft_density = center_ft_pair(density,ft_density)
+                max_density = c_density.max()
+                nc_density = c_density/max_density
+                nc_ft_density = c_ft_density/max_density
+                coeff = ht(nc_density)
+                ft_coeff = ht(nc_ft_density)
+                
+                euler_angles,correlation_value = find_rotation(coeff)
+                out_density_coeff = rotate_coeff(coeff,lm_split_ids,euler_angles)
+                out_ft_density_coeff = rotate_coeff(ft_coeff,lm_split_ids,euler_angles)
+                
+                return (iht(out_density_coeff),iht(out_ft_density_coeff)),correlation_value
+
+        return align_to_reference
+    
+#######################
+## Ruiz equalization ##
+#@techreport{ruiz2001scaling,
+#  title={A scaling algorithm to equilibrate both rows and columns norms in matrices},
+#  author={Ruiz, Daniel},
+#  year={2001},
+#  institution={CM-P00040415}
+#}
+#
+#
+
+def ruiz_equalization_symmetric(matrix: np.ndarray, max_iterations: int = 100, convergence_epsilon:float  =1e-10) -> tuple[np.ndarray,np.ndarray]:
+    r'''
+    Ruiz equalization for symmetric/antisymmetric matrices.
+    '''
+    two_dim = matrix.ndim<=2
+    m_scaled = matrix
+    scaling_final = scaling = 1
+    converged = False
+    for i in range(max_iterations):
+        scaling = 1/np.sqrt(np.max(np.abs(m_scaled),axis = -2))
+        m_scaled = scaling[...,:,None] * m_scaled * scaling[...,None,:]
+        scaling_final*=scaling
+        epsilon = np.abs(1-np.max(scaling,axis = -1)).max()
+        #xprint(epsilon)
+        if epsilon<convergence_epsilon:
+            converged = True
+            break
+    if not converged:
+        log.warning('Ruiz equalization did not converge to epsilon<{convergence_epsilon} within {max_iterations} steps, final epsilon is {epsilon}.')
+    return (m_scaled,scaling_final) 
+

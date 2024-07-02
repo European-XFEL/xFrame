@@ -8,6 +8,8 @@ from scipy.special import eval_gegenbauer
 from xframe import Multiprocessing
 from xframe import settings
 from xframe.library.pythonLibrary import xprint
+from dataclasses import dataclass,field
+from typing import ClassVar
 
 log = logging.getLogger('root')
 
@@ -61,18 +63,65 @@ class PolarHarmonicTransform:
         return np.zeros(self.n_points,complex)
 
 
-def get_harmonic_transform(bandwidth,dimensions=3,options={}):
+def get_harmonic_transform(bandwidth,dimensions=3,n_phi=0,n_theta=0,options={}):
     #xprint(f"bw = {bandwidth}, dimensions = {dimensions}, options = {options}")
     if dimensions==2:
         return PolarHarmonicTransform(max_order=bandwidth)
     elif dimensions==3:
-        keys = ['anti_aliazing_degree','n_phi','n_theta']
+        keys = ['anti_aliazing_degree']
         shtns_opt = {key:options[key] for key in keys if key in options}
-        from xframe.library.mathLibrary import shtns        
+        shtns_opt['n_phi']=n_phi
+        shtns_opt['n_theta']=n_theta
+        from xframe.library.mathLibrary import shtns
+        #xprint(f'shtns opt = {shtns_opt}')
         return shtns.ShSmall(bandwidth,**shtns_opt)
-        
 
+def get_harmonic_transform_from_array(array):
+    #xprint(f"bw = {bandwidth}, dimensions = {dimensions}, options = {options}")
+    shape = array.shape
+    dimension = array.ndim
+    if dimension ==2:
+        bandwidth = shape[1]//2
+        opt = {'n_angular_points':shape[1]}
+    else:
+        bandwidth = shape[1]
+        opt = {'n_phi':shape[2],'n_theta':shape[1]}
+    from xframe.library.mathLibrary import shtns
+    return shtns.ShSmall(bandwidth,**opt)
+
+
+
+    
+def polar_spherical_dft_reciprocity_relation_radial_cutoffs(cutoff:float,n_points:int,reciprocity_coefficient: float =np.pi) -> float:
+    '''
+    Reciprocity relation between the real and reciprocal cutoff.
+    Reciprocity coefficient of Pi corresponds to the usual FFT relation for [2pi/Angstrom] units in reciprocal and [Angstrom] in reals space.
+    '''
+    other_cutoff = reciprocity_coefficient*n_points/cutoff    
+    return other_cutoff
+
+
+@dataclass
+class HankelWeightStruct:
+    ''' Data class that specifies input variables for the generation of Hankel transform weights '''
+    supported_dimensions : ClassVar[tuple[int]] = (2,3)
+    supported_hankel_types : ClassVar[tuple[str]] = ['trapz','zernike_trapz','sincos_trapz','midpoint','zernike_midpoint','sincos_midpoint']
+
+    dimension: int = 3
+    n_radial_points: tuple[int,int] = (64,64)
+    angular_bandwidth: int = 32
+    hankel_type: str = 'midpoint'
+    n_processes_for_weight_generation: int|None =  None
+    reciprocity_coefficient: float = np.pi
+    other: dict = field(default_factory=dict)
+
+    @property
+    def weight_name(self):
+        s = self
+        return f'Dim{s.dimension}N{s.n_radial_points}Bandwith{s.angular_bandwidth}_{s.hankel_type}_rc{s.reciprocity_coefficient}'
+        
 class HankelTransformWeights:
+    ht_modes = HankelWeightStruct.supported_hankel_types
     @staticmethod
     def _reciprocity_relation(Nq,reciprocity_coefficient,Q_or_R):
         R_or_Q =  reciprocity_coefficient*Nq/Q_or_R
@@ -275,44 +324,55 @@ class HankelTransformWeights:
 
 
     @classmethod
-    def get_weights_dict(cls,dimensions,mode,angular_bandwidth,n_points,reciprocity_coefficient,n_processes_for_weight_generation,other={}):
-        weight_generator = getattr(cls,mode)
-        weights = weight_generator(n_points,angular_bandwidth,dimensions,reciprocity_coefficient,n_processes_for_weight_generation,**other)
-        weights_dict = {}
-        weights_dict["weights"]=weights
-        weights_dict["mode"]=mode
-        weights_dict["dimensions"]=dimensions
-        weights_dict["n_points"]=n_points
-        weights_dict["bandwidth"]=angular_bandwidth
-        weights_dict["reciprocity_coefficient"]=reciprocity_coefficient
-        return weights_dict
+    def get_weights_dict(cls,struct: HankelWeightStruct = HankelWeightStruct()):
+        temp = struct.__dict__        
+        weight_generator = getattr(cls,struct.hankel_type)
+        weights = weight_generator(struct.n_radial_points,struct.angular_bandwidth,struct.dimension,struct.reciprocity_coefficient,struct.n_processes_for_weight_generation,**struct.other)
+        temp["weights"]=weights
+        return temp
+
+    
+@dataclass
+class HankelTransformStruct(HankelWeightStruct):
+    ''' Data class that specifies input variables of HankelTransform class'''
+    max_q: float = None # default float value set in post_init 
+    max_nonzero_r: float = None # default float value set in post_init 
+    use_gpu:bool = True
+    def __post_init__(self):
+        if self.max_q is None:
+            self.max_q = polar_spherical_dft_reciprocity_relation_radial_cutoffs(1.0,self.n_radial_points[1])
+        if self.max_nonzero_r is None:
+            self.max_nonzero_r = polar_spherical_dft_reciprocity_relation_radial_cutoffs(self.max_q,self.n_radial_points[1])
+    @property
+    def max_r(self) -> float:
+        return polar_spherical_dft_reciprocity_relation_radial_cutoffs(self.max_q,self.n_radial_points[1])
     
 class HankelTransform:
     ht_modes = ['trapz','zernike_trapz','sincos_trapz','midpoint','zernike_midpoint','sincos_midpoint']
-    
-    def __init__(self,n_points=64,angular_bandwidth=32,q_max=None,r_support=None,mode='midpoint',dimensions = 3, weights = None, reciprocity_coefficient = np.pi, use_gpu = True, n_processes_for_weight_generation = None,other={}):
-        self.mode = mode
-        self.dimensions = dimensions
-        self.Nr,self.Nq = HankelTransformWeights._read_n_points(n_points)
-        self.bandwidth = angular_bandwidth
-        self.use_gpu=use_gpu
-        self.reciprocity_coefficient = reciprocity_coefficient
-        self.q_max=q_max
-        self.r_support = r_support
-        if q_max is None:
-            self.q_max = polar_spherical_dft_reciprocity_relation_radial_cutoffs(1,self.Nq,reciprocity_coefficient = reciprocity_coefficient)
-        self.r_max = polar_spherical_dft_reciprocity_relation_radial_cutoffs(self.q_max,self.Nq,reciprocity_coefficient = reciprocity_coefficient)
-        if r_support is None:
-            self.r_support = polar_spherical_dft_reciprocity_relation_radial_cutoffs(self.q_max,self.Nq,reciprocity_coefficient = reciprocity_coefficient)
+
+    def __init__(self,struct: HankelTransformStruct  = HankelTransformStruct(),weights: np.ndarray|list|tuple|None = None):
+        self.struct = struct
+        #xprint(f'struct2 = {struct.__dict__}')
+        self.use_gpu = struct.use_gpu
+        self.dimensions = struct.dimension
+        self.mode = struct.hankel_type
+        self.Nr,self.Nq = HankelTransformWeights._read_n_points(struct.n_radial_points)
+        self.n_points = struct.n_radial_points
+        self.bandwidth = struct.angular_bandwidth
+        self.q_max = struct.max_q
+        self.r_max = struct.max_r
+        self.r_support = struct.max_nonzero_r
 
         #xprint(f'current process id = {Multiprocessing.get_process_name()}')
-        if use_gpu and Multiprocessing.get_process_name()==0:
-            settings.general.n_control_workers = 1
-            Multiprocessing.comm_module.restart_control_worker()
+        if struct.use_gpu and Multiprocessing.get_process_name()==0:
+            comm = Multiprocessing.comm_module
+            if not comm.are_control_workers_running():
+                settings.general.n_control_workers = 1
+                comm.restart_control_worker()
         if not isinstance(weights,(np.ndarray,list,tuple)):            
-            weight_generator = getattr(HankelTransformWeights,mode)
-            weights = weight_generator(n_points,angular_bandwidth,dimensions,reciprocity_coefficient,n_processes_for_weight_generation,**other)
-        self.assembled_weights = getattr(HankelTransformWeights,'assemble_'+mode)(weights,self.bandwidth,self.r_max,self.reciprocity_coefficient,dimensions=self.dimensions)
+            weight_generator = getattr(HankelTransformWeights,self.mode)
+            weights = weight_generator(self.n_points,self.bandwidth,self.dimensions,struct.reciprocity_coefficient,struct.n_processes_for_weight_generation,**struct.other)
+        self.assembled_weights = getattr(HankelTransformWeights,'assemble_'+self.mode)(weights,self.bandwidth,self.r_max,np.pi,dimensions=self.dimensions)
         self.grids = {'real':self.assembled_weights.pop('real_points'),'reciprocal':self.assembled_weights.pop('reciprocal_points')}
         if self.r_support<self.r_max:
             max_id = np.argmin(self.grids['real']<self.r_support)
@@ -323,7 +383,7 @@ class HankelTransform:
             self.assembled_weights['forward'] = fw
             self.assembled_weights['inverse'] = iw
 
-        if 'pinv' in other:
+        if 'pinv' in struct.other:
             #fw = self.assembled_weights['forward']            
             #self.assembled_weights['inverse'] = np.moveaxis(np.array([np.linalg.pinv(fw[...,i]) for i in range(fw.shape[-1])]),0,-1)
             iw = self.assembled_weights['inverse']
@@ -333,17 +393,10 @@ class HankelTransform:
         self._forward_coeff,self._inverse_coeff = self._generate_coeff_arrays()
         self.forward_cmplx,self.inverse_cmplx = self._generate_ht()
 
-    def from_weight_dict(self,weights_dict,r_max=1,use_gpu=True,r_max_support=None):
-        w = weights_dict
-        weights = w['weights']
-        n_points = w['radial_points']
-        bandwidth = w['bandwidth']
-        dimensions = w['dimensions']
-        mode = w['mode']
-        reciprocity_coefficient = w['reciprocity_coefficient']
-        self.__init__(n_points=n_points,angular_bandwidth=bandwidth,r_max=r_max,mode = mode,dimensions=dimensions,weights=weights,reciprocity_coefficient=reciprocity_coefficient,use_gpu=use_gpu,r_max_support = r_max_support)
-        return self
-    
+    @classmethod
+    def from_kwargs(cls,**kwargs):
+        struct = HankelTransformStruct(**kwargs)
+        return cls(struct)
     def _generate_coeff_arrays(self):
         if self.dimensions==2:
             coeffs = self._generate_polar_coeff_arrays()
@@ -356,10 +409,8 @@ class HankelTransform:
         coeff_shape_i = (self.Nr,self.bandwidth**2)
         forward_array = np.zeros(coeff_shape_f,dtype=complex)
         inverse_array = np.zeros(coeff_shape_i,dtype=complex)
-        ls = np.arange(self.bandwidth)
-        ms = np.concatenate((-ls,ls[1:]))
-        forward_coeff = shtns.ShCoeff(forward_array,ls,ms)
-        inverse_coeff = shtns.ShCoeff(inverse_array,ls,ms)
+        forward_coeff = shtns.ShCoeff.from_bandwith_complex(forward_array,self.bandwidth)
+        inverse_coeff = shtns.ShCoeff.from_bandwith_complex(inverse_array,self.bandwidth)
         return forward_coeff,inverse_coeff
     def _generate_polar_coeff_arrays(self):
         coeff_shape_f = (self.Nq,2*self.bandwidth)
@@ -698,40 +749,49 @@ class HankelTransform:
     def reziprocal_radial_points(self):
         return self.grid['reciprocal']
 
-def polar_spherical_dft_reciprocity_relation_radial_cutoffs(cutoff:float,n_points:int,reciprocity_coefficient=np.pi):
-    '''
-    Reciprocity relation between the real and reciprocal cutoff.
-    Reciprocity coefficient of Pi corresponds to the usual FFT relation for [2pi/Angstrom] units in reciprocal and [Angstrom] in reals space.
-    '''
-    other_cutoff = reciprocity_coefficient*n_points/cutoff    
-    return other_cutoff
 
 
+
+@dataclass
+class SphericalFourierTransformStruct(HankelTransformStruct):
+    ''' Data class that specifies input variables of SphericalFourierTransform class'''
+    n_azimutal_angles: int = 0 #0 leaves the decission to shtns (azimutal only used for dimension = 3)
+    n_polar_angles: int = 0 #0 leaves the decission to shtns
+
+        
 class SphericalFourierTransform:
-    def __init__(self,n_radial_points=64,angular_bandwidth=32,q_max=None,r_support=None,mode='midpoint',dimensions = 3,weights = None,reciprocity_coefficient = np.pi, use_gpu = True,n_processes_for_weight_generation = None, other={}):
-        self.ht = HankelTransform(n_points=n_radial_points,angular_bandwidth=angular_bandwidth,q_max=q_max,r_support=r_support,mode=mode,dimensions=dimensions,weights=weights,reciprocity_coefficient=reciprocity_coefficient,use_gpu=use_gpu,n_processes_for_weight_generation = n_processes_for_weight_generation,other=other)
-        self.harm = get_harmonic_transform(angular_bandwidth,dimensions=dimensions,options=other)
+    '''
+    Class that provides Fourier transforms of complex valued functions in polar and spherical coordinates.
+    '''
+    def __init__(self,struct : SphericalFourierTransformStruct = SphericalFourierTransformStruct(), weights = None):
+        self.struct = struct
+        if weights is not None:
+            self.ht = HankelTransform(struct,weights = weights)
+        else:
+            #xprint(f'struct = {struct.__dict__}')
+            self.ht = HankelTransform(struct)
+        self.harm = get_harmonic_transform(struct.angular_bandwidth,dimensions=struct.dimension,n_phi = struct.n_polar_angles,n_theta = struct.n_azimutal_angles,options=struct.other)
+        #xprint(f'angular shape = {self.harm.angular_shape}')
         self._init_end()
         self.reciprocal_grid_in_cartesian_coords = None
         self._shift = None
+        
     def _init_end(self):
         self.dimensions=self.ht.dimensions
         self.forward_cmplx,self.inverse_cmplx = self._generate_transforms()
+        
     @classmethod
-    def from_weight_dict(cls,weights_dict,q_max=None,r_support = None,use_gpu=True,other={}):
-        w = weights_dict
-        weights = w['weights']
-        n_points = w['n_points']
-        bandwidth = w['bandwidth']
-        reciprocity_coefficient = w['reciprocity_coefficient']
-        instance = cls(n_radial_points=n_points,angular_bandwidth=bandwidth,q_max=q_max,r_support = r_support,mode = w['mode'],dimensions=w['dimensions'],weights=weights,reciprocity_coefficient=reciprocity_coefficient,use_gpu=use_gpu,other=other)
-        return instance
-
-    def from_transforms(self,hankel_transform,harmonic_transform):
+    def from_transforms(cls,hankel_transform,harmonic_transform):
         self.ht = hankel_transform
         self.harm = harmonic_transform
         self._init_end()
-        return self    
+        return self
+    @classmethod
+    def from_kwargs(cls,**kwargs):
+        struct = SphericalFourierTransformStruct(**kwargs)
+        return cls(struct)
+
+    
     def _generate_transforms(self):
         harm_forward_cmplx = self.harm.forward_cmplx
         harm_inverse_cmplx = self.harm.inverse_cmplx
@@ -749,7 +809,7 @@ class SphericalFourierTransform:
         return forward_cmplx,inverse_cmplx
     def empty_density(self):
         angular_shape = self.harm.angular_shape
-        radial_shape = (self.ht.n_points,)
+        radial_shape = (self.ht.Nr,)
         return np.zeros(radial_shape+angular_shape,dtype=complex)
     @property
     def real_grid(self):
@@ -784,15 +844,13 @@ class SphericalFourierTransform:
             self.reciprocal_grid_in_cartesian_coords = spherical_to_cartesian(self.reciprocal_grid)
         cart_grid = self.reciprocal_grid_in_cartesian_coords
         def shift(reciprocal_density,vector,opposite_direction=False):
-            if opposite_direction:
-                prefactor = -1
-            else:
-                prefactor = 1
+            prefactor = (-1)**opposite_direction
             cart_vect = spherical_to_cartesian(vector)
             phases = np.exp(-1.j*prefactor*(cart_grid*cart_vect).sum(axis=-1))
             reciprocal_density*=phases
             return reciprocal_density
         return shift
+    
 class ZernikeTransform:
     '''class implementing Zernike Series expansion.'''
     def __init__(self,bandwidth=32,order=0,n_points=128,max_r=1,dimension=3,grid='uniform',bw_to_sampling_factor=4):
@@ -890,6 +948,7 @@ class ZernikeTransform:
     def inverse(self,fs):
         return np.sum(self.izernike_values*self.C[:,None]*fs[:,None],axis=0)
 
+    
 #######################
 ## Experimental Area ##
 ## 

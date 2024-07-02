@@ -584,10 +584,10 @@ class InvariantExtractor:
             sort_mode = 1
         else:
             sort_mode = 0
-        rescale = pmopt.method=='rescale_sign_loss'
+        rescale_mode = pmopt.method
         extend_above_q_limit = pmopt.extend_above_max_bl_q_limit
         
-        Vs,new_q_id_limits = Deg2Invar.regularize(self.b_coeff['I1I1'],dim = self.dimensions,q_id_limits=self.b_coeff_q_id_limits['I1I1'],sort_mode = sort_mode,rescale=rescale,extend_above_q_limit=extend_above_q_limit)
+        Vs,new_q_id_limits = Deg2Invar.regularize(self.b_coeff['I1I1'],dim = self.dimensions,q_id_limits=self.b_coeff_q_id_limits['I1I1'],sort_mode = sort_mode,rescale_mode=rescale_mode,extend_above_q_limit=extend_above_q_limit)
         self.b_coeff_q_id_limits['I1I1'][:,0,:]=new_q_id_limits
         self.b_coeff_q_id_limits['I1I1'][:,1,:]=new_q_id_limits
         
@@ -606,7 +606,7 @@ class InvariantExtractor:
             
         if 'I2I2' in self.b_coeff:
             log.info('Processing I2I2 ...')
-            Vs,new_q_id_limits = Deg2Invar.regularize(self.b_coeff['I2I2'],dim = self.dimensions,q_id_limits=self.b_coeff_q_id_limits['I2I2'],sort_mode = sort_mode,rescale=rescale,extend_above_q_limit=extend_above_q_limit)
+            Vs,new_q_id_limits = Deg2Invar.regularize(self.b_coeff['I2I2'],dim = self.dimensions,q_id_limits=self.b_coeff_q_id_limits['I2I2'],sort_mode = sort_mode,rescale_mode=rescale_mode,extend_above_q_limit=extend_above_q_limit)
             self.b_coeff_q_id_limits['I2I2'][:,0,:]=new_q_id_limits
             self.b_coeff_q_id_limits['I2I2'][:,1,:]=new_q_id_limits
             eig_I2I2 = [sp.linalg.eigh(V@V.conj().T,driver='ev')[1][::-1] for V in Vs]

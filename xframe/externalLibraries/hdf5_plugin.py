@@ -80,6 +80,9 @@ class HDF5_DB(HDF5Interface):
                     HDF5_DB._save_dict(h5_file,path,key,item)
                 elif type(item).__name__ in custom_save_routines:
                     custom_save_routines[type(item).__name__](h5_file,path,key,item)
+                elif item is None:
+                    h5_file[path].create_dataset(key,data='None'.encode('utf-8'))
+                    h5_file[path+'/'+key].attrs['type']='none'
                 else:
                     raise ValueError('Cannot save {} type for key {}'.format(type(item),key))
             except Exception as e:
@@ -95,6 +98,8 @@ class HDF5_DB(HDF5Interface):
             if isinstance(item, h5._hl.dataset.Dataset):
                 if item_type == 'str':
                     ans[key] = item[()].decode('utf-8')
+                elif item_type == 'none':
+                    ans[key] = None
                 elif item_type in custom_load_routines:
                     ans[key] = custom_load_routines[item_type](item)
                 else:                   

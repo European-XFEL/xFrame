@@ -615,7 +615,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         return data
 
     def load_invariants(self,name,**kwargs):
-        print(self.get_path("invariants",path_modifiers=kwargs['path_modifiers']))
+        #print(self.get_path("invariants",path_modifiers=kwargs['path_modifiers']))
         data = self.load_direct(name,**kwargs)
         if isinstance(data['data_projection_matrices'],np.ndarray):
             matrices = data['data_projection_matrices']

@@ -10,7 +10,15 @@ from pysofft.make_wiegner import genWigAll,genWigAllTrans,get_euler_angles,wig_l
 from pysofft.wignerTransform import wigNaiveSynthesis_fftw
 from pysofft.wignerWeights import makeweights2
 from pysofft.soft import Inverse_SO3_Naive_fft_pc,Forward_SO3_Naive_fft_pc,coefLoc_so3,sampLoc_so3,totalCoeffs_so3
-from pysofft.soft import sampLoc_so3, calc_mean_C_array,integrate_over_so3,integrate_over_so3_normalized,zeros_order_forward_so3,get_so3_probabily_weights,wigner_normalization_factors,wigner_normalization_factor
+from pysofft.soft import (sampLoc_so3,
+                          calc_mean_C_array,
+                          calc_int_C_array,
+                          integrate_over_so3,
+                          integrate_over_so3_normalized,
+                          zeros_order_forward_so3,
+                          get_so3_probabily_weights,
+                          wigner_normalization_factors,
+                          wigner_normalization_factor)
 from pysofft.rotate import rotate_coeff_multi,rotate_coeff
 from xframe.library.gridLibrary import GridFactory
 from pysofft import soft as _soft
@@ -207,8 +215,7 @@ class Soft(SoftInterface):
     # euler_angles is an array of length 3 containing the euler angles (alpha,beta,gamma) in ZYZ format
     def rotate_coeff(self,coeff,split_ids,euler_angles):
         #log.info('coeff.shape before rotation = {}'.format(coeff[0].shape))
-        rotated_coeff = rotate_coeff_multi(self.bw, coeff,split_ids, euler_angles)
-        return rotated_coeff
+        return rotate_coeff_multi(self.bw, coeff ,split_ids, euler_angles)
 
     def rotate_coeff_single(self,coeff,split_ids,euler_angles):
         log.info('coeff.shape before rotation = {}'.format(coeff.shape))
@@ -256,20 +263,11 @@ class Soft(SoftInterface):
         r_split_upper=r_split_ids[1]
         mean_C = calc_mean_C_array(self.bw,f_coeff,g_coeff,r_split_lower,r_split_upper,lm_split_ids,self._wigners_transposed,True)
         return mean_C
-    def calc_mean_C_weighted(self,f_coeff,g_coeff,r_split_ids,ml_split_ids):
-        '''
-        Same as calc_mean_C but multiplies each correlation array with its maximum before averaging to emphasize shells with good alignment.
-        '''
+    def calc_int_C(self,f_coeff,g_coeff,r_split_ids,lm_split_ids,radial_sampling_points):
         r_split_lower=r_split_ids[0]
         r_split_upper=r_split_ids[1]
-        try:
-            from pysofft.soft import calc_weighted_mean_C_array as method
-        except ImportError:
-            log.warning('Installed pysofft version does not support weighted mean correlation method, defaulting to unweighted routine.')
-            method=calc_mean_C_array
-        mean_C = method(self.bw,f_coeff,g_coeff,r_split_lower,r_split_upper,ml_split_ids,self._wigners_transposed,True)
+        mean_C = calc_int_C_array(self.bw,f_coeff,g_coeff,r_split_lower,r_split_upper,lm_split_ids,self._wigners_transposed,True,radial_sampling_points)
         return mean_C
-
     
     #testing 
     def combine_coeffs(self,f_coeff,g_coeff,split_ids):

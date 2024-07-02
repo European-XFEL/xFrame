@@ -44,6 +44,8 @@ class ShCoeff(np.ndarray):
         return coeff
     def copy(self):
         return ShCoeff(np.array(self),self.ls,self.ms)
+    def conj(self,*args,**kwargs):
+        return ShCoeff(self.conj(*args,**kwargs),self.ls,self.ms)
         
 class ShCoeffView:
     def __init__(self,coeff:ShCoeff,ls,ms,mode='complex'):

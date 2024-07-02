@@ -82,6 +82,8 @@ class SingleProcessCommunictionAnalysis(ComInterfaceAnalysis):
         return handle.run
     def restart_control_worker(self):
         self.control_worker.restart_working()
+    def are_control_workers_running(self):
+        return self.control_worker.are_workers_running()
 
 
 class MPICommunictionAnalysis(ComInterfaceAnalysis):

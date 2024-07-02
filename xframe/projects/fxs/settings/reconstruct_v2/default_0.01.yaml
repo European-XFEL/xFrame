@@ -380,7 +380,7 @@ IO:
           _value: true
     ft_weights:
       name:
-        _value: 'weights{postfix}_{type}.h5'
+        _value: 'weights_{name}.h5'
       folder:
         _value: 'ft_weights'
     reconstructions:
