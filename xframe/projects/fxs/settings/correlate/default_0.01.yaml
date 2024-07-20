@@ -1,4 +1,5 @@
-structure_name: 'default'
+structure_name:
+  _value: 'default'
 image_dimensions:
   _value: [512,512]
 

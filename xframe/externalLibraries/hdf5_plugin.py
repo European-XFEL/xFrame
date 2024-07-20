@@ -36,12 +36,18 @@ class HDF5_DB(HDF5Interface):
             raise FileNotFoundError('Path Error, Abort loading "{}".'.format(path))
             
     @staticmethod
-    def load(path,as_h5_object=False,write_mode='r',**kwargs):
+    def load(path,as_h5_object=False,h5_path=None,write_mode='r',**kwargs):
         try:
             if isinstance(path,str):
                 if not as_h5_object:
+                    if isinstance(h5_path,str):
+                        entry_point = h5_path
+                        if entry_point[-1] != '/':
+                            entry_point+='/'
+                    else:
+                        entry_point = '/'
                     with h5.File(path, 'r') as h5file:
-                        data=HDF5_DB.recursively_load_dict_from_group(h5file, '/')
+                        data=HDF5_DB.recursively_load_dict_from_group(h5file, entry_point)
                 else:
                     data = h5.File(path, write_mode)
             else:

@@ -13,6 +13,7 @@ from pysofft.soft import Inverse_SO3_Naive_fft_pc,Forward_SO3_Naive_fft_pc,coefL
 from pysofft.soft import (sampLoc_so3,
                           calc_mean_C_array,
                           calc_int_C_array,
+                          _calc_int_C_array,
                           integrate_over_so3,
                           integrate_over_so3_normalized,
                           zeros_order_forward_so3,
@@ -136,10 +137,13 @@ class WignerD:
 
         
 class Soft(SoftInterface):
-    def __init__(self,bw):
+    def __init__(self,bw,wigner_data=None):
         self.bw = bw
         self._soft = _soft
-        tmp = self.generate_data()
+        if wigner_data is None:
+            tmp = self.generate_data()
+        else:
+            tmp = wigner_data
         self.grid = self.make_SO3_grid()
         self.alphas = self.grid[:,0,0,0]
         self.betas = self.grid[0,:,0,1]

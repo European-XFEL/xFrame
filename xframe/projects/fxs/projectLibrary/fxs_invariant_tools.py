@@ -490,7 +490,8 @@ class CC:
             cc_out = cc
         else:
             cc_out = np.array(cc)
-            cc_out -= average_intensity[:,None,None]*average_intensity[None,:,None]
+            cc_out -= np.mean(cc_out,axis = -1)[...,None] #average_intensity[:,None,None]*average_intensity[None,:,None]
+            #cc_out -= average_intensity[:,None,None]*average_intensity[None,:,None]
         return cc_out
 
     @staticmethod
@@ -1842,13 +1843,13 @@ def harmonic_coeff_to_deg2_invariants_3d(Ilm,Ilm2 = None):
             Bl = np.array(tuple(Il @ Il.T.conj() for Il in Ilm))
         else:
             ls = Ilm.ls
-            Bl = np.array(tuple(Ilm.lm[l] @ Ilm.lm[l].T.conj() for l in ls))
+            Bl = np.array(tuple(Ilm.lm[l] @ np.conj(Ilm.lm[l].T) for l in ls))
     else:
         if isinstance(Ilm,(tuple,list)):
             Bl = np.array(tuple(Il1 @ (Il2.T.conj()) for Il1,Il2 in zip(Ilm,Ilm2)))
         else:
             ls = Ilm.ls
-            Bl = np.array(tuple(Ilm.lm[l] @ Ilm2.lm[l].T.conj() for l in ls))            
+            Bl = np.array(tuple(Ilm.lm[l] @ np.conj(Ilm2.lm[l].T) for l in ls))            
     return Bl
 
 

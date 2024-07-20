@@ -1996,14 +1996,14 @@ def generate_calc_center(real_grid):
         if density_integral==0:
             density_integral=1
         center = si.integrate(cart_grid[:]*density[...,None].real)/density_integral
-        center=cartesian_to_spherical(center)
+        center = cartesian_to_spherical(center)
         return center        
     return calc_center
 
 
 
 class Alignment():
-    def __init__(self,fourier_transform:SphericalFourierTransform,consider_point_inverse=False):
+    def __init__(self,fourier_transform:SphericalFourierTransform,consider_point_inverse=False,wigner_data = None):
         struct = fourier_transform.struct
         self.bandwidth = struct.angular_bandwidth
         self.dimension = struct.dimension
@@ -2016,7 +2016,7 @@ class Alignment():
         self.harmonic_transform = self.fourier_transform.harm
         self.radial_sampling_points = self.fourier_transform.real_grid[:,0,0,0]
         self.max_r = struct.max_r
-        self._radial_limit_ids = [0,len(self.radial_sampling_points)]
+        self._radial_limit_ids = [0,len(self.radial_sampling_points)-1]
         self._radial_limits = [0.0,self.max_r]
         self._consider_point_inverse = consider_point_inverse
         
@@ -2026,8 +2026,8 @@ class Alignment():
         self.shift_to_center = self._assemble_shift_to_center()
         self.center_ft_pair = self._assemble_center_fourier_pair()
         if self.dimension ==3:
-            self.soft = get_soft_obj(self.bandwidth)
-            self.soft_grid = self.soft.make_SO3_grid()
+            self.soft = Soft(self.bandwidth,wigner_data=wigner_data)
+            self.soft_grid = self.soft.grid
             self.rotate_by = self._assemble_rotate_by()
             self.find_rotation = self._assemble_find_rotation()
             self.find_rotation_to_reference = self._assemble_find_rotation_to_reference()
@@ -2070,6 +2070,9 @@ class Alignment():
         return self._radial_limit_ids
     @radial_limit_ids.setter
     def radial_limit_ids(limit_ids):
+        n_radial_points = len(self.radial_sampling_points)  
+        assert limit_ids[0]< max_index,'radial_limit_ids are out of bounds, there are {n_radial_points} radial points but given min limit id is {limit_ids[0]}.'
+        assert limit_ids[1]< max_index,'radial_limit_ids are out of bounds, there are {n_radial_points} radial points but given max limit id is {limit_ids[1]}.'
         self._radial_limit_ids[0]=limit_ids[0]
         self._radial_limit_ids[1]=limit_ids[1]
         rs = self.radial_sampling_points
@@ -2206,12 +2209,12 @@ class Alignment():
         rotate_coeff = self.soft.rotate_coeff
         shift = self.fourier_transform.shift
         ht,iht = self.harmonic_transform.forward_cmplx,self.harmonic_transform.inverse_cmplx
-        #ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
+        ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
         hankel,ihankel = self.hankel_transform.forward_cmplx,self.hankel_transform.inverse_cmplx
         lm_split_ids = self.harmonic_transform.l_split_ids_complex
 
         if self.consider_point_inverse:
-            def align(density:np.array,ft_density:np.array,ref_density:np.array,ref_ft_density:np.ndarray):
+            def align(density:np.array,ft_density:np.array,ref_density:np.array,ref_ft_density:np.ndarray,weights: np.ndarray|tuple|list = (0.5,0.5)):
                 # centering
                 c_density,c_ft_density = center_ft_pair(density,ft_density)
                 c_ref_density,c_ref_ft_density = center_ft_pair(ref_density,ref_ft_density)
@@ -2224,9 +2227,9 @@ class Alignment():
                 nc_ref_ft_density = c_ref_ft_density/max_ref_density
 
                 # To threate pinv similar as normal density
-                temp = hankel(ht(nc_density))
-                coeff = ihankel(temp).copy()
-                coeff_pinv = ihankel(temp.conj())
+                temp = ft(nc_density)
+                coeff = ht(ift(temp))
+                coeff_pinv = ht(ift(temp.conj()))
                 
                 ref_coeff = ht(nc_ref_density)
                 ft_coeff = ht(nc_ft_density)
@@ -2234,7 +2237,7 @@ class Alignment():
                 euler_angles,correlation_value = find_rotation(coeff,ref_coeff)
                 euler_angles2,correlation_value2 = find_rotation(coeff_pinv,ref_coeff)
                 if correlation_value2>correlation_value:
-                    print((correlation_value2-correlation_value)/abs(correlation_value))
+                    #print((correlation_value2-correlation_value)/abs(correlation_value))
                     euler_angles = euler_angles2
                     correlation_value = correlation_value2
                     coeff = coeff_pinv
@@ -2242,11 +2245,11 @@ class Alignment():
                 aligned_coeff = rotate_coeff(coeff,lm_split_ids,euler_angles)
                 aligned_ft_coeff = rotate_coeff(ft_coeff,lm_split_ids,euler_angles)
             
-                average = (iht(aligned_coeff)+nc_ref_density)/2
-                ft_average = (iht(aligned_ft_coeff)+nc_ref_ft_density)/2
+                average = iht(aligned_coeff)*weights[0] + nc_ref_density*weights[1]
+                ft_average = iht(aligned_ft_coeff)*weights[0] + nc_ref_ft_density*weights[1]
                 return (average, ft_average),correlation_value
         else:
-            def align(density:np.array,ft_density:np.array,ref_density:np.array,ref_ft_density:np.ndarray):
+            def align(density:np.array,ft_density:np.array,ref_density:np.array,ref_ft_density:np.ndarray,weights: np.ndarray|tuple|list = (0.5,0.5)):
                 # centering
                 c_density,c_ft_density = center_ft_pair(density,ft_density)
                 c_ref_density,c_ref_ft_density = center_ft_pair(ref_density,ref_ft_density)
@@ -2266,8 +2269,8 @@ class Alignment():
                 aligned_coeff = rotate_coeff(coeff,lm_split_ids,euler_angles)
                 aligned_ft_coeff = rotate_coeff(ft_coeff,lm_split_ids,euler_angles)
             
-                average = (iht(aligned_coeff)+nc_ref_density)/2
-                ft_average = (iht(aligned_ft_coeff)+nc_ref_ft_density)/2
+                average = iht(aligned_coeff)*weights[0] + nc_ref_density*weights[1]
+                ft_average = iht(aligned_ft_coeff)*weights[0] + nc_ref_ft_density*weights[1]
                 return (average, ft_average),correlation_value
         return align
     
@@ -2278,7 +2281,7 @@ class Alignment():
         shift = self.fourier_transform.shift
         ht,iht = self.harmonic_transform.forward_cmplx,self.harmonic_transform.inverse_cmplx
         hankel,ihankel = self.hankel_transform.forward_cmplx,self.hankel_transform.inverse_cmplx
-        #ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
+        ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
         lm_split_ids = self.harmonic_transform.l_split_ids_complex
         consider_point_inverse = self.consider_point_inverse
 
@@ -2292,15 +2295,15 @@ class Alignment():
                 nc_ft_density = c_ft_density/max_density
 
 
-                temp = hankel(ht(nc_density))
-                coeff = ihankel(temp).copy()
-                coeff_pinv = ihankel(temp.conj())
+                temp = ft(nc_density)
+                coeff = ht(ift(temp))
+                coeff_pinv = ht(ift(temp.conj()))
                 ft_coeff = ht(nc_ft_density)
                 
                 euler_angles,correlation_value = find_rotation(coeff)
                 euler_angles2,correlation_value2 = find_rotation(coeff_pinv)
                 if correlation_value2>correlation_value:
-                    print((correlation_value2-correlation_value)/abs(correlation_value))
+                    #print((correlation_value2-correlation_value)/abs(correlation_value))
                     euler_angles = euler_angles2
                     coeff = coeff_pinv
                     ft_coeff = ft_coeff.conj()
@@ -2346,7 +2349,9 @@ def ruiz_equalization_symmetric(matrix: np.ndarray, max_iterations: int = 100, c
     scaling_final = scaling = 1
     converged = False
     for i in range(max_iterations):
-        scaling = 1/np.sqrt(np.max(np.abs(m_scaled),axis = -2))
+        columnwise_max = np.max(np.abs(m_scaled),axis = -2)
+        columnwise_max[columnwise_max==0]=1
+        scaling = 1/columnwise_max
         m_scaled = scaling[...,:,None] * m_scaled * scaling[...,None,:]
         scaling_final*=scaling
         epsilon = np.abs(1-np.max(scaling,axis = -1)).max()
@@ -2355,6 +2360,6 @@ def ruiz_equalization_symmetric(matrix: np.ndarray, max_iterations: int = 100, c
             converged = True
             break
     if not converged:
-        log.warning('Ruiz equalization did not converge to epsilon<{convergence_epsilon} within {max_iterations} steps, final epsilon is {epsilon}.')
+        log.warning(f'Ruiz equalization did not converge to epsilon<{convergence_epsilon} within {max_iterations} steps, final epsilon is {epsilon}.')
     return (m_scaled,scaling_final) 
 

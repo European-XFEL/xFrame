@@ -118,7 +118,7 @@ class HankelWeightStruct:
     @property
     def weight_name(self):
         s = self
-        return f'Dim{s.dimension}N{s.n_radial_points}Bandwith{s.angular_bandwidth}_{s.hankel_type}_rc{s.reciprocity_coefficient}'
+        return f'{s.dimension}D_NrNq{s.n_radial_points}_bandwith{s.angular_bandwidth}_{s.hankel_type}_rc{s.reciprocity_coefficient}'
         
 class HankelTransformWeights:
     ht_modes = HankelWeightStruct.supported_hankel_types
