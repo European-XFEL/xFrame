@@ -209,7 +209,10 @@ class Soft(SoftInterface):
     def wigners(self):
         if not isinstance(self._wigners_big,WignerD):
             self._wigners_big = WignerD(self._soft,self.wigners_small,self.grid,self.bw)
-        return self._wigners_big    
+        return self._wigners_big
+    @property
+    def wigner_data(self):
+        return (self._wigners,self._wigners_transposed,self.legendre_weights)
 
     #################################################
     # computes the rotated harmonic coefficients

@@ -1,0 +1,104 @@
+structure_name: 'tutorial'
+
+reconstruction_files:
+  - 3d_tutorial/{today}/run_0/data.h5
+  #- 3d_tutorial/{today}/run_1/data.h5
+  #- 3d_tutorial/4_2_2042/run_0/data.h5
+
+GPU:
+  use: True
+  n_gpu_workers:
+    command: 'max(Multiprocessing.free_cpus//10,1)'
+multi_processing:
+  use: True
+  n_processes: auto
+  n_weight_generation: auto
+
+selection:
+  use_selection_file: False
+  error_limits: (None,None)
+  
+  
+alignment:
+  align_by_masks: False
+  normalization:
+    use: True
+    method:
+      command: 'np.max' # 'mean'
+  positional:
+    apply: True
+  rotational:
+    apply: True
+    r_limits: [200,400] # in angstroem
+    consider_point_inverse: True
+  
+averaging:
+  n_recostrutions: all
+  used_reconstruction: "last" #'best'
+  averaging_mode: 'pairwise' # single_reference
+  n_random_orders: 10  
+  single_reference:
+    reference_selection_mode: 'least_error' #'custom' , 'first_id' 
+    custom: (0,10) # (file id in reconstuction_list, reconstruction id)
+  
+    
+
+resolution_metrics:
+  PRTF: True
+  relative_std: True
+    
+
+
+
+IO:
+  folders:
+    home:
+        command: 'xframe_opt.IO.folders.home'
+    data:
+      home: 'data/fxs/'
+    reconstructions:
+      data: 'reconstructions/'
+    averaged_results:
+      data: 'averages/{dimensions}d_{structure_name}/{time}/run_{run}/'
+    vtk_results:
+      averaged_results: 'vtk/'
+    ft_weights:
+      data: 'ft_weights/'
+  files:
+    ft_weights:
+      name: 'weights{postfix}_{type}.h5'
+      folder: 'ft_weights'
+    reconstructions:
+      name: '{path}'
+      folder: 'reconstructions'
+      options:
+        generate_vtk_files: True
+    selection:
+      name: 'selection.h5'
+      folder: 'reconstructions'
+    reconstruction_settings:
+      name: '{path}/settings.yaml'
+      folder: 'reconstructions'
+      
+    average_results:
+      name: 'average_results.h5'
+      folder: 'averaged_results'
+      options:
+        generate_average_vtk: True
+        generate_aligned_vtk: False
+        generate_input_vtk: False
+        generate_rotation_metric_vtk: False
+        save_settings: True
+        plot_resolution_metrics: True
+        plot_average_bl: False
+        plot_average_cn: False
+    real_vtk:
+      name: 'real_{reconstruction}.vts'
+      folder: 'vtk_results'
+    rotation_metric_vtk:
+      name:  'rotation_metric_{reconstruction}_{iteration}.vtr'
+      folder: 'vtk_results'      
+    reciprocal_vtk:
+      name: 'reciprocal_{reconstruction}.vts'
+      folder: 'vtk_results'
+

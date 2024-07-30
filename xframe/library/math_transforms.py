@@ -843,10 +843,10 @@ class SphericalFourierTransform:
         if self.reciprocal_grid_in_cartesian_coords is None:
             self.reciprocal_grid_in_cartesian_coords = spherical_to_cartesian(self.reciprocal_grid)
         cart_grid = self.reciprocal_grid_in_cartesian_coords
-        def shift(reciprocal_density,vector,opposite_direction=False):
-            prefactor = (-1)**opposite_direction
+        def shift(reciprocal_density,vector,opposite_direction=False,power = 1):
+            prefactor = -1.j*(-1)**opposite_direction*power
             cart_vect = spherical_to_cartesian(vector)
-            phases = np.exp(-1.j*prefactor*(cart_grid*cart_vect).sum(axis=-1))
+            phases = np.exp(prefactor*(cart_grid*cart_vect).sum(axis=-1))
             reciprocal_density*=phases
             return reciprocal_density
         return shift

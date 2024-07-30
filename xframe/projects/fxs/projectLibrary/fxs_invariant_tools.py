@@ -1789,8 +1789,9 @@ def deg2_invariant_apply_precision_filter(bl,precision):
     return bl
 
 
-def intensity_to_deg2_invariant(intensity,intensity2=False):   
-    cht = get_harmonic_transform_from_array(intensity)
+def intensity_to_deg2_invariant(intensity,intensity2=False,cht=None):
+    if cht is None:
+        cht = get_harmonic_transform_from_array(intensity)
     dimensions = intensity.ndim
     harm_coeff = cht.forward_cmplx(intensity.astype(complex))
     #print(f'cht datatype = {type(cht.data_type)}')

@@ -4,7 +4,8 @@ structure_name: '3d_tutorial'
 
 grid:
   max_q: 0.322416
-  n_radial_points: 512
+  n_radial_points:
+    command: '(1024,256)'
   max_order: 128
 
 shapes:

@@ -21,6 +21,7 @@ from scipy.stats import rv_discrete
 from scipy.linalg import eigh
 import sys
 import abc
+import typing
 log=logging.getLogger('root')
 
 from xframe.library.interfaces import GSLDependency
@@ -31,7 +32,10 @@ from xframe.library.interfaces import PeakDetectorDependency
 from scipy.stats import ttest_1samp
 from scipy.optimize import root_scalar as sp_root
 
-from xframe.library.math_transforms import SphericalFourierTransform, SphericalFourierTransformStruct
+from xframe.library.math_transforms import SphericalFourierTransform, SphericalFourierTransformStruct, HankelTransformWeights
+from xframe.library.pythonLibrary import DictNamespace
+from xframe import Multiprocessing
+
 
 
 ######################
@@ -823,8 +827,8 @@ def eval_ND_zernike_polynomials_old(m_array,n_max,points,dimension):
     return values
 
 def eval_ND_zernike_polynomials(l_array,s_max,points,dimension):
-    '''
-    Computes the radial part $R^l_s(p)$ of the D-dimensional Zernike polynomials. For each $l$ in l\_ array all coefficients $R^l_s(p)$ with $s_{\max} \geq s\geq l$ and even $s-l$ are computed.    
+    r'''
+    Computes the radial part $R^l_s(p)$ of the D-dimensional Zernike polynomials. For each $l$ in array all coefficients $R^l_s(p)$ with $s_{\max} \geq s\geq l$ and even $s-l$ are computed.    
     '''
     D=dimension
     def evaluate(l,s):
@@ -1012,7 +1016,7 @@ def approximate_tikhonov_parameters(A,b,std_noise=False):
     return np.asarray(lambd)
     
 def tikhonov_solver_svd(A,b,lambd):
-    '''
+    r'''
     Finds x that minimizes $|| A x -B ||^2 - ||\lambda Id x ||^2 $
     '''
     n_orders = A.shape[-1]
@@ -1044,7 +1048,7 @@ def tikhonov_calc_offset(xs,A_offsets,b_offsets):
     return b_offsets - np.sum(A_offsets*xs,axis = -1)    
 
 def tikhonov_regularization(As,bs,lambd,allow_offset = False):
-    '''  
+    r'''  
     For each pair of elements (A,b) in As,bs this method finds x that minimizes: 
     $||Ax-b||+||\lambda*x||$    
     if allow_offset is true it minimizes:
@@ -1222,7 +1226,7 @@ def _pi_in_q__to__reciprocity_coefficient(pi_in_q):
 
     
 def polar_spherical_dft_reciprocity_relation_radial_steps(step:float,n_points:int,pi_in_q = True):
-    '''
+    r'''
     Reciprocity relation between the real and reciprocal step sizes.
     If pi_in_q is true it is assumed that the reciprocal unit is 2Pi/length otherwise it is just 1/length.
     $\delta R*\delta Q = 1/(2*N)$    
@@ -1234,7 +1238,7 @@ def polar_spherical_dft_reciprocity_relation_radial_steps(step:float,n_points:in
     return other_step
     
 def polar_spherical_dft_reciprocity_relation_radial_step_cutoff(step:float,n_points:int,pi_in_q = True):
-    '''
+    r'''
     Reciprocity relation between the real and reciprocal step sizes.
     If pi_in_q is true it is assumed that the reciprocal unit is 2Pi/length otherwise it is just 1/length.
     $\delta R*\delta Q = 1/(2*N)$    
@@ -1501,7 +1505,7 @@ def find_connected_component(image,start,periodic_axes = tuple(),return_mask = F
 #################################
 #### solve procrustes problem ###
 def solve_procrustes_problem(V1,V2):
-    '''
+    r'''
     Finds the unitary matrix U that minimizes ||V1-V2U||.
     by computing the svd of V2^\dagger V1
     '''
@@ -1588,7 +1592,7 @@ class CharView:
         self.array[m] = value
 
 class CharFuncSO3(np.ndarray):
-    """
+    r"""
     A class to represent Charactersitic functions $M_{lnk}$ of distributions $\rho(\alpha,\beta,\gamma)$ on SO(3).
     $$M_{lnk} = \int_{SO(3)} \rho(\alpha,\beta,\gamma) D^l_{nk}(\alpha,\beta,\gamma) sin(\beta)\,d\alpha d\beta d\gamma$$
     where $D^l_{nk}(\alpha,\beta,\gamma)$ are Wigner-D matrices.
@@ -1767,7 +1771,7 @@ class CharFuncFactory:
     #General
     @staticmethod
     def uniform(bw = 16):
-        '''
+        r'''
         Creates uniform characteristif function
         $$ M_{lnk} = \delta_{l,0}\delta_{n,0}\delta_{k,0} $$
         '''
@@ -1778,7 +1782,7 @@ class CharFuncFactory:
 
     @staticmethod
     def delta(bw = 16,angle_ids=None):
-        '''
+        r'''
         Creates characteristic function for the deltadistribution 
         $$ M_{lnk} = D^l_{nk}(\alpha,\beta,\gamma) $$        
         '''        
@@ -1980,6 +1984,62 @@ def denoise_tv_chambolle_masked(img,mask,lamb=0.1,tau=0.25,n_iterations=70,mask_
         
 
 
+    ##########################
+## Cumulative Variance  ##
+
+class CumulativeVariance:
+    '''
+    Welford's online algorithm:
+    Algorithm taken from wikipedia: https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
+    '''
+    def __init__(self,mean=0,count=0,m2=0):
+        self.count = count
+        self.mean = mean
+        self.m2 = m2
+        
+    def update(self,val:np.ndarray|int|float|complex):
+        # updates the running mean and variance by a single new value
+        self.count += 1
+        delta = val - self.mean
+        self.mean += delta / self.count
+        delta2 = val - self.mean
+        self.m2 += delta * delta2
+        return self
+        
+    def merge(self,var):
+        # merges the values of another CummulativeVariance instance to create the combined average and variance.
+        count_a = self.count
+        count_b = var.count
+        self.count += count_b
+        delta = var.mean-self.mean
+        temp = delta*count_b/self.count
+        self.mean = self.mean + temp
+        self.m2 = self.m2 + var.m2 + delta*count_a*temp
+        return self
+        
+    def merge_from_data(self,mean,count,m2):
+        count_a = self.count
+        self.count += count
+        delta = mean-self.mean
+        temp = delta*count/self.count
+        self.mean = self.mean + temp
+        self.m2 = self.m2 + m2 + delta*count_a*temp
+        return self
+    
+    @property
+    def variance(self):
+        count = self.count
+        if count > 1:
+            return self.m2/count
+        elif count == 1:
+            return 0
+        else:
+            raise AssertionError('Variance of empty dataset is not defined.')
+    @property
+    def data(self):
+        return (self.mean,self.count,self.m2)
+
+
 #################
 ####alignment####
 def generate_calc_center(real_grid):
@@ -2000,16 +2060,32 @@ def generate_calc_center(real_grid):
         return center        
     return calc_center
 
-
-
 class Alignment():
-    def __init__(self,fourier_transform:SphericalFourierTransform,consider_point_inverse=False,wigner_data = None):
+    ''' dataset which is input to align_dataset_to_reference,align_dataset_pair, normalize_dataset, preprocess_dataset has the structure
+        [density,ft_density,additional_real_density1, additional_real_density2 , ....]
+        all of these arrays (except ft_density) have to have the same shape, compatible with the real
+        space grid of the fourier transform and ft_density has to be compatible with the reciprocal space shape.
+    '''
+    def __init__(self,fourier_transform:SphericalFourierTransform,
+                 consider_point_inverse=False,
+                 wigner_data = None,
+                 normalize=True,
+                 center=True,
+                 normalization_method=np.max,
+                 dataset_length = 2):
         struct = fourier_transform.struct
         self.bandwidth = struct.angular_bandwidth
         self.dimension = struct.dimension
-
-        self._reference = [None,None]
-        self._reference_coeff = [None,None]
+        self.apply_normalization=normalize
+        self.apply_centering = center
+        
+        self.dataset_length = max(dataset_length,1)
+        temp_density = np.zeros(fourier_transform.real_grid.shape[:-1]).astype(complex)
+        temp_ft_density = np.zeros(fourier_transform.reciprocal_grid.shape[:-1]).astype(complex)
+        self._reference = [temp_density,temp_ft_density] + [temp_density.copy()]*(dataset_length-2)
+        self._reference_coeff = [None]*dataset_length
+        
+        self._alignment_defining_dataset_id = [0]
         
         self.fourier_transform = fourier_transform
         self.hankel_transform = fourier_transform.ht
@@ -2020,19 +2096,24 @@ class Alignment():
         self._radial_limits = [0.0,self.max_r]
         self._consider_point_inverse = consider_point_inverse
         
-        
         self.find_center = generate_calc_center(self.fourier_transform.real_grid)
         self.shift_by = fourier_transform.shift
         self.shift_to_center = self._assemble_shift_to_center()
-        self.center_ft_pair = self._assemble_center_fourier_pair()
+        self.center,self.center_dataset,self.center_variance_dataset = self._assemble_center()
+        self.normalization_method = normalization_method        
+        self.normalize,self.normalize_dataset,self.normalize_variance_dataset = self._assemble_normalize()
+        self.preprocess,self.preprocess_dataset,self.preprocess_variance_dataset = self._assemble_preprocess_dataset()
         if self.dimension ==3:
             self.soft = Soft(self.bandwidth,wigner_data=wigner_data)
             self.soft_grid = self.soft.grid
             self.rotate_by = self._assemble_rotate_by()
             self.find_rotation = self._assemble_find_rotation()
             self.find_rotation_to_reference = self._assemble_find_rotation_to_reference()
-            self.average_pair = self._assemble_average_pair()
-            self.align_to_reference = self._assemble_align_to_reference()
+            self.align_pair,self.align_dataset_pair,self.align_variance_dataset_pair = self._assemble_align_pair()
+            self.align_to_reference,self.align_dataset_to_reference = self._assemble_align_to_reference()
+            if dataset_length == 1:
+                self.align_dataset_pair = self.align_dataset
+                self.align_dataset_to_reference = self.align_to_reference
 
     @classmethod
     def from_struct(cls,init_data: SphericalFourierTransformStruct = SphericalFourierTransformStruct(), weights = None):
@@ -2041,7 +2122,14 @@ class Alignment():
     def from_kwargs(cls,**kwargs):
         struct = SphericalFourierTransformStruct(**kwargs)
         return cls.from_struct(struct)
-
+    
+    @property
+    def alignment_defining_dataset_id(self):
+        return self._alignment_defining_dataset_id
+    @alignment_defining_dataset_id.setter
+    def alignment_defining_dataset_id(self,_id:int):
+        self._alignment_defining_dataset_id[0]=int(_id)
+        
     @property
     def reference(self):
         return self._reference
@@ -2049,30 +2137,28 @@ class Alignment():
     def reference_coeff(self):
         return self._reference_coeff
     @reference.setter
-    def reference(self,density_pair: list|np.ndarray) -> None:
-        if isinstance(density_pair,np.ndarray):
-            density = density_pair
-            ft_density = self.fourier_transform.forward_cmplx(density.astype(complex))
+    def reference(self,dataset: list|np.ndarray) -> None:
+        if isinstance(dataset,np.ndarray):
+            density = self.preprocess(dataset)
+            self._reference[0]=density
         else:
-            density,ft_density = density_pair
-            
-        centered_reference = self.center_ft_pair(density,ft_density)
-        max_density = centered_reference[0].max()
+            new_dataset = self.preprocess_dataset(dataset)
+            for _id in range(self.dataset_length):
+                self._reference[_id] = new_dataset[_id]
+                
         ht = self.harmonic_transform.forward_cmplx
-        self._reference[0] = centered_reference[0]/max_density
-        self._reference[1] = centered_reference[1]/max_density
-        self.reference_coeff[0] = ht(self._reference[0])
-        self.reference_coeff[1] = ht(self._reference[1])
-
-
+        for _id,r in enumerate(self._reference):
+            self._reference_coeff[_id] = ht(r)
+        
+        
     @property
     def radial_limit_ids(self):
         return self._radial_limit_ids
     @radial_limit_ids.setter
     def radial_limit_ids(limit_ids):
         n_radial_points = len(self.radial_sampling_points)  
-        assert limit_ids[0]< max_index,'radial_limit_ids are out of bounds, there are {n_radial_points} radial points but given min limit id is {limit_ids[0]}.'
-        assert limit_ids[1]< max_index,'radial_limit_ids are out of bounds, there are {n_radial_points} radial points but given max limit id is {limit_ids[1]}.'
+        assert limit_ids[0]<max_index, 'radial_limit_ids are out of bounds, there are {n_radial_points} radial points but given min limit id is {limit_ids[0]}.'
+        assert limit_ids[1]<max_index, 'radial_limit_ids are out of bounds, there are {n_radial_points} radial points but given max limit id is {limit_ids[1]}.'
         self._radial_limit_ids[0]=limit_ids[0]
         self._radial_limit_ids[1]=limit_ids[1]
         rs = self.radial_sampling_points
@@ -2088,12 +2174,18 @@ class Alignment():
     @radial_limits.setter
     def radial_limits(self,limits):
         rs = self.radial_sampling_points
-        min_id = np.argmin(np.abs(rs - limits[0]))[0]
-        max_id = np.argmin(np.abs(rs - limits[1]))[0]
-        self.radial_limit_ids = [min_id,max_id]
-
-
-
+        changed = False
+        min_id,max_id = self._radial_limits
+        if isinstance(limits[0],(float,int)):
+            min_id = np.argmin(np.abs(rs - limits[0]))
+            changed = True
+        if isinstance(limits[1],(float,int)):
+            max_id = np.argmin(np.abs(rs - limits[1]))
+            changed = True
+        if changed:
+            self._radial_limit_ids[0] = min_id
+            self._radial_limit_ids[1] = max_id
+        
     @property
     def consider_point_inverse(self):
         return self._consider_point_inverse
@@ -2111,11 +2203,10 @@ class Alignment():
         calc_int_C = self.soft.calc_int_C
         lm_split_ids = self.harmonic_transform.l_split_ids_complex
         angle_grid = self.soft_grid
-
+        
         r_limit_ids = self.radial_limit_ids
         rs = self.radial_sampling_points
-
-        reference_coeff = self.reference_coeff
+        
         def find_rotation(coeff,ref_coeff,return_correlation:bool=False):            
             #ref_lm_coeff = np.concatenate(ref_lm_coeff,axis = 1).copy()
             #lm_coeff = np.concatenate(lm_coeff,axis = 1).copy()
@@ -2147,13 +2238,13 @@ class Alignment():
 
         r_limit_ids = self.radial_limit_ids
         rs = self.radial_sampling_points
-
+        alignment_dataset_id = self.alignment_defining_dataset_id
         reference_coeff = self.reference_coeff
         def find_rotation_to_reference(lm_coeff,return_correlation:bool=False):            
             #ref_lm_coeff = np.concatenate(ref_lm_coeff,axis = 1).copy()
             #lm_coeff = np.concatenate(lm_coeff,axis = 1).copy()
             #print('limits = {}'.format(r_limit_ids))
-            int_C = calc_int_C(lm_coeff,reference_coeff[0],r_limit_ids,lm_split_ids,rs).real
+            int_C = calc_int_C(lm_coeff,reference_coeff[alignment_dataset_id[0]],r_limit_ids,lm_split_ids,rs).real
             #self.results['rotation_metrics'].append(mean_C)
             #log.info('mean C shape = {},max = {}, min = {}'.format(mean_C.shape,np.max(mean_C),np.min(mean_C)))
             argmax = np.argmax(int_C)
@@ -2179,16 +2270,99 @@ class Alignment():
             centered_density = ift(shift(ft(density),center,opposite_direction=True))
             return centered_density#,centered_ft_density)
         return center
-    def _assemble_center_fourier_pair(self):
+
+    def _assemble_center(self):
         find_center = self.find_center
         shift = self.fourier_transform.shift
         ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
-        def center(density,ft_density):
+        centering_dataset_id = self.alignment_defining_dataset_id 
+
+        def center(density:np.ndarray):
             center = find_center(density)
-            centered_density = ift(shift(ft(density),center,opposite_direction=True))
-            centered_ft_density = shift(ft_density,center,opposite_direction=True)
-            return (centered_density, centered_ft_density)
-        return center
+            return ift(shift(ft(density),center,opposite_direction=True))
+        
+        def center_dataset(dataset:tuple):
+            center = find_center(dataset[centering_dataset_id[0]])
+            centered_density = ift(shift(ft(dataset[0]),center,opposite_direction=True))
+            centered_ft_density = shift(dataset[1],center,opposite_direction=True)
+            centered_dataset = (centered_density,centered_ft_density)+tuple(ift(shift(ft(d),center,opposite_direction=True)) for d in dataset[2:])
+            return centered_dataset
+        
+        def center_variance_dataset(dataset:tuple):
+            center = find_center(dataset[centering_dataset_id[0]].mean)
+            centered_mean = ift(shift(ft(dataset[0].mean),center,opposite_direction=True))
+            centered_m2 = ift(shift(ft(dataset[0].m2),center,opposite_direction=True)) 
+            centered_density_var = CumulativeVariance(centered_mean,count = dataset[0].count,m2 = centered_m2) 
+            centered_ft_mean = shift(dataset[1].mean,center,opposite_direction=True)
+            centered_ft_m2 = shift(dataset[1].m2,center,opposite_direction=True) 
+            centered_ft_density_var = CumulativeVariance(centered_ft_mean,count = dataset[1].count,m2 = centered_ft_m2)
+            centered_variance_dataset = (centered_density_var,centered_ft_density_var)+tuple( CumulativeVariance(mean = ift(shift(ft(d.mean),center,opposite_direction=True)),count = d.count,m2 =  ift(shift(ft(d.m2),center,opposite_direction=True)))  for d in dataset[2:])
+            return centered_variance_dataset
+        return center,center_dataset,center_variance_dataset
+    
+    
+    
+    def _assemble_normalize(self):
+        norm_method = self.normalization_method
+        def method(array):
+            val = norm_method(np.abs(array).real)
+            if val == 0:
+                val = 1
+                log.warning('Normalizing constant is 0! Substituting with 1 and trying to continue.')
+            return val
+
+        def normalize(density):
+            norm_const=method(density)
+            return density/norm_const
+        def normalize_dataset(dataset):
+            # overrides dataset with its normalized variant
+            norm_const = method(dataset[0])
+            normalized_dataset= (dataset[0]/norm_const,dataset[1]/norm_const)+tuple(d/method(d) for d in dataset[2:])
+            return normalized_dataset
+        def normalize_variance_dataset(dataset:list):
+            norm_const = method(dataset[0].mean)
+            sq_norm_const = norm_const**2
+            part1 = tuple(CumulativeVariance(mean=d.mean/norm_const,count = d.count, m2 = d.m2/sq_norm_const) for d in dataset[:2])
+            part2_consts = tuple(method(d.mean) for d in dataset[2:])
+            part2 = tuple(CumulativeVariance(mean=d.mean/const,count = d.count, m2 = d.m2/(const**2)) for d,const in zip(dataset[2:],part2_consts)) 
+            return  part1 + part2 
+                        
+        return normalize,normalize_dataset,normalize_variance_dataset
+
+    def _assemble_preprocess_dataset(self):
+        normalize,normalize_d,normalize_vd = self.normalize,self.normalize_dataset,self.normalize_variance_dataset
+        center,center_d,center_vd = self.center,self.center_dataset,self.center_variance_dataset
+        if self.apply_normalization:
+            if self.apply_centering:
+                def preprocess(dataset):
+                    return normalize(center(dataset))
+                def preprocess_dataset(dataset):
+                    return normalize_d(center_d(dataset))
+                def preprocess_variance_dataset(dataset):
+                    return normalize_vd(center_vd(dataset))
+            else:
+                def preprocess(dataset):
+                    return normalize(dataset)
+                def preprocess_dataset(dataset):
+                    return normalize_d(dataset)
+                def preprocess_variance_dataset(dataset):
+                    return normalize_vd(dataset)
+        elif self.apply_centering:
+            def preprocess(dataset):
+                return center(dataset)
+            def preprocess_dataset(dataset):
+                return center_d(dataset)
+            def preprocess_variance_dataset(dataset):
+                return center_vd(dataset)
+        else:
+            def preprocess(dataset):
+                return dataset
+            def preprocess_dataset(dataset):
+                return dataset
+            def preprocess_variance_dataset(dataset):
+                return dataset
+        return preprocess,preprocess_dataset,preprocess_variance_dataset
+    
     def _assemble_rotate_by(self):
         rotate_coeff = self.soft.rotate_coeff
         lm_split_ids = self.harmonic_transform.l_split_ids_complex
@@ -2202,103 +2376,163 @@ class Alignment():
             rotated_function = iht(rotated_coeff)
             return rotated_function
         return rotate
-    
-    def _assemble_average_pair(self):
-        find_rotation = self.find_rotation
-        center_ft_pair = self.center_ft_pair
-        rotate_coeff = self.soft.rotate_coeff
-        shift = self.fourier_transform.shift
-        ht,iht = self.harmonic_transform.forward_cmplx,self.harmonic_transform.inverse_cmplx
-        ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
-        hankel,ihankel = self.hankel_transform.forward_cmplx,self.hankel_transform.inverse_cmplx
-        lm_split_ids = self.harmonic_transform.l_split_ids_complex
-
-        if self.consider_point_inverse:
-            def align(density:np.array,ft_density:np.array,ref_density:np.array,ref_ft_density:np.ndarray,weights: np.ndarray|tuple|list = (0.5,0.5)):
-                # centering
-                c_density,c_ft_density = center_ft_pair(density,ft_density)
-                c_ref_density,c_ref_ft_density = center_ft_pair(ref_density,ref_ft_density)
-                # normalization
-                max_density = c_density.max()
-                max_ref_density = c_ref_density.max()
-                nc_density = c_density/max_density
-                nc_ft_density = c_ft_density/max_density
-                nc_ref_density = c_ref_density/max_ref_density
-                nc_ref_ft_density = c_ref_ft_density/max_ref_density
-
-                # To threate pinv similar as normal density
-                temp = ft(nc_density)
-                coeff = ht(ift(temp))
-                coeff_pinv = ht(ift(temp.conj()))
                 
-                ref_coeff = ht(nc_ref_density)
-                ft_coeff = ht(nc_ft_density)
-            
-                euler_angles,correlation_value = find_rotation(coeff,ref_coeff)
-                euler_angles2,correlation_value2 = find_rotation(coeff_pinv,ref_coeff)
-                if correlation_value2>correlation_value:
-                    #print((correlation_value2-correlation_value)/abs(correlation_value))
-                    euler_angles = euler_angles2
-                    correlation_value = correlation_value2
-                    coeff = coeff_pinv
-                    ft_coeff = ft_coeff.conj()
-                aligned_coeff = rotate_coeff(coeff,lm_split_ids,euler_angles)
-                aligned_ft_coeff = rotate_coeff(ft_coeff,lm_split_ids,euler_angles)
-            
-                average = iht(aligned_coeff)*weights[0] + nc_ref_density*weights[1]
-                ft_average = iht(aligned_ft_coeff)*weights[0] + nc_ref_ft_density*weights[1]
-                return (average, ft_average),correlation_value
-        else:
-            def align(density:np.array,ft_density:np.array,ref_density:np.array,ref_ft_density:np.ndarray,weights: np.ndarray|tuple|list = (0.5,0.5)):
-                # centering
-                c_density,c_ft_density = center_ft_pair(density,ft_density)
-                c_ref_density,c_ref_ft_density = center_ft_pair(ref_density,ref_ft_density)
-                # normalization
-                max_density = c_density.max()
-                max_ref_density = c_ref_density.max()
-                nc_density = c_density/max_density
-                nc_ft_density = c_ft_density/max_density
-                nc_ref_density = c_ref_density/max_ref_density
-                nc_ref_ft_density = c_ref_ft_density/max_ref_density
 
-                coeff = ht(nc_density)                
-                ref_coeff = ht(nc_ref_density)
-                ft_coeff = ht(nc_ft_density)
-            
-                euler_angles,correlation_value = find_rotation(coeff,ref_coeff)
-                aligned_coeff = rotate_coeff(coeff,lm_split_ids,euler_angles)
-                aligned_ft_coeff = rotate_coeff(ft_coeff,lm_split_ids,euler_angles)
-            
-                average = iht(aligned_coeff)*weights[0] + nc_ref_density*weights[1]
-                ft_average = iht(aligned_ft_coeff)*weights[0] + nc_ref_ft_density*weights[1]
-                return (average, ft_average),correlation_value
-        return align
-    
-    def _assemble_align_to_reference(self):
-        find_rotation = self.find_rotation_to_reference
-        center_ft_pair = self.center_ft_pair
+    def _assemble_align_pair(self):
+        find_rotation = self.find_rotation
         rotate_coeff = self.soft.rotate_coeff
-        shift = self.fourier_transform.shift
         ht,iht = self.harmonic_transform.forward_cmplx,self.harmonic_transform.inverse_cmplx
-        hankel,ihankel = self.hankel_transform.forward_cmplx,self.hankel_transform.inverse_cmplx
         ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
         lm_split_ids = self.harmonic_transform.l_split_ids_complex
         consider_point_inverse = self.consider_point_inverse
-
+        alignment_dataset_id = self.alignment_defining_dataset_id
+        preprocess,preprocess_d,preprocess_vd = self.preprocess,self.preprocess_dataset,self.preprocess_variance_dataset
         if self.consider_point_inverse:
-            def align_to_reference(density:np.array,ft_density:np.array):
-                #center
-                c_density,c_ft_density = center_ft_pair(density,ft_density)
-                #normalize
-                max_density = c_density.max()
-                nc_density = c_density/max_density
-                nc_ft_density = c_ft_density/max_density
+            def align_pair(density1:np.ndarray,density2:np.ndarray):
+                density1 = preprocess(density1)
+                density2 = preprocess(density2)
 
+                temp = ft(density1)
+                temp_conj = temp.conj()
+                signal_coeff = ht(ift(temp))
+                signal_coeff_pinv = ht(ift(temp_conj))
+                ref_coeff = ht(density2)
+                
+                euler_angles,correlation_value = find_rotation(signal_coeff,ref_coeff)
+                euler_angles2,correlation_value2 = find_rotation(signal_coeff_pinv,ref_coeff)
+                if correlation_value2>correlation_value:
+                    #print((correlation_value2-correlation_value)/abs(correlation_value))
+                    euler_angles = euler_angles2
+                    signal_coeff = signal_coeff_pinv
+                    correlation_value=correlation_value2
 
-                temp = ft(nc_density)
+                aligned_density1 = iht(rotate_coeff(signal_coeff,lm_split_ids,euler_angles))
+                return aligned_density1,density2,correlation_value,euler_angles
+                
+            def align_dataset_pair(dataset1:list,dataset2:list):
+                dataset1 = preprocess_d(dataset1)
+                dataset2 = preprocess_d(dataset2)
+
+                primary_data1 = dataset1[alignment_dataset_id[0]]                
+                temp = ft(primary_data1)
+                signal_coeff = ht(ift(temp))
+                signal_coeff_pinv = ht(ift(temp.conj()))
+                primary_data2 = dataset2[alignment_dataset_id[0]]
+                ref_coeff = ht(primary_data2)
+                
+                euler_angles,correlation_value = find_rotation(signal_coeff,ref_coeff)
+                euler_angles2,correlation_value2 = find_rotation(signal_coeff_pinv,ref_coeff)
+                if correlation_value2>correlation_value:
+                    #print((correlation_value2-correlation_value)/abs(correlation_value))
+                    euler_angles = euler_angles2
+                    dataset1 = [ift(ft(dataset1[0]).conj()),dataset1[1].conj()]+[ift(ft(d).conj()) for d in dataset1[2:]]
+                    correlation_value=correlation_value2
+
+                coeff_dataset1 = [ht(d) for d in dataset1]
+                aligned_dataset1 = [iht(rotate_coeff(c,lm_split_ids,euler_angles)) for c in coeff_dataset1]
+                return aligned_dataset1,dataset2,correlation_value,euler_angles
+
+            def align_variance_dataset_pair(dataset1:list,dataset2:list):
+                dataset1 = preprocess_vd(dataset1)
+                dataset2 = preprocess_vd(dataset2)
+                
+                primary_data1 = dataset1[alignment_dataset_id[0]].mean
+                temp = ft(primary_data1)
+                signal_coeff = ht(ift(temp))
+                signal_coeff_pinv = ht(ift(temp.conj()))
+                primary_data2 = dataset2[alignment_dataset_id[0]].mean
+                ref_coeff = ht(primary_data2)
+
+                euler_angles,correlation_value = find_rotation(signal_coeff,ref_coeff)
+                euler_angles2,correlation_value2 = find_rotation(signal_coeff_pinv,ref_coeff)
+                if correlation_value2>correlation_value:
+                    #print((correlation_value2-correlation_value)/abs(correlation_value))
+                    euler_angles = euler_angles2
+                    dataset10 = CumulativeVariance(mean = ift(ft(dataset1[0].mean).conj()),count = dataset1[0].count,m2= ift(ft(dataset1[0].m2).conj()))
+                    dataset11 = CumulativeVariance(mean = dataset1[1].mean.conj(),count = dataset1[1].count,m2 = dataset1[1].m2.conj())
+                    dataset1 = (dataset10,dataset11) + tuple( CumulativeVariance(mean = ift(ft(d.mean).conj()),count = d.count,m2= ift(ft(d.m2).conj())) for d in dataset1[2:])
+                    correlation_value=correlation_value2
+                aligned_dataset1 = []
+                for d in dataset1:
+                    r_mean = iht(rotate_coeff(ht(d.mean),lm_split_ids,euler_angles))
+                    r_m2 = iht(rotate_coeff(ht(d.m2),lm_split_ids,euler_angles))
+                    aligned_dataset1.append(CumulativeVariance(mean = r_mean,count = d.count,m2 = r_m2))
+                return aligned_dataset1,dataset2,correlation_value,euler_angles
+
+        else:
+            def align_pair(density1:np.ndarray,density2:np.ndarray):
+                density1 = preprocess(density1)
+                density2 = preprocess(density2)
+                
+                signal_coeff = ht(density1) 
+                ref_coeff = ht(density2)
+                euler_angles,correlation_value = find_rotation(signal_coeff,ref_coeff)
+                aligned_density1 = iht(rotate_coeff(signal_coeff,lm_split_ids,euler_angles))
+                return aligned_density1,density2,correlation_value,euler_angles
+            def align_dataset_pair(dataset1:list,dataset2:list):
+                dataset1 = preprocess_d(dataset1)
+                dataset2 = preprocess_d(dataset2)
+                coeff_dataset1 = [ht(d) for d in dataset1]
+                
+                signal_coeff = coeff_dataset1[alignment_dataset_id[0]]
+                ref_coeff = ht(dataset2[alignment_dataset_id[0]])
+                euler_angles,correlation_value = find_rotation(signal_coeff,ref_coeff)
+                aligned_dataset1 = [iht(rotate_coeff(c,lm_split_ids,euler_angles)) for c in coeff_dataset1]
+                return aligned_dataset1,dataset2,correlation_value,euler_angles
+            def align_variance_dataset_pair(dataset1:list,dataset2:list):
+                dataset1 = preprocess_vd(dataset1)
+                dataset2 = preprocess_vd(dataset2)
+
+                primary_data1 = dataset1[alignment_dataset_id[0]].mean
+                signal_coeff = ht(primary_data1)
+                primary_data2 = dataset2[alignment_dataset_id[0]].mean
+                ref_coeff = ht(primary_data2)
+
+                euler_angles,correlation_value = find_rotation(signal_coeff,ref_coeff)
+                aligned_dataset = []
+                for d in dataset1:
+                    r_mean = iht(rotate_coeff(ht(d.mean),lm_split_ids,euler_angles))
+                    r_m2 = iht(rotate_coeff(ht(d.m2),lm_split_ids,euler_angles))
+                    aligned_dataset1.append(CumulativeVariance(mean = r_mean,count = d.count,m2 = r_m2))
+                return aligned_dataset1,dataset2,correlation_value,euler_angles
+                
+        return align_pair,align_dataset_pair,align_variance_dataset_pair
+    
+    def _assemble_align_to_reference(self):
+        find_rotation = self.find_rotation_to_reference
+        rotate_coeff = self.soft.rotate_coeff
+        ht,iht = self.harmonic_transform.forward_cmplx,self.harmonic_transform.inverse_cmplx
+        ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
+        lm_split_ids = self.harmonic_transform.l_split_ids_complex
+        consider_point_inverse = self.consider_point_inverse
+        alignment_dataset_id = self.alignment_defining_dataset_id
+        preprocess,preprocess_d = self.preprocess,self.preprocess_dataset
+        
+        if self.consider_point_inverse:
+            def align_dataset_to_reference(dataset:list):
+                dataset = preprocess_d(dataset)                
+                
+                primary_data = dataset[alignment_dataset_id[0]]                
+                temp = ft(primary_data)
                 coeff = ht(ift(temp))
                 coeff_pinv = ht(ift(temp.conj()))
-                ft_coeff = ht(nc_ft_density)
+                euler_angles,correlation_value = find_rotation(coeff)
+                euler_angles2,correlation_value2 = find_rotation(coeff_pinv)
+                if correlation_value2>correlation_value:
+                    #print((correlation_value2-correlation_value)/abs(correlation_value))
+                    euler_angles = euler_angles2
+                    dataset = [ift(ft(dataset[0]).conj()),dataset[1].conj()]+[ift(ft(d).conj()) for d in dataset[2:]]
+                    correlation_value=correlation_value2
+                
+                coeff_dataset = [ht(d) for d in dataset]
+                aligned_dataset = [iht(rotate_coeff(c,lm_split_ids,euler_angles)) for c in coeff_dataset]
+                return aligned_dataset,correlation_value,euler_angles
+            
+            def align_to_reference(density:np.ndarray):
+                density = preprocess(density)                
+                temp = ft(density)
+                coeff = ht(ift(temp))
+                coeff_pinv = ht(ift(temp.conj()))
                 
                 euler_angles,correlation_value = find_rotation(coeff)
                 euler_angles2,correlation_value2 = find_rotation(coeff_pinv)
@@ -2306,28 +2540,278 @@ class Alignment():
                     #print((correlation_value2-correlation_value)/abs(correlation_value))
                     euler_angles = euler_angles2
                     coeff = coeff_pinv
-                    ft_coeff = ft_coeff.conj()
                     correlation_value=correlation_value2
-                out_density_coeff = rotate_coeff(coeff,lm_split_ids,euler_angles)
-                out_ft_density_coeff = rotate_coeff(ft_coeff,lm_split_ids,euler_angles)
                 
-                return (iht(out_density_coeff),iht(out_ft_density_coeff)),correlation_value
+                aligned_density = iht(rotate_coeff(coeff,lm_split_ids,euler_angles))
+                return aligned_density,correlation_value,euler_angles
         else:
-            def align_to_reference(density:np.array,ft_density:np.array):
-                c_density,c_ft_density = center_ft_pair(density,ft_density)
-                max_density = c_density.max()
-                nc_density = c_density/max_density
-                nc_ft_density = c_ft_density/max_density
-                coeff = ht(nc_density)
-                ft_coeff = ht(nc_ft_density)
-                
+            def align_dataset_to_reference(dataset:list):
+                dataset = preprocess_d(dataset)
+                coeff_dataset = [ht(d) for d in dataset]                
+                euler_angles,correlation_value = find_rotation(coeff_dataset[alignment_dataset_id[0]])
+                aligned_dataset = [iht(rotate_coeff(c,lm_split_ids,euler_angles)) for c in coeff_dataset]
+                return aligned_dataset,correlation_value,euler_angles
+            
+            def align_to_reference(density:np.ndarray):
+                density = preprocess(density)
+                coeff = ht(density)
                 euler_angles,correlation_value = find_rotation(coeff)
-                out_density_coeff = rotate_coeff(coeff,lm_split_ids,euler_angles)
-                out_ft_density_coeff = rotate_coeff(ft_coeff,lm_split_ids,euler_angles)
-                
-                return (iht(out_density_coeff),iht(out_ft_density_coeff)),correlation_value
+                aligned_density = iht(rotate_coeff(coeff,lm_split_ids,euler_angles))
+                return aligned_density,correlation_value,euler_angles
+            
+        return align_to_reference,align_dataset_to_reference
 
-        return align_to_reference
+
+class AlignedAveragerStruct:
+    defaults = DictNamespace.dict_to_dictnamespace(
+        {'fourier_struct': SphericalFourierTransformStruct(),
+                'alignment':{'alignment_defining_dataset_id':0,
+                             'normalization':{'apply':True,
+                                              'method':np.max},
+                             'positional':{'apply':True},
+                             'rotational':{'apply':True,                                           
+                                           'r_limits':[None,None],
+                                           'consider_point_inverse':True}
+                             },
+                'averaging':{'n_random_instances':1
+                             },
+                 'n_processes':None
+                }
+    )
+    
+    def __init__(self,fourier_struct : SphericalFourierTransformStruct|None = None,alignment : dict|None =None,averaging : dict|None =None,n_processes=None):
+
+        if fourier_struct is None:
+            self.fourier_struct=self.defaults.fourier_struct
+        else:
+            self.fourier_struct = fourier_struct
+            
+        if alignment is None:
+            self.alignment = self.defaults.alignment.copy()
+        else:
+            self.alignment = DictNamespace.dict_to_dictnamespace(alignment)
+            
+        if averaging is None:
+            self.averaging = self.defaults.averaging.copy()
+        else:
+            self.averaging = DictNamespace.dict_to_dictnamespace(averaging)
+        self.n_processes = n_processes
+    
+class AlignedAverager:
+    def __init__(self, struct:AlignedAveragerStruct=AlignedAveragerStruct(),dataset_length:int = 2,hankel_weights = None,alignment_wigners:np.ndarray=None):
+        self.struct = struct
+        if hankel_weights is not None:
+            self.hankel_weights =  hankel_weights
+        else:
+            self.hankel_weights = HankelTransformWeights.get_weights_dict(struct.fourier_struct)['weights']
+            
+        self.fourier = SphericalFourierTransform(struct.fourier_struct,weights=self.hankel_weights)
+        
+        self.aligner = Alignment(self.fourier,
+                                                        consider_point_inverse = self.struct.alignment.rotational.consider_point_inverse,
+                                                        dataset_length=dataset_length,
+                                                        normalize = self.struct.alignment.normalization.apply,
+                                                        center = self.struct.alignment.positional.apply,
+                                                        normalization_method = self.struct.alignment.normalization.method,
+                                                        wigner_data=alignment_wigners)
+        self.wigner_data = self.aligner.soft.wigner_data
+        self.dataset_length = dataset_length
+
+    def _set_aligner_properties(self,aligner):
+        aligner.radial_limits = self.struct.alignment.rotational.r_limits
+        aligner.alignment_defining_dataset_id = self.struct.alignment.alignment_defining_dataset_id
+        return aligner
+    
+    def average_single_reference(self,data: np.ndarray|typing.Callable,n_datasets:int):
+        if isinstance(data,np.ndarray):
+            data = data.__getitem__
+            align_method = 'align_to_reference'
+        else:
+            align_method = 'align_dataset_to_reference'
+        n_references = self.struct.averaging.n_random_instances
+        n_processes = self.struct.n_processes
+        ref_ids = np.random.choice(np.arange(n_datasets),n_references,replace=False)
+        ids = np.array(tuple((j,ref)  for ref in ref_ids for j in range(n_datasets)))
+        d_length = self.dataset_length
+        update_aligner = self._set_aligner_properties
+        f_struct = self.struct.fourier_struct
+        
+        def worker(ids,**kwargs):
+            f = SphericalFourierTransform(f_struct,weights = self.hankel_weights)
+            aligner = Alignment(f,
+                                                       consider_point_inverse=self.struct.alignment.rotational.consider_point_inverse,
+                                                       dataset_length=d_length,
+                                                       normalize=self.struct.alignment.normalization.apply,
+                                                       center = self.struct.alignment.positional.apply,
+                                                       normalization_method=self.struct.alignment.normalization.method,
+                                                       wigner_data=self.wigner_data)
+            aligner = update_aligner(aligner)
+            align = aligner.__getattribute__(align_method)
+            
+            ref_id = ids[0,1]
+            aligner.reference  = data(ref_id)
+            aligned_ds = [[]]
+            ref_ids = [ref_id]
+            variances_per_ref_id = [tuple(CumulativeVariance() for i in range(d_length))]
+            ref_ids = [ref_id]
+            for _id in ids:
+                if _id[1] != ref_id:
+                    ref_id = _id[1]
+                    ref_ids.append(ref_id)
+                    aligner.reference = data(ref_id)
+                    aligned_ds.append([])
+                    variances_per_ref_id.append(tuple(CumulativeVariance() for i in range(d_length)))
+                if _id[1] == _id[0]:
+                    aligned_ds[-1].append(aligner.reference)
+                    for d ,variance in zip(aligner.reference,variances_per_ref_id[-1]):
+                        variance.update(d)
+                    continue
+                aligned_d = align(data(_id[0]))
+                aligned_ds[-1].append(aligned_d[0])
+                for d,variance in zip(aligned_d[0],variances_per_ref_id[-1]):
+                    variance.update(d)
+                    
+            out = tuple( tuple(variance.data for variance in variances) for variances in variances_per_ref_id) 
+            return out,ref_ids
+            
+        results = Multiprocessing.process_mp_request(worker,
+                       input_arrays=[ids],
+                       call_with_multiple_arguments=True,
+                       split_mode='sequential',
+                       n_processes = n_processes)
+        
+        variances_per_ref = {ref_id:tuple(CumulativeVariance() for i in range(d_length)) for ref_id in ref_ids}
+        for worker_part in results:
+            for ref_part,ref_id in zip(worker_part[0],worker_part[1]):
+                variances = variances_per_ref[ref_id]
+                for d,variance in zip(ref_part,variances):
+                    variance.merge_from_data(*d)   
+        return tuple(variances_per_ref.values()),tuple(variances_per_ref.keys())
+    
+    @staticmethod
+    def _create_reduction_pair_ids(n_elements,n_random_instances=5):
+        '''
+        For n_orders=1 this function creates id pairs corresponding 
+        to a tree reduction of the form;
+          1 2 3 4 5 6 7 8 9       1 2 3 4 5 6 7 8
+        9 |-| | |-| |-| |-|    8  |-| |-| |-| |-|
+        5  |--|  |   |---|     4   |---|   |---|
+        3   |----|     |       2     |-------|
+        2      |-------|       1         |
+        1          | 
+        Where If the number of elements is odd third element forms a pair with its self to generate an even number of of "pairs".
+        Aditionally it computes the weights, i.e. the number of highest level nodes above a given node "|" normalized by the total amount of highest level nodes above
+        the pair "|-|" this node belongs to. For the above example of 8 inputs all weights woud be 1/2 since 8 is a power of 2, i.e.
+           1   2   3   4   5   6   7   8  
+        8 1/2-1/2 1/2-1/2 1/2-1/2 1/2-1/2
+        4   1/2-----1/2     1/2-----1/2
+        2       1/2-------------1/2
+        while for 3 elements one would have
+           1   2   3
+        3 1/2-1/2  1
+        2   2/3---1/3
+        Finally the top level indices are permuted by a random permutation and are returned as third return element.
+        The parameter n_elements represents the number of highest level nodes.
+        The parameter n_random_instances controls the number of these trees with random intput orders that are created simultaneousely. 
+        '''
+        K = n_random_instances
+        N=n_elements
+        arrays = []
+        counts = [np.ones(N*K,dtype = int)]
+        initial_mask = None
+        startm = N
+        #generating counts and standard pair ids (no permutation in highest nodes)
+        while N>1:
+            ids = np.arange(N*K,dtype=int)
+            if N%2==0:
+                out = ids.reshape(-1,2)
+                N = N//2
+                count = (counts[-1][::2]+counts[-1][1::2])
+                counts[-1] = counts[-1].reshape(-1,2)
+            else:
+                mask = np.full(N+1,True)
+                mask[3]=False
+                mask = np.concatenate((mask,)*K)
+                out = np.zeros((N+1)*K,dtype=int)
+                outc = out.copy()
+                out[mask] = ids
+                outc[mask] = counts[-1]
+                out[~mask] = -1
+                out = out.reshape(-1,2)
+                if N==startm:
+                    initial_mask=mask
+                N=(N+1)//2
+        
+                count = outc[::2]+outc[1::2]
+                counts[-1] = outc.reshape(-1,2)
+                
+            arrays.append(out)
+            counts.append(count)
+        
+        # applying permutation to the pairs of the highes level
+        pairs_list = np.concatenate(tuple(np.random.choice(np.arange(n_elements),n_elements,replace = False) for i in range(K)))
+        initial_ids = pairs_list[arrays[0].flatten()]
+        if isinstance(initial_mask,np.ndarray):
+            initial_ids[~initial_mask]=-1
+        initial_ids=initial_ids.reshape(-1,2)
+        arrays[0]=initial_ids
+    
+        #transforming counts to weights
+        weights = []
+        for c in counts[:-1]:
+            weights.append(c/(c.sum(axis = -1)[:,None]))
+        return arrays,weights,pairs_list
+
+    def average_pairwise(self,data: np.ndarray|typing.Callable,n_datasets:int):
+        if isinstance(data,np.ndarray):
+            data = data.__getitem__
+            align_method = 'align_pair'
+            raise NotImplementedError('Average_pairwise is currently only implemented for datasets. Not individual numpy arrays. To little time to write the wrapper now ... ')
+        else:
+            align_method = 'align_variance_dataset_pair'
+        n_random_instances = self.struct.averaging.n_random_instances
+        n_processes = self.struct.n_processes
+        ids,weights,initial_ids = self._create_reduction_pair_ids(n_datasets,n_random_instances = n_random_instances)
+        d_length = self.dataset_length
+        update_aligner = self._set_aligner_properties
+        f_struct = self.struct.fourier_struct
+        
+        def worker(ids,variance_loader,**kwargs):
+            f = SphericalFourierTransform(f_struct,weights = self.hankel_weights)
+            aligner = Alignment(f,
+                                                       consider_point_inverse=self.struct.alignment.rotational.consider_point_inverse,
+                                                       dataset_length=d_length,
+                                                       normalize=self.struct.alignment.normalization.apply,
+                                                       center = self.struct.alignment.positional.apply,
+                                                       normalization_method=self.struct.alignment.normalization.method,
+                                                       wigner_data=self.wigner_data)
+            aligner = update_aligner(aligner)
+            align = aligner.__getattribute__(align_method)
+            
+            merged = []
+            for _id in ids:
+                var1 = variance_loader(_id[0])
+                var2 = variance_loader(_id[1])
+                var1,var2 = align(var1,var2)[:2]
+                merged_data = tuple( v2.merge(v1).data for v1,v2 in zip(var1,var2)) 
+                merged.append(merged_data)
+            return tuple(merged)
+            
+        def step_data(_id:int):
+            return tuple(CumulativeVariance(d,count = 1, m2 = np.zeros_like(d)) for d in data(_id))
+            
+        for step_pairs,step_weights in zip(ids,weights):
+            results = Multiprocessing.process_mp_request(worker,
+                       input_arrays=[step_pairs],
+                       const_inputs=[step_data],
+                       call_with_multiple_arguments=True,
+                       split_mode='sequential',
+                       n_processes = n_processes)
+            results_flat = tuple(tuple(CumulativeVariance(*data) for data in r) for results_per_process in results for r in results_per_process )
+            step_data = results_flat.__getitem__ 
+        return results_flat,initial_ids
+
+
     
 #######################
 ## Ruiz equalization ##
