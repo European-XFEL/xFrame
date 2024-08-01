@@ -33,7 +33,7 @@ from scipy.stats import ttest_1samp
 from scipy.optimize import root_scalar as sp_root
 
 from xframe.library.math_transforms import SphericalFourierTransform, SphericalFourierTransformStruct, HankelTransformWeights
-from xframe.library.pythonLibrary import DictNamespace
+from xframe.library.pythonLibrary import DictNamespace,xprint
 from xframe import Multiprocessing
 
 
@@ -1984,7 +1984,7 @@ def denoise_tv_chambolle_masked(img,mask,lamb=0.1,tau=0.25,n_iterations=70,mask_
         
 
 
-    ##########################
+##########################
 ## Cumulative Variance  ##
 
 class CumulativeVariance:
@@ -2007,17 +2007,11 @@ class CumulativeVariance:
         return self
         
     def merge(self,var):
-        # merges the values of another CummulativeVariance instance to create the combined average and variance.
-        count_a = self.count
-        count_b = var.count
-        self.count += count_b
-        delta = var.mean-self.mean
-        temp = delta*count_b/self.count
-        self.mean = self.mean + temp
-        self.m2 = self.m2 + var.m2 + delta*count_a*temp
-        return self
+        # merges another CumulativeVariance instance to create the combined average and variance.
+        return self.merge_from_data(var.mean,var.count,var.m2)
         
     def merge_from_data(self,mean,count,m2):
+        # merges the data of another CummulativeVariance instance to create the combined average and variance.
         count_a = self.count
         self.count += count
         delta = mean-self.mean
@@ -2791,16 +2785,27 @@ class AlignedAverager:
             merged = []
             for _id in ids:
                 var1 = variance_loader(_id[0])
-                var2 = variance_loader(_id[1])
-                var1,var2 = align(var1,var2)[:2]
-                merged_data = tuple( v2.merge(v1).data for v1,v2 in zip(var1,var2)) 
+                if _id[1] <0:
+                    merged_data = tuple(v.data for v in var1)
+                else:
+                    var2 = variance_loader(_id[1])
+                    var1,var2 = align(var1,var2)[:2]
+                    merged_data = tuple( v2.merge(v1).data for v1,v2 in zip(var1,var2))
                 merged.append(merged_data)
-            return tuple(merged)
+            return merged
             
         def step_data(_id:int):
-            return tuple(CumulativeVariance(d,count = 1, m2 = np.zeros_like(d)) for d in data(_id))
+            d = data(_id)
+            if isinstance(d[0],np.ndarray):
+                return tuple(CumulativeVariance(d,count = 1, m2 = np.zeros_like(d)) for d in data(_id))
+            else:
+                return d
+
+        xprint("Start pairwise reduction:")
+        n_steps = len(ids)
+        for num,step_pairs in enumerate(ids):
+            xprint(f"Step {num+1} of {n_steps}")
             
-        for step_pairs,step_weights in zip(ids,weights):
             results = Multiprocessing.process_mp_request(worker,
                        input_arrays=[step_pairs],
                        const_inputs=[step_data],
@@ -2808,6 +2813,82 @@ class AlignedAverager:
                        split_mode='sequential',
                        n_processes = n_processes)
             results_flat = tuple(tuple(CumulativeVariance(*data) for data in r) for results_per_process in results for r in results_per_process )
+            #print(f"N = {len(results_flat)} len ids = {len(step_pairs)}")
+            step_data = results_flat.__getitem__ 
+        return results_flat,initial_ids
+    
+    def average_pairwise_shared(self,data: np.ndarray|typing.Callable,n_datasets:int):
+        if isinstance(data,np.ndarray):
+            data = data.__getitem__
+            align_method = 'align_pair'
+            raise NotImplementedError('Average_pairwise is currently only implemented for datasets. Not individual numpy arrays. To little time to write the wrapper now ... ')
+        else:
+            align_method = 'align_variance_dataset_pair'
+        n_random_instances = self.struct.averaging.n_random_instances
+        n_processes = self.struct.n_processes
+        ids,weights,initial_ids = self._create_reduction_pair_ids(n_datasets,n_random_instances = n_random_instances)
+        d_length = self.dataset_length
+        update_aligner = self._set_aligner_properties
+        f_struct = self.struct.fourier_struct
+        
+        def worker(ids,variance_loader,**kwargs):
+            f = SphericalFourierTransform(f_struct,weights = self.hankel_weights)
+            aligner = Alignment(f,
+                                consider_point_inverse=self.struct.alignment.rotational.consider_point_inverse,
+                                dataset_length=d_length,
+                                normalize=self.struct.alignment.normalization.apply,
+                                center = self.struct.alignment.positional.apply,
+                                normalization_method=self.struct.alignment.normalization.method,
+                                wigner_data=self.wigner_data)
+            aligner = update_aligner(aligner)
+            align = aligner.__getattribute__(align_method)
+            
+            merged = []
+            outs = kwargs['outputs']
+            out_ids = kwargs['output_ids'][0]
+            #print(out_ids)
+            counts = 0 
+            for _id,out_id in zip(ids,out_ids):
+                var1 = variance_loader(_id[0])
+                if _id[1] <0:
+                    merged_data = tuple(v for v in var1)
+                else:
+                    var2 = variance_loader(_id[1])
+                    var1,var2 = align(var1,var2)[:2]
+                    merged_data = tuple( v2.merge(v1) for v1,v2 in zip(var1,var2))
+                for d_id,md in enumerate(merged_data):
+                    #print(f'var_ids = {tuple(3*d_id+i for i in range(d_length))} out id = {out_id}')
+                    mean_out = outs[3*d_id]
+                    mean_out[out_id] = md.mean
+                    count_out = outs[3*d_id+1]
+                    count_out[out_id] = md.count
+                    m2_out = outs[3*d_id+2]
+                    m2_out[out_id] = md.m2
+            
+        def step_data(_id:int):
+            d = data(_id)
+            if isinstance(d[0],np.ndarray):
+                return tuple(CumulativeVariance(d,count = 1, m2 = np.zeros_like(d)) for d in data(_id))
+            else:
+                return d
+
+        xprint("Start pairwise reduction:")
+        n_steps = len(ids)
+        for num,step_pairs in enumerate(ids):
+            xprint(f"Step {num+1} of {n_steps}")
+            count = 0
+            for i in range(np.max(step_pairs)+1):
+                count += step_data(i)[0].count
+            shapes = tuple((len(step_pairs),) + d.mean.shape for d in step_data(0))
+            results = Multiprocessing.process_mp_request(worker,
+                                                         mode = Multiprocessing.MPMode_SharedArray((shapes[0],(len(step_pairs),),shapes[0],shapes[1],(len(step_pairs),),shapes[1],shapes[2],(len(step_pairs),),shapes[2]),(complex,int,complex,complex,int,complex,complex,int,complex),),
+                                                         input_arrays=[step_pairs],
+                                                         const_inputs=[step_data],
+                                                         call_with_multiple_arguments=True,
+                                                         split_mode='sequential',
+                                                         n_processes = n_processes)
+            #results_flat = [tuple(CumulativeVariance(mean = results[3*i][j].copy(),count = results[3*i+1][j].copy(), m2 = results[3*i+2][j].copy()) for i in range(d_length)) for j in range(len(step_pairs))]
+            results_flat = tuple(tuple(CumulativeVariance(mean = results[3*i][j],count = results[3*i+1][j], m2 = results[3*i+2][j]) for i in range(d_length)) for j in range(len(step_pairs)))
             step_data = results_flat.__getitem__ 
         return results_flat,initial_ids
 
