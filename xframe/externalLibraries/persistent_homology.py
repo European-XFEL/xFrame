@@ -150,7 +150,9 @@ def get_persistent_homology_2d(im,periodic=False):
                     groups0[uf[q]] = (bl, bl-v, p)
                 uf.union(oldp, q)
 
+    # peak id, peak x, peak y, persistence
     groups0 = [(k, groups0[k][0], groups0[k][1], groups0[k][2]) for k in groups0]
+    
     groups0.sort(key=lambda g: g[2], reverse=True)
 
     return groups0

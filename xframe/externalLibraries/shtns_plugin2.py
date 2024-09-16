@@ -101,7 +101,9 @@ class ShCoeffView:
             elif (isinstance(items[0],int)) and  (isinstance(items[1],int)):
                 l_mask = self.get_l_mask(items[0])
                 m_mask = self.get_m_mask(items[1])
-                return self.coeff[...,l_mask & m_mask]
+                #print(np.sum(l_mask & m_mask))
+                #return self.coeff[...,l_mask & m_mask]
+                return self.coeff[...,get_lm_id(items[0],items[1])]
             else:
                 l_mask = self.get_l_mask(items[0])
                 m_mask = self.get_m_mask(items[1])               
@@ -109,6 +111,14 @@ class ShCoeffView:
                 return self.coeff[...,mask]
     def __setitem__(self,items,value):
         self.__getitem__(items)[:] = value
+        if isinstance(items,tuple):
+            if len(items) ==2:
+                self.coeff[...,get_lm_id(items[0],items[1])] = value
+            else:
+                self.__getitem__(items)[:] = value
+        else:
+            self.__getitem__(items)[:] = value
+            
         
 class ShSmall:
     def __init__(self,bandwidth,anti_aliazing_degree = 2,n_phi = 0,n_theta=0):

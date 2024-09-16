@@ -89,7 +89,7 @@ class ShCoeffView:
                 mask = l_mask & m_mask
                 return self.coeff[...,mask]
     def __setitem__(self,items,value):
-        self.__getitem__(items)[:] = value
+        self.__getitem__(items) = value
         
 class ShSmall:
     def __init__(self,bandwidth,anti_aliazing_degree = 2,n_phi = 0,n_theta=0):

@@ -2238,12 +2238,27 @@ class Alignment():
     @property
     def apply_normalization(self):
         return self._apply_normalization
+    @apply_normalization.setter
+    def apply_normalization(self,val):
+        if not val==self._apply_normalization:
+            self._apply_normalization = val
+            self._select_preprocessing()
     @property
     def apply_centering(self):
         return self._apply_centering
+    @apply_centering.setter
+    def apply_centering(self,val):
+        if not val == self._apply_centering:
+            self._apply_centering=val
+            self._select_preprocessing()
     @property
     def apply_rotation(self):
         return self._apply_rotation
+    @apply_rotation.setter
+    def apply_rotation(self,val):
+        if not val == self._apply_rotation:
+            self._apply_rotation = val
+            self._select_aligns()
     @property
     def consider_point_inverse(self):
         return self._consider_point_inverse
@@ -2251,9 +2266,8 @@ class Alignment():
     def consider_point_inverse(self,val):
         if not val == self._consider_point_inverse:
             self._consider_point_inverse = val
-            self.average_pair = self._assemble_average_pair()
-            self.align_to_reference = self._assemble_align_to_reference()
-                    
+            self._select_aligns()
+            
     def _set_preprocessing(self,key):
         d = self._preprocess_dict
         self._preprocess[0] = d[key]['value']
@@ -2659,15 +2673,25 @@ class Alignment():
         def align_pair(density1:np.ndarray,density2:np.ndarray):
             density1 = preprocess[0](density1)
             density2 = preprocess[0](density2)
-            return density1,density2
+            correlation_value = real_L2(density1-density2)
+            return density1,density2,correlation_value
         def align_dataset_pair(dataset1:list,dataset2:list):
+            l2 = real_L2
+            if [alignment_dataset_id[0]==1]:
+                l2 = reciprocal_L2
             dataset1 = preprocess_d[0](dataset1)
             dataset2 = preprocess_d[0](dataset2)
-            return aligned_dataset1,dataset2
+            correlation_value= l2(dataset1[alignment_dataset_id[0]]-dataset2[alignment_dataset_id[0]])
+            return dataset1,dataset2,correlation_value
         def align_variance_dataset_pair(dataset1:list,dataset2:list):
+            l2 = real_L2
+            align_id = alignment_dataset_id[0]
+            if [align_id==1]:
+                l2 = reciprocal_L2
             dataset1 = preprocess_vd[0](dataset1)
             dataset2 = preprocess_vd[0](dataset2)
-            return aligned_dataset1,dataset2
+            correlation_value=l2(dataset1[align_id].mean-dataset2[align_id].mean)
+            return dataset1,dataset2,correlation_value
         
         align_dict[''] = {'value':align_pair,'dataset': align_dataset_pair,'variance_dataset':align_variance_dataset_pair}
         
@@ -2687,7 +2711,7 @@ class Alignment():
         
         align_dict = {}
         def align_to_reference_pr(density:np.ndarray):
-            density = preprocess(density)                
+            density = preprocess[0](density)                
             temp = ft(density)
             coeff = ht(ift(temp))
             coeff_pinv = ht(ift(temp.conj()))
@@ -2773,9 +2797,91 @@ class Alignment():
                 r_m2 = iht(rotate_coeff(ht(d.m2),lm_split_ids,euler_angles))
                 aligned_dataset.append(CumulativeVariance(mean = r_mean,count = d.count,m2 = r_m2))
             return aligned_dataset,correlation_value,euler_angles
-        align_dict['r'] = {'value':align_to_reference_r,'dataset': align_dataset_to_reference_r,'variance_dataset':align_variance_dataset_to_reference_r}     
+        align_dict['r'] = {'value':align_to_reference_r,'dataset': align_dataset_to_reference_r,'variance_dataset':align_variance_dataset_to_reference_r}
+
+        def align_to_reference_p(density:np.ndarray):
+            density = preprocess[0](density)                
+            density_inv = ift(ft(density).conj())
+
+            ref = self._reference[0]
+            correlation_value = real_L2(density-ref)
+            correlation_value2 = real_L2(density_inv-ref)
+            if correlation_value2>correlation_value:
+                #print((correlation_value2-correlation_value)/abs(correlation_value))
+                correlation_value=correlation_value2
+                density = density_inv
+                
+            return density,correlation_value
         
-        return align_to_reference,align_dataset_to_reference
+        def align_dataset_to_reference_p(dataset:list):
+            dataset = preprocess_d[0](dataset)                
+            primary_data = dataset[alignment_dataset_id[0]]
+            ref = self._reference[alignment_dataset_id[0]]
+            if alignment_dataset_id[0]==1:
+                conj_data = primary_data.conj()
+                correlation_value = reciprocal_L2(primary_data-ref)
+                correlation_value2 = reciprocal_L2(conj_data-ref)
+            else:
+                conj_data = ift(ft(primary_data).conj())
+                correlation_value = real_L2(primary_data-ref)
+                correlation_value2 = real_L2(conj_data-ref)
+
+            if correlation_value2>correlation_value:
+                dataset = [ift(ft(dataset[0]).conj()),dataset[1].conj()]+[ift(ft(d).conj()) for d in dataset[2:]]
+                correlation_value=correlation_value2
+            return dataset,correlation_value
+        
+        def align_variance_dataset_to_reference_p(dataset:list):
+            dataset = preprocess_vd[0](dataset)                
+            primary_data = dataset[alignment_dataset_id[0]].mean
+            ref = self._reference[alignment_dataset_id[0]].mean
+            if alignment_dataset_id[0]==1:
+                conj_data = primary_data.conj()
+                correlation_value = reciprocal_L2(primary_data-ref)
+                correlation_value2 = reciprocal_L2(conj_data-ref)
+            else:
+                conj_data = ift(ft(primary_data).conj())
+                correlation_value = real_L2(primary_data-ref)
+                correlation_value2 = real_L2(conj_data-ref)
+                
+            if correlation_value2>correlation_value:
+                #print((correlation_value2-correlation_value)/abs(correlation_value))
+                dataset0 = CumulativeVariance(mean = ift(ft(dataset[0].mean).conj()),count = dataset[0].count,m2= ift(ft(dataset[0].m2).conj()))
+                dataset1 = CumulativeVariance(mean = dataset[1].mean.conj(),count = dataset[1].count,m2 = dataset[1].m2.conj())
+                dataset = (dataset0,dataset1) + tuple( CumulativeVariance(mean = ift(ft(d.mean).conj()),count = d.count,m2= ift(ft(d.m2).conj())) for d in dataset[2:])
+                correlation_value=correlation_value2
+            return dataset,correlation_value
+        
+        align_dict['p'] = {'value':align_to_reference_p,'dataset': align_dataset_to_reference_p,'variance_dataset':align_variance_dataset_to_reference_p}
+        
+        def align_to_reference(density:np.ndarray):
+            density = preprocess[0](density)                
+            ref = self._reference[0]
+            correlation_value = real_L2(density-ref)                
+            return density,correlation_value
+        
+        def align_dataset_to_reference(dataset:list):
+            dataset = preprocess_d[0](dataset)                
+            primary_data = dataset[alignment_dataset_id[0]]
+            ref = self._reference[alignment_dataset_id[0]]
+            if alignment_dataset_id[0]==1:
+                correlation_value = reciprocal_L2(primary_data-ref)
+            else:
+                correlation_value = real_L2(primary_data-ref)
+            return dataset,correlation_value
+        
+        def align_variance_dataset_to_reference(dataset:list):
+            dataset = preprocess_vd[0](dataset)                
+            primary_data = dataset[alignment_dataset_id[0]].mean
+            ref = self._reference[alignment_dataset_id[0]].mean
+            if alignment_dataset_id[0]==1:
+                correlation_value = reciprocal_L2(primary_data-ref)
+            else:
+                correlation_value = real_L2(primary_data-ref)
+            return dataset,correlation_value
+        align_dict[''] = {'value':align_to_reference,'dataset': align_dataset_to_reference,'variance_dataset':align_variance_dataset_to_reference}     
+        
+        return align_dict
 
 
 class AlignedAveragerStruct:
@@ -3158,11 +3264,11 @@ def ruiz_equalization_symmetric(matrix: np.ndarray, max_iterations: int = 100, c
     for i in range(max_iterations):
         columnwise_max = np.max(np.abs(m_scaled),axis = -2)
         columnwise_max[columnwise_max==0]=1
-        scaling = 1/columnwise_max
+        scaling = 1/np.sqrt(columnwise_max)
         m_scaled = scaling[...,:,None] * m_scaled * scaling[...,None,:]
         scaling_final*=scaling
         epsilon = np.abs(1-np.max(scaling,axis = -1)).max()
-        #xprint(epsilon)
+
         if epsilon<convergence_epsilon:
             converged = True
             break
