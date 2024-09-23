@@ -2003,7 +2003,7 @@ class CumulativeVariance:
         delta = val - self.mean
         self.mean += delta / self.count
         delta2 = val - self.mean
-        self.m2 += delta * delta2.conj()
+        self.m2 += (delta * delta2.conj()).real
         return self
         
     def merge(self,var):
@@ -2017,7 +2017,7 @@ class CumulativeVariance:
         delta = mean-self.mean
         temp = delta*count/self.count
         self.mean = self.mean + temp
-        self.m2 = self.m2 + m2 + delta*count_a*temp.conj()
+        self.m2 = self.m2 + m2 + (delta*count_a*temp.conj()).real
         return self
     
     @property
@@ -2061,8 +2061,8 @@ class Alignment():
         space grid of the fourier transform and ft_density has to be compatible with the reciprocal space shape.
     '''
     def __init__(self,fourier_transform:SphericalFourierTransform,
-                 consider_point_inverse=False,
                  wigner_data = None,
+                 consider_point_inverse=False,
                  normalize=True,
                  normalization_method=np.max,
                  center=True,
@@ -2107,26 +2107,31 @@ class Alignment():
         self.normalization_method = normalization_method        
         self.normalize,self.normalize_dataset,self.normalize_variance_dataset = self._assemble_normalize()
         self._preprocess_dict = self._assemble_preprocess_dataset()
-        self._preprocess = [self._preprocess_dict['nc']['value']]
-        self._preprocess_dataset = [self._preprocess_dict['nc']['dataset']]
-        self._preprocess_variance_dataset = [self._preprocess_dict['nc']['variance_dataset']]
-        
+        self._preprocess = [None]
+        self._preprocess_dataset = [None]
+        self._preprocess_variance_dataset = [None]
+        self._select_preprocessing()
         if self.dimension ==3:
             self.soft = Soft(self.bandwidth,wigner_data=wigner_data)
             self.soft_grid = self.soft.grid
             self.rotate_by = self._assemble_rotate_by()
             self.find_rotation = self._assemble_find_rotation()
             self.find_rotation_to_reference = self._assemble_find_rotation_to_reference()
-            self.align_pair_dict = self._assemble_align_pair()
-            self.align_to_reference_dict = self._assemble_align_to_reference()
+            self._align_pair_dict = self._assemble_align_pair()
+            self._align_to_reference_dict = self._assemble_align_to_reference()
             
-            self._align_pair = []
-            self._align_pair_dataset = []
-            self._align_pair_variance_dataset = []
-            self._align_to_reference = []
-            self._align_to_reference_dataset = []
-            self._align_to_reference_variance_dataset = []
+            self._align_pair = [None]
+            self._align_pair_dataset = [None]
+            self._align_pair_variance_dataset = [None]
+            self._align_to_reference = [None]
+            self._align_to_reference_dataset = [None]
+            self._align_to_reference_variance_dataset = [None]
+            self._select_align()
 
+    @staticmethod
+    def real_pos(a:np.ndarray):
+        return np.clip(a.real,a_min=0,a_max = None)
+        #return a
     @classmethod
     def from_struct(cls,init_data: SphericalFourierTransformStruct = SphericalFourierTransformStruct(), weights = None):
         return cls(SphericalFourierTransform(init_data,weights = weights))
@@ -2258,7 +2263,7 @@ class Alignment():
     def apply_rotation(self,val):
         if not val == self._apply_rotation:
             self._apply_rotation = val
-            self._select_aligns()
+            self._select_align()
     @property
     def consider_point_inverse(self):
         return self._consider_point_inverse
@@ -2266,7 +2271,7 @@ class Alignment():
     def consider_point_inverse(self,val):
         if not val == self._consider_point_inverse:
             self._consider_point_inverse = val
-            self._select_aligns()
+            self._select_align()
             
     def _set_preprocessing(self,key):
         d = self._preprocess_dict
@@ -2297,7 +2302,7 @@ class Alignment():
         self._align_to_reference_dataset[0]  = ar[key]['dataset']
         self._align_to_reference_variance_dataset[0]  = ar[key]['variance_dataset']
         
-    def _select_aligns(self):
+    def _select_align(self):
         if self._apply_rotation:
             if self._consider_point_inverse:
                 self._set_align('pr')
@@ -2388,7 +2393,8 @@ class Alignment():
         find_center = self.find_center
         shift = self.fourier_transform.shift
         ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
-        centering_dataset_id = self.alignment_defining_dataset_id 
+        centering_dataset_id = self.alignment_defining_dataset_id
+        real_pos = self.real_pos
 
         def center(density:np.ndarray):
             center = find_center(density)
@@ -2404,12 +2410,12 @@ class Alignment():
         def center_variance_dataset(dataset:tuple):
             center = find_center(dataset[centering_dataset_id[0]].mean)
             centered_mean = ift(shift(ft(dataset[0].mean),center,opposite_direction=True))
-            centered_m2 = ift(shift(ft(dataset[0].m2),center,opposite_direction=True)) 
+            centered_m2 = real_pos(ift(shift(ft(dataset[0].m2.astype(complex)),center,opposite_direction=True)))
             centered_density_var = CumulativeVariance(centered_mean,count = dataset[0].count,m2 = centered_m2) 
             centered_ft_mean = shift(dataset[1].mean,center,opposite_direction=True)
-            centered_ft_m2 = shift(dataset[1].m2,center,opposite_direction=True) 
+            centered_ft_m2 = dataset[1].m2 # variance is <|x*x.conj|>-<x>*<x>.conj()  which is invariant under shifts that change x by a phase 
             centered_ft_density_var = CumulativeVariance(centered_ft_mean,count = dataset[1].count,m2 = centered_ft_m2)
-            centered_variance_dataset = (centered_density_var,centered_ft_density_var)+tuple( CumulativeVariance(mean = ift(shift(ft(d.mean),center,opposite_direction=True)),count = d.count,m2 =  ift(shift(ft(d.m2),center,opposite_direction=True)))  for d in dataset[2:])
+            centered_variance_dataset = (centered_density_var,centered_ft_density_var)+tuple( CumulativeVariance(mean = ift(shift(ft(d.mean),center,opposite_direction=True)),count = d.count,m2 =  real_pos(ift(shift(ft(d.m2.astype(complex)),center,opposite_direction=True))))  for d in dataset[2:])
             return centered_variance_dataset
         return center,center_dataset,center_variance_dataset
     
@@ -2498,6 +2504,7 @@ class Alignment():
         preprocess,preprocess_d,preprocess_vd = self._preprocess,self._preprocess_dataset,self._preprocess_variance_dataset
         real_L2 = self.real_L2_norm
         reciprocal_L2 = self.reciprocal_L2_norm
+        real_pos = self.real_pos
         align_dict = {}
         def align_pair_pr(density1:np.ndarray,density2:np.ndarray):
             density1 = preprocess[0](density1)
@@ -2559,14 +2566,14 @@ class Alignment():
             if correlation_value2>correlation_value:
                 #print((correlation_value2-correlation_value)/abs(correlation_value))
                 euler_angles = euler_angles2
-                dataset10 = CumulativeVariance(mean = ift(ft(dataset1[0].mean).conj()),count = dataset1[0].count,m2= ift(ft(dataset1[0].m2).conj()))
-                dataset11 = CumulativeVariance(mean = dataset1[1].mean.conj(),count = dataset1[1].count,m2 = dataset1[1].m2.conj())
-                dataset1 = (dataset10,dataset11) + tuple( CumulativeVariance(mean = ift(ft(d.mean).conj()),count = d.count,m2= ift(ft(d.m2).conj())) for d in dataset1[2:])
+                dataset10 = CumulativeVariance(mean = ift(ft(dataset1[0].mean).conj()),count = dataset1[0].count,m2= real_pos(ift(ft(dataset1[0].m2.astype(complex)).conj())))
+                dataset11 = CumulativeVariance(mean = dataset1[1].mean.conj(),count = dataset1[1].count,m2 = dataset1[1].m2)
+                dataset1 = (dataset10,dataset11) + tuple( CumulativeVariance(mean = ift(ft(d.mean).conj()),count = d.count,m2= real_pos(ift(ft(d.m2.astype(complex)).conj()))) for d in dataset1[2:])
                 correlation_value=correlation_value2
             aligned_dataset1 = []
             for d in dataset1:
                 r_mean = iht(rotate_coeff(ht(d.mean),lm_split_ids,euler_angles))
-                r_m2 = iht(rotate_coeff(ht(d.m2),lm_split_ids,euler_angles))
+                r_m2 = real_pos(iht(rotate_coeff(ht(d.m2.astype(complex)),lm_split_ids,euler_angles)))
                 aligned_dataset1.append(CumulativeVariance(mean = r_mean,count = d.count,m2 = r_m2))
             return aligned_dataset1,dataset2,correlation_value,euler_angles
         
@@ -2624,9 +2631,9 @@ class Alignment():
             if correlation_value2>correlation_value:
                 #print((correlation_value2-correlation_value)/abs(correlation_value))
                 euler_angles = euler_angles2
-                dataset10 = CumulativeVariance(mean = ift(ft(dataset1[0].mean).conj()),count = dataset1[0].count,m2= ift(ft(dataset1[0].m2).conj()))
-                dataset11 = CumulativeVariance(mean = dataset1[1].mean.conj(),count = dataset1[1].count,m2 = dataset1[1].m2.conj())
-                dataset1 = (dataset10,dataset11) + tuple( CumulativeVariance(mean = ift(ft(d.mean).conj()),count = d.count,m2= ift(ft(d.m2).conj())) for d in dataset1[2:])
+                dataset10 = CumulativeVariance(mean = ift(ft(dataset1[0].mean).conj()),count = dataset1[0].count,m2= real_pos(ift(ft(dataset1[0].m2.astype(complex)).conj())))
+                dataset11 = CumulativeVariance(mean = dataset1[1].mean.conj(),count = dataset1[1].count,m2 = dataset1[1].m2)
+                dataset1 = (dataset10,dataset11) + tuple( CumulativeVariance(mean = ift(ft(d.mean).conj()),count = d.count,m2= real_pos(ift(ft(d.m2.astype(complex).conj())))) for d in dataset1[2:])
                 correlation_value=correlation_value2
             return dataset1,dataset2,correlation_value
         
@@ -2664,7 +2671,7 @@ class Alignment():
             aligned_dataset = []
             for d in dataset1:
                 r_mean = iht(rotate_coeff(ht(d.mean),lm_split_ids,euler_angles))
-                r_m2 = iht(rotate_coeff(ht(d.m2),lm_split_ids,euler_angles))
+                r_m2 = real_pos(iht(rotate_coeff(ht(d.m2.astype(complex)),lm_split_ids,euler_angles)))
                 aligned_dataset1.append(CumulativeVariance(mean = r_mean,count = d.count,m2 = r_m2))
             return aligned_dataset1,dataset2,correlation_value,euler_angles
         
@@ -2708,7 +2715,7 @@ class Alignment():
         preprocess,preprocess_d,preprocess_vd = self._preprocess,self._preprocess_dataset,self._preprocess_variance_dataset
         real_L2 = self.real_L2_norm
         reciprocal_L2 = self.reciprocal_L2_norm
-        
+        real_pos = self.real_pos
         align_dict = {}
         def align_to_reference_pr(density:np.ndarray):
             density = preprocess[0](density)                
@@ -2759,14 +2766,14 @@ class Alignment():
             if correlation_value2>correlation_value:
                 #print((correlation_value2-correlation_value)/abs(correlation_value))
                 euler_angles = euler_angles2
-                dataset0 = CumulativeVariance(mean = ift(ft(dataset[0].mean).conj()),count = dataset[0].count,m2= ift(ft(dataset[0].m2).conj()))
-                dataset1 = CumulativeVariance(mean = dataset[1].mean.conj(),count = dataset[1].count,m2 = dataset[1].m2.conj())
-                dataset = (dataset0,dataset1) + tuple( CumulativeVariance(mean = ift(ft(d.mean).conj()),count = d.count,m2= ift(ft(d.m2).conj())) for d in dataset[2:])
+                dataset0 = CumulativeVariance(mean = ift(ft(dataset[0].mean).conj()),count = dataset[0].count,m2= real_pos(ift(ft(dataset[0].m2.astype(complex)).conj())))
+                dataset1 = CumulativeVariance(mean = dataset[1].mean.conj(),count = dataset[1].count,m2 = dataset[1].m2)
+                dataset = (dataset0,dataset1) + tuple( CumulativeVariance(mean = ift(ft(d.mean).conj()),count = d.count,m2= real_pos(ift(ft(d.m2.astype(complex)).conj()))) for d in dataset[2:])
                 correlation_value=correlation_value2
             aligned_dataset = []
             for d in dataset:
                 r_mean = iht(rotate_coeff(ht(d.mean),lm_split_ids,euler_angles))
-                r_m2 = iht(rotate_coeff(ht(d.m2),lm_split_ids,euler_angles))
+                r_m2 = real_pos(iht(rotate_coeff(ht(d.m2.astype(complex)),lm_split_ids,euler_angles)))
                 aligned_dataset.append(CumulativeVariance(mean = r_mean,count = d.count,m2 = r_m2))
             return aligned_dataset,correlation_value,euler_angles
         align_dict['pr'] = {'value':align_to_reference_pr,'dataset': align_dataset_to_reference_pr,'variance_dataset':align_variance_dataset_to_reference_pr}     
@@ -2794,7 +2801,7 @@ class Alignment():
             aligned_dataset = []
             for d in dataset:
                 r_mean = iht(rotate_coeff(ht(d.mean),lm_split_ids,euler_angles))
-                r_m2 = iht(rotate_coeff(ht(d.m2),lm_split_ids,euler_angles))
+                r_m2 = real_pos(iht(rotate_coeff(ht(d.m2.astype(complex)),lm_split_ids,euler_angles)))
                 aligned_dataset.append(CumulativeVariance(mean = r_mean,count = d.count,m2 = r_m2))
             return aligned_dataset,correlation_value,euler_angles
         align_dict['r'] = {'value':align_to_reference_r,'dataset': align_dataset_to_reference_r,'variance_dataset':align_variance_dataset_to_reference_r}
@@ -2846,9 +2853,9 @@ class Alignment():
                 
             if correlation_value2>correlation_value:
                 #print((correlation_value2-correlation_value)/abs(correlation_value))
-                dataset0 = CumulativeVariance(mean = ift(ft(dataset[0].mean).conj()),count = dataset[0].count,m2= ift(ft(dataset[0].m2).conj()))
-                dataset1 = CumulativeVariance(mean = dataset[1].mean.conj(),count = dataset[1].count,m2 = dataset[1].m2.conj())
-                dataset = (dataset0,dataset1) + tuple( CumulativeVariance(mean = ift(ft(d.mean).conj()),count = d.count,m2= ift(ft(d.m2).conj())) for d in dataset[2:])
+                dataset0 = CumulativeVariance(mean = ift(ft(dataset[0].mean).conj()),count = dataset[0].count,m2= real_pos(ift(ft(dataset[0].m2.astype(complex)).conj())))
+                dataset1 = CumulativeVariance(mean = dataset[1].mean.conj(),count = dataset[1].count,m2 = dataset[1].m2)
+                dataset = (dataset0,dataset1) + tuple( CumulativeVariance(mean = ift(ft(d.mean).conj()),count = d.count,m2= real_pos(ift(ft(d.m2.astype(complex)).conj()))) for d in dataset[2:])
                 correlation_value=correlation_value2
             return dataset,correlation_value
         
@@ -2887,19 +2894,20 @@ class Alignment():
 class AlignedAveragerStruct:
     defaults = DictNamespace.dict_to_dictnamespace(
         {'fourier_struct': SphericalFourierTransformStruct(),
-                'alignment':{'align_by':0,
-                             'normalization':{'apply':True,
-                                              'method':np.max},
-                             'positional':{'apply':True},
-                             'rotational':{'apply':True,                                           
-                                           'r_limits':[None,None],
-                                           'consider_point_inverse':True}
-                             },
-                'averaging':{'n_random_instances':1,
-                             'mode':'pairwise_shared'
-                             },
-                 'n_processes':None
-                }
+         'alignment':{'align_by':0,
+                      'normalization':{'apply':True,
+                                       'method':np.max},
+                      'positional':{'apply':True},
+                      'rotational':{'apply':True,                                           
+                                    'r_limits':[None,None],
+                                    'consider_point_inverse':True}
+                      },
+         'averaging':{'n_random_orders':1,
+                      'mode':'pairwise_shared', # 'single_reference'
+                      'single_reference': {'selection':'random'}
+                      },
+         'n_processes':None
+         }
     )
     
     def __init__(self,fourier_struct : SphericalFourierTransformStruct|None = None,alignment : dict|None =None,averaging : dict|None =None,n_processes=None):
@@ -2932,17 +2940,17 @@ class AlignedAverager:
         if hankel_weights is not None:
             self.hankel_weights =  hankel_weights
         else:
-            self.hankel_weights = HankelTransformWeights.get_weights_dict(struct.fourier_struct)['weights']
-            
+            self.hankel_weights = HankelTransformWeights.get_weights(struct.fourier_struct)
         self.fourier = SphericalFourierTransform(struct.fourier_struct,weights=self.hankel_weights)
         
         self.aligner = Alignment(self.fourier,
-                                                        consider_point_inverse = self.struct.alignment.rotational.consider_point_inverse,
-                                                        dataset_length=dataset_length,
-                                                        normalize = self.struct.alignment.normalization.apply,
-                                                        center = self.struct.alignment.positional.apply,
-                                                        normalization_method = self.struct.alignment.normalization.method,
-                                                        wigner_data=alignment_wigners)
+                                 wigner_data=alignment_wigners,
+                                 consider_point_inverse = self.struct.alignment.rotational.consider_point_inverse,
+                                 normalize = self.struct.alignment.normalization.apply,
+                                 normalization_method = self.struct.alignment.normalization.method,
+                                 center = self.struct.alignment.positional.apply,
+                                 rotate = self.struct.alignment.rotational.apply,
+                                 dataset_length=dataset_length)
         self.wigner_data = self.aligner.soft.wigner_data
         self.dataset_length = dataset_length
 
@@ -2956,10 +2964,14 @@ class AlignedAverager:
             data = data.__getitem__
             align_method = 'align_to_reference'
         else:
-            align_method = 'align_dataset_to_reference'
-        n_references = self.struct.averaging.n_random_instances
+            align_method = 'align_to_reference_variance_dataset'
+        n_references = self.struct.averaging.n_random_orders
         n_processes = self.struct.n_processes
-        ref_ids = np.random.choice(np.arange(n_datasets),n_references,replace=False)
+        if self.struct.averaging.single_reference == 'random':
+            ref_ids = np.random.choice(np.arange(n_datasets),n_references,replace=False)
+        else:
+            n_references = 1
+            ref_ids = (0,)
         ids = np.array(tuple((j,ref)  for ref in ref_ids for j in range(n_datasets)))
         d_length = self.dataset_length
         update_aligner = self._set_aligner_properties
@@ -3098,8 +3110,8 @@ class AlignedAverager:
             align_method = 'align_pair'
             raise NotImplementedError('Average_pairwise is currently only implemented for datasets. Not individual numpy arrays. To little time to write the wrapper now ... ')
         else:
-            align_method = 'align_variance_dataset_pair'
-        n_random_instances = self.struct.averaging.n_random_instances
+            align_method = 'align_pair_variance_dataset'
+        n_random_instances = self.struct.averaging.n_random_orders
         n_processes = self.struct.n_processes
         ids,weights,initial_ids = self._create_reduction_pair_ids(n_datasets,n_random_instances = n_random_instances)
         d_length = self.dataset_length
@@ -3125,8 +3137,8 @@ class AlignedAverager:
                     merged_data = tuple(v.data for v in var1)
                 else:
                     var2 = variance_loader(_id[1])
-                    var1,var2 = align(var1,var2)[:2]
-                    merged_data = tuple( v2.merge(v1).data for v1,v2 in zip(var1,var2))
+                    var2,var1 = align(var2,var1)[:2]
+                    merged_data = tuple( v1.merge(v2).data for v1,v2 in zip(var1,var2))
                 merged.append(merged_data)
             return merged
             
@@ -3161,8 +3173,8 @@ class AlignedAverager:
             align_method = 'align_pair'
             raise NotImplementedError('Average_pairwise is currently only implemented for datasets. Not individual numpy arrays. To little time to write the wrapper now ... ')
         else:
-            align_method = 'align_variance_dataset_pair'
-        n_random_instances = self.struct.averaging.n_random_instances
+            align_method = 'align_pair_variance_dataset'
+        n_random_instances = self.struct.averaging.n_random_orders
         n_processes = self.struct.n_processes
         ids,weights,initial_ids = self._create_reduction_pair_ids(n_datasets,n_random_instances = n_random_instances)
         d_length = self.dataset_length
@@ -3192,8 +3204,8 @@ class AlignedAverager:
                     merged_data = tuple(v for v in var1)
                 else:
                     var2 = variance_loader(_id[1])
-                    var1,var2 = align(var1,var2)[:2]
-                    merged_data = tuple( v2.merge(v1) for v1,v2 in zip(var1,var2))
+                    var2,var1 = align(var2,var1)[:2]
+                    merged_data = tuple( v1.merge(v2) for v1,v2 in zip(var1,var2))
                 for d_id,md in enumerate(merged_data):
                     #print(f'var_ids = {tuple(3*d_id+i for i in range(d_length))} out id = {out_id}')
                     mean_out = outs[3*d_id]
@@ -3201,7 +3213,7 @@ class AlignedAverager:
                     count_out = outs[3*d_id+1]
                     count_out[out_id] = md.count
                     m2_out = outs[3*d_id+2]
-                    m2_out[out_id] = md.m2
+                    m2_out[out_id] = md.m2.real
             
         def step_data(_id:int):
             d = data(_id)
@@ -3223,7 +3235,7 @@ class AlignedAverager:
             output_dtypes = []
             for s in shapes:
                 output_shapes+=[s,(len(step_pairs),),s]
-                output_dtypes+=[complex,int,complex]
+                output_dtypes+=[complex,int,float]
             results = Multiprocessing.process_mp_request(worker,
                                                          mode = Multiprocessing.MPMode_SharedArray(output_shapes,output_dtypes),
                                                          input_arrays=[step_pairs],
@@ -3232,6 +3244,7 @@ class AlignedAverager:
                                                          split_mode='sequential',
                                                          n_processes = n_processes)
             #results_flat = [tuple(CumulativeVariance(mean = results[3*i][j].copy(),count = results[3*i+1][j].copy(), m2 = results[3*i+2][j].copy()) for i in range(d_length)) for j in range(len(step_pairs))]
+            #print(f'm2 = {[tuple(np.min(results[3*i+2][j])  for i in range(d_length)) for j in range(len(step_pairs)) ]}')
             results_flat = tuple(tuple(CumulativeVariance(mean = results[3*i][j],count = results[3*i+1][j], m2 = results[3*i+2][j]) for i in range(d_length)) for j in range(len(step_pairs)))
             first_variance_per_step[num]=results_flat[0]
             step_data = results_flat.__getitem__ 

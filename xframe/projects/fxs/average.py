@@ -39,8 +39,10 @@ from .projectLibrary.harmonic_transforms import HarmonicTransform
 from .projectLibrary.misk import _get_reciprocity_coefficient
 from .projectLibrary.resolution_metrics import PRTF_fxs,FQCB_2D,FQCB_3D,FSC_single_fxs,FSC_bit_limit
 from .projectLibrary.fxs_invariant_tools import intensity_to_deg2_invariant,harmonic_coeff_to_deg2_invariants
-from xframe.externalLibraries import shtns_plugin,soft_plugin
+from xframe.externalLibraries import shtns_plugin2 as shtns_plugin
+from xframe.externalLibraries import soft_plugin
 from .projectLibrary.fourier_transforms import generate_ft,load_fourier_transform_weights
+from xframe.library.math_transforms import HankelTransformStruct
 #from analysisLibrary.classes import ReciprocalProjectionData
 from xframe import settings
 from xframe import database
@@ -863,15 +865,26 @@ class Alignment():
         Nr,Nq = self.Nr,self.Nq
         harmonic_transform_opt = { i:r_opt.grid.get(i,0) for i in ['n_phi','n_theta']}
         
-        fourier_transform_weights = load_fourier_transform_weights(self.dimension,r_opt.fourier_transform.type,self.max_order,(self.Nr,self.Nq),r_opt.fourier_transform.reciprocity_coefficient,allow_weight_saving=True,n_processes=self.opt.multi_process.n_processes_weight_generation)
+        h_struct = HankelTransformStruct()
+        h_struct.dimension = self.dimension
+        h_struct.n_radial_points = (self.Nr,self.Nq)
+        h_struct.angular_bandwidth = self.max_order+1
+        h_struct.hankel_type = r_opt.fourier_transform.type
+        h_struct.reciprocity_coefficient = r_opt.fourier_transform.reciprocity_coefficient
+        h_struct.max_q = max_q
+        #fourier_transform_weights = load_fourier_transform_weights(h_struct)
         max_nonzero_r = r_opt.grid.get("max_nonzero_r",None)
         if max_nonzero_r is None:
             r_support = None
         else:
             r_support = r_opt.particle_radius*max_nonzero_r
-            
+
+        h_struct.max_nonzero_r = r_support
         
-        sft = SphericalFourierTransform.from_weight_dict(fourier_transform_weights,q_max = max_q,use_gpu=self.opt.GPU.use,other = harmonic_transform_opt,r_support = r_support)
+        h_struct.n_azimutal_angles = harmonic_transform_opt['n_theta']
+        h_struct.n_polar_angles = harmonic_transform_opt['n_phi']
+        
+        sft = SphericalFourierTransform(struct = h_struct)
 
         if self.dimension == 2:
             bandwidth = fourier_transform_weights['bandwidth']

@@ -328,8 +328,15 @@ class HankelTransformWeights:
         temp = struct.__dict__        
         weight_generator = getattr(cls,struct.hankel_type)
         weights = weight_generator(struct.n_radial_points,struct.angular_bandwidth,struct.dimension,struct.reciprocity_coefficient,struct.n_processes_for_weight_generation,**struct.other)
-        temp["weights"]=weights
+        temp = {"weights":weights}
         return temp
+
+    @classmethod
+    def get_weights(cls,struct: HankelWeightStruct = HankelWeightStruct()):
+        temp = struct.__dict__        
+        weight_generator = getattr(cls,struct.hankel_type)
+        weights = weight_generator(struct.n_radial_points,struct.angular_bandwidth,struct.dimension,struct.reciprocity_coefficient,struct.n_processes_for_weight_generation,**struct.other)
+        return weights
 
     
 @dataclass

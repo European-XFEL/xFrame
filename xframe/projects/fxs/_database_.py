@@ -12,6 +12,7 @@ import glob
 from xframe.interfaces import DatabaseInterface,ExperimentWorkerInterface,ProjectWorkerInterface
 from xframe.library.mathLibrary import plane3D
 from xframe.library.mathLibrary import spherical_to_cartesian
+from xframe.library.math_transforms import SphericalFourierTransformStruct,SphericalFourierTransform
 #from xframe.projectRecipes import analysisLibrary as aLib
 from xframe.library.gridLibrary import GridFactory
 from xframe.library.gridLibrary import NestedArray
@@ -96,6 +97,113 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         return run-1
 
     def save_average_results(self,name,data,**kwargs):
+        options = kwargs
+        log.info(options)
+        ft_struct = SphericalFourierTransformStruct(**data['fourier_transform_struct'])
+        ft = SphericalFourierTransform(ft_struct)
+        time_struct=time.gmtime()
+        time_str=str(time_struct[2])+'_'+str(time_struct[1])+'_'+str(time_struct[0])
+        path=self.folders[self.files['average_results']['folder']]
+        path_modifiers={'time':time_str,'structure_name':settings.project.structure_name,'dimensions':ft.dimensions}
+        run= self.get_latest_run('average_results',path_modifiers=path_modifiers) + 1
+        path_modifiers['run']=run
+        run_path=path.format(**path_modifiers)
+        log.info('run_path = {}'.format(run_path))
+        path = self.get_path('average_results', path_modifiers=path_modifiers)
+        self.save(path,data)
+
+        if options.get('save_settings',True):
+            path = os.path.dirname(self.get_path('average_results', path_modifiers=path_modifiers))
+            self._save_settings(path)
+            
+        real_grid = ft.real_grid
+        reciprocal_grid = ft.reciprocal_grid
+        dimension = ft.dimensions
+        qs = reciprocal_grid[:].__getitem__((slice(None),)+(int(0),)*dimension)
+        #reciprocity_coefficient = data['reciprocity_coefficient']
+        #reciprocal_grid[...,0]*= (np.pi/reciprocity_coefficient) 
+        vtk_saver = self.get_db('file://vtk').save
+
+
+        if options['generate_average_vtk']:
+            try:
+                real_density = data['real_density'].real
+                real_mean_over_std = real_density.real/np.sqrt(np.abs(data['real_variance']).real)
+                real_mask = data['mask'].real
+                real_mask_mean_over_std = real_density.real/np.sqrt(np.abs(data['mask_variance']).real)
+                intensity = (data['reciprocal_density']*data['reciprocal_density'].conj()).real
+                intensity_over_variance = intensity/np.abs(data['reciprocal_variance']).real
+
+                if dimension == 2:
+                    grid_type = 'polar'
+                elif dimension == 3:
+                    grid_type = 'spherical'
+                real_vtk_path=self.get_path('real_vtk',path_modifiers={**path_modifiers,'reconstruction':'average'})
+                
+                self.save(real_vtk_path,[real_density.real,real_mean_over_std,real_mask,real_mask_mean_over_std],grid = real_grid,names=['density','mean/std','mask','mask_mean/mask_std'],grid_type=grid_type)
+
+                reciprocal_vtk_path=self.get_path('reciprocal_vtk',path_modifiers={**path_modifiers,'reconstruction':'average'})
+                
+                self.save(reciprocal_vtk_path,[intensity,intensity_over_variance],grid = reciprocal_grid,names=['intensity','intensity/variance'],grid_type=grid_type)
+                #vtk_saver([reciprocal_density],reciprocal_grid,reciprocal_vtk_path, dset_names = ['amplitude'],grid_type='spherical')
+                if options['generate_progression_vtk']:
+                    n_steps = len(data['variance_step_progression'])
+                    progression = [d['real']['mean'].real for d in data['variance_step_progression'].values()]
+                    names = [f'mean_step_{i}'for i in range(1,n_steps+1)]
+                    progression += [d['real']['mean'].real/np.sqrt(np.abs(d['real']['variance']).real) for d in data['variance_step_progression'].values()]
+                    names += [f'mean/std_step_{i}'for i in range(1,n_steps+1)]
+                    progression += [d['mask']['mean'].real for d in data['variance_step_progression'].values()]
+                    names += [f'mask_step_{i}'for i in range(1,n_steps+1)]
+                    
+                    real_progression_vtk_path=self.get_path('real_vtk',path_modifiers={**path_modifiers,'reconstruction':'average_steps'})
+                    self.save(real_progression_vtk_path,progression,grid = real_grid,names=names,grid_type=grid_type)
+            except Exception as e:
+                traceback.print_exc()
+                log.error('Failed to generate aligned vtk.')
+                
+        if options['plot_resolution_metrics']:
+            try:
+                for key,metrics in data['resolution_metrics'].items():
+                    if key == "PRTF":
+                        layout = {'title':'PRTF','x_label':r'q [\AA$^{-1}$]','y_label':'PRTF [arb.]'}                        
+                        fig = plot1D.get_fig(np.vstack([np.abs(metrics),np.full_like(metrics,1/np.exp(1))]),grid = qs,ylim=[0.0,1.1],layout = layout,labels=['PRTF','limit'])
+                        fig_path = run_path + 'PRTF.matplotlib'
+                        self.save(fig_path,fig)
+                    if key == "mean_std_integrated_progression":
+                        layout = {'title':'integrated(mean/std)','x_label':r'$\approx \log_2($ \#Averaged patterns$)$','y_label':'integrated(mean/std) [arb.]'}
+                        fig = plot1D.get_fig(metrics,grid = np.arange(1,len(metrics)+1),y_scale='log',layout = layout,labels=['int(mean/std)'])
+                        fig_path = run_path + 'progresion_mean_std.matplotlib'
+                        self.save(fig_path,fig)
+            except Exception as e:
+                traceback.print_exc()
+                log.error('Failed to generate resolution metric plots.')
+
+        if options['plot_average_bl']:
+            #input matrices
+            if dimension == 3:
+                Bls = np.array([m @ m.T.conj() for m in data['input_proj_matrices']])
+            elif dimension == 2:
+                Bls = np.array([m[:,None] * m.T.conj()[None,:] for m in data['input_proj_matrices']])
+            Bls/=np.max(np.abs(Bls))
+            self._save_first_invariants(Bls.real,qs,run_path,options,name="input_",scale='symlog',cmap='RdBu',plot_abs = False)
+            
+            mask = (Bls[:ft_struct.angular_bandwidth] == 0)
+            
+            I = np.abs(ft.forward_cmplx(data['real_density'])).real**2
+            I2 = np.abs(data['reciprocal_density']).real**2
+            #xprint(I.shape)
+            bl = intensity_to_deg2_invariant(I)
+            bl/=np.max(np.abs(bl[:ft_struct.angular_bandwidth][mask]))
+            ft_bl = intensity_to_deg2_invariant(I2)
+            ft_bl/=np.max(np.abs(ft_bl[:ft_struct.angular_bandwidth][mask]))
+            self._save_first_invariants(bl.real,qs,run_path,options,name="average_".format(key),scale='symlog',cmap='RdBu',plot_abs = False)
+            self._save_first_invariants(ft_bl.real,qs,run_path,options,name="average_ft_".format(key),scale='symlog',cmap='RdBu',plot_abs = False)
+            #self._save_first_invariants(ft_bl,qs,run_path,options,name='average_ft_')
+
+
+            #self._save_first_invariants(Bls,q_radial_points,run_path,options,name="first_")
+            
+    def save_average_results_old(self,name,data,**kwargs):
         grid_pair = data['internal_grid']
         real_grid = grid_pair["real_grid"]
         reciprocal_grid = grid_pair["reciprocal_grid"].copy()
@@ -212,7 +320,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             try:
                 for key,metrics in data['resolution_metrics'].items():
                     if key == "PRTF":
-                        layout = {'title':'PRTF','x_label':'q [\AA$^{-1}$]','y_label':'PRTF [arb.]'}                        
+                        layout = {'title':'PRTF','x_label':r'q [\AA$^{-1}$]','y_label':'PRTF [arb.]'}                        
                         fig = plot1D.get_fig(np.abs(metrics),grid = qs,ylim=[0.0,1.1],layout = layout,labels=['PRTF'])
                         fig_path = run_path + 'PRTF.matplotlib'
                         self.save(fig_path,fig)
@@ -296,11 +404,11 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                 errors = np.moveaxis(np.array([d['error_dict']['reciprocal']['deg2_invariant_l2_diff'] for d in r.values()]),2,0)
                 for order in err_orders:
                     if order in settings.project.projections.reciprocal.used_order_ids:
-                        fig = plot1D.get_fig(errors[order,::-1,2:],y_scale = 'log',layout={'title':'Relative B{} errors.'.format(order),'x_label':'loop step','y_label':'$\sum_{q_1,q_2}(B_l-B_l^{data})^2/(B_l^{data})^2$'})
+                        fig = plot1D.get_fig(errors[order,::-1,2:],y_scale = 'log',layout={'title':'Relative B{} errors.'.format(order),'x_label':'loop step','y_label':r'$\sum_{q_1,q_2}(B_l-B_l^{data})^2/(B_l^{data})^2$'})
                         error_path = run_path + 'B{}_errors.matplotlib'.format(order)
                         self.save(error_path,fig)
                 mean_error = np.mean(errors[::2],axis = 0)
-                fig = plot1D.get_fig(mean_error[::-1,2:],y_scale = 'log',layout={'title':'Relative Bl errors mean.','x_label':'loop step','y_label':'$\sum_{q_1,q_2}(B_l-B_l^{data})^2/(B_l^{data})^2$'})
+                fig = plot1D.get_fig(mean_error[::-1,2:],y_scale = 'log',layout={'title':'Relative Bl errors mean.','x_label':'loop step','y_label':r'$\sum_{q_1,q_2}(B_l-B_l^{data})^2/(B_l^{data})^2$'})
                 error_path = run_path + 'Bl_mean_error.matplotlib'.format(order)
                 self.save(error_path,fig)
         except Exception as e:
@@ -341,17 +449,17 @@ class ProjectDB(DefaultDB,DatabaseInterface):
 
                     if settings.project["dimensions"] == 3:
 
-                        self.save(real_vtk_path,[real_density,real_mask,last_real_density,last_real_mask,initial_density,initial_support],grid =real_grid,grid_type='spherical',skip_custom_methods=True,dset_names=['best_density','best_support','last_density','last_support','initial_density','initial_support'])
+                        self.save(real_vtk_path,[real_density,real_mask,last_real_density,last_real_mask,initial_density,initial_support],grid =real_grid,grid_type='spherical',skip_custom_methods=True,names=['best_density','best_support','last_density','last_support','initial_density','initial_support'])
                         #save_vtk([real_density,real_mask],real_grid,real_vtk_path,grid_type='spherical')
                          
                         reciprocal_vtk_path=self.get_path('reciprocal_vtk',path_modifiers=vtk_path_modifiers)
-                        self.save(reciprocal_vtk_path,[reciprocal_intensity,last_reciprocal_intensity],grid = reciprocal_grid,grid_type='spherical',skip_custom_methods=True,dset_names=['best_intensity','last_intensity'])
+                        self.save(reciprocal_vtk_path,[reciprocal_intensity,last_reciprocal_intensity],grid = reciprocal_grid,grid_type='spherical',skip_custom_methods=True,names=['best_intensity','last_intensity'])
                     elif settings.project["dimensions"] == 2:
-                        self.save(real_vtk_path,[real_density,real_mask,last_real_density,last_real_mask,initial_density,initial_support],grid =real_grid,grid_type='polar',skip_custom_methods=True,dset_names=['best_density','best_support','last_density','last_support','initial_density','initial_support'])
+                        self.save(real_vtk_path,[real_density,real_mask,last_real_density,last_real_mask,initial_density,initial_support],grid =real_grid,grid_type='polar',skip_custom_methods=True,names=['best_density','best_support','last_density','last_support','initial_density','initial_support'])
                         #save_vtk([real_density,real_mask],real_grid,real_vtk_path,grid_type='spherical')
                          
                         reciprocal_vtk_path=self.get_path('reciprocal_vtk',path_modifiers=vtk_path_modifiers)
-                        self.save(reciprocal_vtk_path,[reciprocal_intensity,last_reciprocal_intensity],grid = reciprocal_grid,grid_type='polar',skip_custom_methods=True,dset_names=['best_intensity','last_intensity'])
+                        self.save(reciprocal_vtk_path,[reciprocal_intensity,last_reciprocal_intensity],grid = reciprocal_grid,grid_type='polar',skip_custom_methods=True,names=['best_intensity','last_intensity'])
                         #log.info(reciprocal_grid[:,0,0])
                          
         except Exception as e:

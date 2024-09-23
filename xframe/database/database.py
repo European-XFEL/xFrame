@@ -494,7 +494,10 @@ class SettingsLoader:
         settings['_settings_path']=settings_path
         settings['_default_settings_path']=default_path
         xprint(f'Paresed settings file: {op.basename(settings_path)}')
-        xprint(f'Using Defaults: {op.basename(default_path)}')
+        if isinstance(default_path,bool):
+            xprint(f'No default settings found.')
+        else:
+            xprint(f'Using Defaults: {op.basename(default_path)}')
         return settings,default_settings,load_sub_defaults
 
 class SettingsParser:

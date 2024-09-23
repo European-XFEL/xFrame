@@ -1115,6 +1115,13 @@ class Deg2Invar:
     def from_intensity():
         pass
     @staticmethod
+    def from_intensity_coeff(coeff,dim=3):
+        if dim == 2:
+            B = np.array(tuple(c[:,None]*c[None,:].conj() for c in coeff.T))
+        else:
+            B = np.array(tuple(coeff.lm[l] @ np.conj(coeff.lm[l].T) for l in coeff.ls))
+        return B
+    @staticmethod
     def from_intensity_coeff():
         pass
     @staticmethod
