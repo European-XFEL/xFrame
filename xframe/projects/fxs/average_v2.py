@@ -164,8 +164,9 @@ class ProjectWorker(ProjectWorkerInterface):
         
         integrate = SphericalIntegrator(ft.real_grid).integrate_normed
         mean_std_integrated_progression = np.array([ integrate(res[0].mean.real/np.sqrt(np.abs(res[0].variance).real)) for res in results[2] ])
+        progression_counts = np.array([res[0].count for res in results[2]])
         
-        metrics = {"PRTF":PRTF2,"PRTF_reciprocal":PRTF1,'mean_std_integrated_progression':mean_std_integrated_progression}
+        metrics = {"PRTF":PRTF2,"PRTF_from_scattering_amplitude":PRTF1,'mean_std_integrated_progression':mean_std_integrated_progression,'progression_counts':progression_counts}
         return metrics
     def post_processing(self,results):
         var_objects = results[0][0]

@@ -120,6 +120,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         reciprocal_grid = ft.reciprocal_grid
         dimension = ft.dimensions
         qs = reciprocal_grid[:].__getitem__((slice(None),)+(int(0),)*dimension)
+        rs = real_grid[:].__getitem__((slice(None),)+(int(0),)*dimension)
         #reciprocity_coefficient = data['reciprocity_coefficient']
         #reciprocal_grid[...,0]*= (np.pi/reciprocity_coefficient) 
         vtk_saver = self.get_db('file://vtk').save
@@ -128,11 +129,16 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         if options['generate_average_vtk']:
             try:
                 real_density = data['real_density'].real
+                scaling = np.max(real_density)
                 real_mean_over_std = real_density.real/np.sqrt(np.abs(data['real_variance']).real)
+                real_mean_plus_std = real_density.real+np.sqrt(np.abs(data['real_variance']).real)
+                real_mean_minus_std = real_density.real-np.sqrt(np.abs(data['real_variance']).real)
                 real_mask = data['mask'].real
                 real_mask_mean_over_std = real_density.real/np.sqrt(np.abs(data['mask_variance']).real)
                 intensity = (data['reciprocal_density']*data['reciprocal_density'].conj()).real
                 intensity_over_variance = intensity/np.abs(data['reciprocal_variance']).real
+                intensity_plus_variance = intensity+np.abs(data['reciprocal_variance']).real
+                intensity_minus_variance = intensity-np.abs(data['reciprocal_variance']).real
 
                 if dimension == 2:
                     grid_type = 'polar'
@@ -140,11 +146,11 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                     grid_type = 'spherical'
                 real_vtk_path=self.get_path('real_vtk',path_modifiers={**path_modifiers,'reconstruction':'average'})
                 
-                self.save(real_vtk_path,[real_density.real,real_mean_over_std,real_mask,real_mask_mean_over_std],grid = real_grid,names=['density','mean/std','mask','mask_mean/mask_std'],grid_type=grid_type)
+                self.save(real_vtk_path,[real_density.real,real_mean_over_std,real_mean_plus_std,real_mean_minus_std,real_mask,real_mask_mean_over_std],grid = real_grid,names=['density','mean/std','real+std','real-std','mask','mask_mean/mask_std'],grid_type=grid_type)
 
                 reciprocal_vtk_path=self.get_path('reciprocal_vtk',path_modifiers={**path_modifiers,'reconstruction':'average'})
                 
-                self.save(reciprocal_vtk_path,[intensity,intensity_over_variance],grid = reciprocal_grid,names=['intensity','intensity/variance'],grid_type=grid_type)
+                self.save(reciprocal_vtk_path,[intensity,intensity_over_variance,intensity_plus_variance,intensity_minus_variance],grid = reciprocal_grid,names=['intensity','intensity/variance','intensity+variance','intensity-variance'],grid_type=grid_type)
                 #vtk_saver([reciprocal_density],reciprocal_grid,reciprocal_vtk_path, dset_names = ['amplitude'],grid_type='spherical')
                 if options['generate_progression_vtk']:
                     n_steps = len(data['variance_step_progression'])
@@ -165,14 +171,15 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             try:
                 for key,metrics in data['resolution_metrics'].items():
                     if key == "PRTF":
-                        layout = {'title':'PRTF','x_label':r'q [\AA$^{-1}$]','y_label':'PRTF [arb.]'}                        
-                        fig = plot1D.get_fig(np.vstack([np.abs(metrics),np.full_like(metrics,1/np.exp(1))]),grid = qs,ylim=[0.0,1.1],layout = layout,labels=['PRTF','limit'])
+                        layout = {'title':'PRTF','x_label':r'q [\AA$^{-1}$]','y_label':'PRTF [arb.]'}        
+                        fig = plot1D.get_fig(np.vstack([np.abs(metrics),data['resolution_metrics']['PRTF_from_scattering_amplitude'],np.full_like(metrics,1/np.exp(1))]),grid = qs,ylim=[0.0,1.1],layout = layout,labels=['PRTF','PRTF from sca','limit'])
                         fig_path = run_path + 'PRTF.matplotlib'
-                        self.save(fig_path,fig)
+                        self.save(fig_path,fig)                    
+                    
                     if key == "mean_std_integrated_progression":
-                        layout = {'title':'integrated(mean/std)','x_label':r'$\approx \log_2($ \#Averaged patterns$)$','y_label':'integrated(mean/std) [arb.]'}
-                        fig = plot1D.get_fig(metrics,grid = np.arange(1,len(metrics)+1),y_scale='log',layout = layout,labels=['int(mean/std)'])
-                        fig_path = run_path + 'progresion_mean_std.matplotlib'
+                        layout = {'title':'integrated(mean/std)','x_label':r'\# of averaged patterns$)$','y_label':'integrated(mean/std) [arb.]'}
+                        fig = plot1D.get_fig(metrics,grid = data['resolution_metrics']['progression_counts'],y_scale='log',layout = layout,labels=['int(mean/std)'])
+                        fig_path = run_path + 'progression_mean_std.matplotlib'
                         self.save(fig_path,fig)
             except Exception as e:
                 traceback.print_exc()
@@ -438,8 +445,8 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                     initial_support = result['initial_support']
                     last_real_density = result['last_real_density'].real
                     last_real_mask = result['last_support_mask']
-                    reciprocal_intensity = np.abs(result['reciprocal_density']).real
-                    last_reciprocal_intensity = np.abs(result['last_reciprocal_density']).real
+                    reciprocal_intensity = (result['reciprocal_density']*result['reciprocal_density'].conj()).real
+                    last_reciprocal_intensity = (result['last_reciprocal_density']*result['last_reciprocal_density'].conj()).real
 
                     _id_str = str(id)
                     if id in worst_id:

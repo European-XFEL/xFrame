@@ -962,7 +962,7 @@ class MTIP:
                                 #        break                            
                                 #log.info('current density shapes reciprocal={} real={}'.format(density_pairs[-1][0].shape,density_pairs[-1][1].shape))
                                         
-                                new_density_pair = process.run(*hist[-1])                            
+                                new_density_pair = process.run(*hist[-1])
                                 copied_density_pair = tuple(copy(a) for a in new_density_pair)
                                 state['density_pair_history']=hist[1:]+(copied_density_pair,)
                                 main_error = main_error_routine(error_dict)

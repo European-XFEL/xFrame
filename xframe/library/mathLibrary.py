@@ -40,7 +40,7 @@ from xframe import Multiprocessing
 
 ######################
 ## This library is a convoluted mess where half of the functions
-## are useless and nod needed anymore ... but the other half is important
+## are useless and not needed anymore ... but the other half is important
 ##
 ## This comment seves to remind me of the dire need to clean up this file !!
 
@@ -2032,7 +2032,8 @@ class CumulativeVariance:
     @property
     def data(self):
         return (self.mean,self.count,self.m2)
-
+    def copy(self):
+        return CumulativeVariance(mean = np.array(self.mean),count = self.count ,m2=np.array(self.m2))
 
 #################
 ####alignment####
@@ -2959,19 +2960,24 @@ class AlignedAverager:
         aligner.alignment_defining_dataset_id = self.struct.alignment.align_by
         return aligner
     
-    def average_single_reference(self,data: np.ndarray|typing.Callable,n_datasets:int):
+    def average_single_reference(self,data: np.ndarray|typing.Callable,n_datasets:int,reference=None):
         if isinstance(data,np.ndarray):
             data = data.__getitem__
             align_method = 'align_to_reference'
         else:
-            align_method = 'align_to_reference_variance_dataset'
-        n_references = self.struct.averaging.n_random_orders
-        n_processes = self.struct.n_processes
-        if self.struct.averaging.single_reference == 'random':
-            ref_ids = np.random.choice(np.arange(n_datasets),n_references,replace=False)
-        else:
+            align_method = 'align_to_reference_dataset'
+        if reference is not None:
             n_references = 1
-            ref_ids = (0,)
+            ref_ids=(0,)
+        else:
+            n_references = self.struct.averaging.n_random_orders
+
+            if self.struct.averaging.single_reference == 'random':
+                ref_ids = np.random.choice(np.arange(n_datasets),n_references,replace=False)
+            else:
+                n_references = 1
+                ref_ids = (0,)
+        n_processes = self.struct.n_processes
         ids = np.array(tuple((j,ref)  for ref in ref_ids for j in range(n_datasets)))
         d_length = self.dataset_length
         update_aligner = self._set_aligner_properties
@@ -2988,15 +2994,17 @@ class AlignedAverager:
                                                        wigner_data=self.wigner_data)
             aligner = update_aligner(aligner)
             align = aligner.__getattribute__(align_method)
-            
-            ref_id = ids[0,1]
-            aligner.reference  = data(ref_id)
+            if reference is not None:
+                ref_id = np.nan
+                aligner.reference = reference                
+            else:
+                ref_id = ids[0,1]
+                aligner.reference  = data(ref_id)
             aligned_ds = [[]]
             ref_ids = [ref_id]
             variances_per_ref_id = [tuple(CumulativeVariance() for i in range(d_length))]
-            ref_ids = [ref_id]
             for _id in ids:
-                if _id[1] != ref_id:
+                if (_id[1] != ref_id) and isinstance(ref_id,int):
                     ref_id = _id[1]
                     ref_ids.append(ref_id)
                     aligner.reference = data(ref_id)
@@ -3014,21 +3022,32 @@ class AlignedAverager:
                     
             out = tuple( tuple(variance.data for variance in variances) for variances in variances_per_ref_id) 
             return out,ref_ids
-            
         results = Multiprocessing.process_mp_request(worker,
                        input_arrays=[ids],
                        call_with_multiple_arguments=True,
                        split_mode='sequential',
                        n_processes = n_processes)
-        
-        variances_per_ref = {ref_id:tuple(CumulativeVariance() for i in range(d_length)) for ref_id in ref_ids}
-        
-        for worker_part in results:
-            for ref_part,ref_id in zip(worker_part[0],worker_part[1]):
-                variances = variances_per_ref[ref_id]
-                for d,variance in zip(ref_part,variances):
-                    variance.merge_from_data(*d)   
-        return tuple(variances_per_ref.values()),ids
+        if reference is not None:            
+            variances_per_ref = {'reference':tuple(CumulativeVariance() for i in range(d_length))}
+            progression = []
+            for worker_part in results:
+                for ref_part in worker_part[0]:
+                    variances = variances_per_ref['reference']
+                    for d,variance in zip(ref_part,variances):
+                        variance.merge_from_data(*d)
+                    progression.append(tuple(v.copy() for v in variances))
+            
+        else:
+            variances_per_ref = {ref_id:tuple(CumulativeVariance() for i in range(d_length)) for ref_id in ref_ids}
+            progression = []
+            for worker_part in results:
+                for ref_part,ref_id in zip(worker_part[0],worker_part[1]):
+                    variances = variances_per_ref[ref_id]
+                    for d,variance in zip(ref_part,variances):
+                        variance.merge_from_data(*d)
+                    if ref_id == ref_ids[0]:
+                        progression.append(tuple(v.copy() for v in variances))
+        return tuple(variances_per_ref.values()),ids,progression[1:]
     
     @staticmethod
     def _create_reduction_pair_ids(n_elements,n_random_instances=5):
@@ -3248,6 +3267,90 @@ class AlignedAverager:
             results_flat = tuple(tuple(CumulativeVariance(mean = results[3*i][j],count = results[3*i+1][j], m2 = results[3*i+2][j]) for i in range(d_length)) for j in range(len(step_pairs)))
             first_variance_per_step[num]=results_flat[0]
             step_data = results_flat.__getitem__ 
+        return results_flat,initial_ids,first_variance_per_step
+    
+    def average_pairwise_shared2(self,data: np.ndarray|typing.Callable,n_datasets:int):
+        if isinstance(data,np.ndarray):
+            data = data.__getitem__
+            align_method = 'align_pair'
+            raise NotImplementedError('Average_pairwise is currently only implemented for datasets. Not individual numpy arrays. To little time to write the wrapper now ... ')
+        else:
+            align_method = 'align_pair_variance_dataset'
+        n_random_instances = 1 #self.struct.averaging.n_random_orders
+        n_processes = self.struct.n_processes
+        ids,weights,initial_ids = self._create_reduction_pair_ids(n_datasets,n_random_instances = n_random_instances)
+        d_length = self.dataset_length
+        update_aligner = self._set_aligner_properties
+        f_struct = self.struct.fourier_struct
+        
+        def worker(ids,variance_loader,**kwargs):
+            f = SphericalFourierTransform(f_struct,weights = self.hankel_weights)
+            aligner = Alignment(f,
+                                consider_point_inverse=self.struct.alignment.rotational.consider_point_inverse,
+                                dataset_length=d_length,
+                                normalize=self.struct.alignment.normalization.apply,
+                                center = self.struct.alignment.positional.apply,
+                                normalization_method=self.struct.alignment.normalization.method,
+                                wigner_data=self.wigner_data)
+            aligner = update_aligner(aligner)
+            align = aligner.__getattribute__(align_method)
+            
+            merged = []
+            outs = kwargs['outputs']
+            out_ids = kwargs['output_ids'][0]
+            #print(out_ids)
+            counts = 0 
+            for _id,out_id in zip(ids,out_ids):
+                var1 = variance_loader(_id[0])
+                if _id[1] <0:
+                    merged_data = tuple(v for v in var1)
+                else:
+                    var2 = variance_loader(_id[1])
+                    var2,var1 = align(var2,var1)[:2]
+                    merged_data = tuple( v1.merge(v2) for v1,v2 in zip(var1,var2))
+                for d_id,md in enumerate(merged_data):
+                    #print(f'var_ids = {tuple(3*d_id+i for i in range(d_length))} out id = {out_id}')
+                    mean_out = outs[3*d_id]
+                    mean_out[out_id] = md.mean
+                    count_out = outs[3*d_id+1]
+                    count_out[out_id] = md.count
+                    m2_out = outs[3*d_id+2]
+                    m2_out[out_id] = md.m2.real
+            
+        def step_data(_id:int):
+            d = data(_id)
+            if isinstance(d[0],np.ndarray):
+                return tuple(CumulativeVariance(d,count = 1, m2 = np.zeros_like(d)) for d in data(_id))
+            else:
+                return d
+
+        xprint("Start pairwise reduction:")
+        first_variance_per_step = [None]*len(ids)
+        n_steps = len(ids)
+        for num,step_pairs in enumerate(ids):
+            xprint(f"Step {num+1} of {n_steps}")
+            count = 0
+            for i in range(np.max(step_pairs)+1):
+                count += step_data(i)[0].count
+            shapes = tuple((len(step_pairs),) + d.mean.shape for d in step_data(0))
+            output_shapes = []
+            output_dtypes = []
+            for s in shapes:
+                output_shapes+=[s,(len(step_pairs),),s]
+                output_dtypes+=[complex,int,float]
+            results = Multiprocessing.process_mp_request(worker,
+                                                         mode = Multiprocessing.MPMode_SharedArray(output_shapes,output_dtypes),
+                                                         input_arrays=[step_pairs],
+                                                         const_inputs=[step_data],
+                                                         call_with_multiple_arguments=True,
+                                                         split_mode='sequential',
+                                                         n_processes = n_processes)
+            #results_flat = [tuple(CumulativeVariance(mean = results[3*i][j].copy(),count = results[3*i+1][j].copy(), m2 = results[3*i+2][j].copy()) for i in range(d_length)) for j in range(len(step_pairs))]
+            #print(f'm2 = {[tuple(np.min(results[3*i+2][j])  for i in range(d_length)) for j in range(len(step_pairs)) ]}')
+            results_flat = tuple(tuple(CumulativeVariance(mean = results[3*i][j],count = results[3*i+1][j], m2 = results[3*i+2][j]) for i in range(d_length)) for j in range(len(step_pairs)))
+            first_variance_per_step[num]=results_flat[0]
+            step_data = results_flat.__getitem__
+        results_flat, _, first_variance_per_step = self.average_single_reference(data = data,n_datasets = n_datasets,reference = tuple(d.mean for d in results_flat[0]))
         return results_flat,initial_ids,first_variance_per_step
 
     def average(self,data: np.ndarray|typing.Callable,n_datasets:int):
