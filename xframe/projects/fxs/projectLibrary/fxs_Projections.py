@@ -974,14 +974,14 @@ class ReciprocalProjection:
                 new_intensity = new_intensity.real
                 #new_intensity[new_intensity<0]=0
                 new_neg_mask = new_intensity<0
-                new_intensity[new_neg_mask] = 0
+                #new_intensity[new_neg_mask] = 0
                 non_zero_mask = (square!=0) #& (np.abs(new_intensity)>0)
                 #log.info('square dtype = {}'.format(square.dtype))
                 temp[non_zero_mask] = new_intensity[non_zero_mask]/square[non_zero_mask].real
                 np.sqrt(temp,out = intensity_multipliers,dtype = complex)
                 mult(reciprocal_density ,intensity_multipliers,out = new_reciprocal_density)
                 new_reciprocal_density[~non_zero_mask] = np.sqrt(new_intensity[~non_zero_mask],dtype = complex)
-                new_reciprocal_density[new_neg_mask] = reciprocal_density[new_neg_mask]
+                #new_reciprocal_density[new_neg_mask] = reciprocal_density[new_neg_mask]
                 #log.info("old intesity sum = {} new intensity sum = {}".format(np.sum(square),np.sum(new_intensity)))
                 #log.info('nans = {} infs = {}'.format(np.isnan(new_reciprocal_density),np.isinf(new_reciprocal_density)))
                 return new_reciprocal_density
@@ -998,7 +998,7 @@ class ReciprocalProjection:
                 np.sqrt(temp,out = intensity_multipliers,dtype=complex)
                 mult(reciprocal_density ,intensity_multipliers,out = new_reciprocal_density)
                 new_reciprocal_density[~non_zero_mask] = np.sqrt(new_intensity2[~non_zero_mask])
-                new_reciprocal_density[new_neg_mask] = reciprocal_density[new_neg_mask]
+                #new_reciprocal_density[new_neg_mask] = reciprocal_density[new_neg_mask]
                 #log.info("old intesity sum = {} new intensity sum = {}".format(np.sum(square),np.sum(new_intensity)))
                 #log.info('nans = {} infs = {}'.format(np.isnan(new_reciprocal_density),np.isinf(new_reciprocal_density)))
                 #new_reciprocal_density = reciprocal_density * sqrt(new_intensity.real/(reciprocal_density*reciprocal_density.conj()).real)            
