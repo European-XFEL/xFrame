@@ -47,7 +47,19 @@ class HDF5_DB(HDF5Interface):
                     else:
                         entry_point = '/'
                     with h5.File(path, 'r') as h5file:
-                        data=HDF5_DB.recursively_load_dict_from_group(h5file, entry_point)
+                        if h5_path is not None:
+                            h5_obj = h5file[entry_point]
+                            obj_type = h5_obj.attrs.get('type',False)
+                            if isinstance(h5_obj,h5._hl.dataset.Dataset):
+                                data = HDF5_DB.load_single_dataset(h5_obj)
+                            elif obj_type=='list':
+                                data = HDF5_DB._load_list(h5_obj,'','')
+                            elif obj_type=='tuple':
+                                data = HDF5_DB._load_tuple(h5_obj,'','')
+                            else:
+                                data=HDF5_DB.recursively_load_dict_from_group(h5file, entry_point)
+                        else:
+                            data=HDF5_DB.recursively_load_dict_from_group(h5file, entry_point)
                 else:
                     data = h5.File(path, write_mode)
             else:
@@ -110,27 +122,18 @@ class HDF5_DB(HDF5Interface):
     @staticmethod
     def recursively_load_dict_from_group(h5_file, path):
         ans = {}
-        h5_obj = h5_file[path]
-        obj_type = h5_obj.attrs.get('type',False)
-        if isinstance(h5_obj,h5._hl.dataset.Dataset):
-            ans = HDF5_DB.load_single_dataset(h5_obj)
-        elif obj_type=='list':
-            ans = HDF5_DB._load_list(h5_obj,'','')
-        elif obj_type=='tuple':
-            ans = HDF5_DB._load_tuple(h5_obj,'','')
-        else:
-            for key, item in h5_file[path].items():
-                #xprint(key)
-                item_type = item.attrs.get('type',False)
-                if isinstance(item, h5._hl.dataset.Dataset):                  
-                    ans[key] = HDF5_DB.load_single_dataset(item)
-                elif isinstance(item, h5._hl.group.Group):
-                    if item_type=='list':
-                        ans[key] = HDF5_DB._load_list(h5_file,path,key)
-                    elif item_type=='tuple':
-                        ans[key] = HDF5_DB._load_tuple(h5_file,path,key)
-                    else:
-                        ans[key] = HDF5_DB.recursively_load_dict_from_group(h5_file, path + key + '/')
+        for key, item in h5_file[path].items():
+            #xprint(key)
+            item_type = item.attrs.get('type',False)
+            if isinstance(item, h5._hl.dataset.Dataset):                  
+                ans[key] = HDF5_DB.load_single_dataset(item)
+            elif isinstance(item, h5._hl.group.Group):
+                if item_type=='list':
+                    ans[key] = HDF5_DB._load_list(h5_file,path,key)
+                elif item_type=='tuple':
+                    ans[key] = HDF5_DB._load_tuple(h5_file,path,key)
+                else:
+                    ans[key] = HDF5_DB.recursively_load_dict_from_group(h5_file, path + key + '/')
         return ans
     
     @staticmethod
