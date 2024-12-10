@@ -514,8 +514,8 @@ class MTIP:
             [(0,1,1,2),['id','id','approximate_unknowns','id']],
             [(0,1,2,3),[('id',()),('id',()),('save_to_dict',(self.results,'fxs_unknowns','replace')),'id']],
             [(0,1,2,1,3),['id','mtip_projection','id','id']],
-            [(0,1,2,3),['id','inverse_harmonic_transform','id','id']],
-            [(0,0,3,1,2),['id','project_to_modified_intensity','save_number_of_particles','id']],
+            [(0,1,2,2,3),['id','inverse_harmonic_transform','inverse_harmonic_transform','id','id']],
+            [(0,0,4,2,1,3),['id','project_to_modified_intensity','save_number_of_particles','id']],
             [(0,1,2,1),['calc_reciprocal_errors','id']],
             [(1,),['id']]
         ]

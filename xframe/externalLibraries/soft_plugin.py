@@ -11,6 +11,7 @@ from pysofft.wignerTransform import wigNaiveSynthesis_fftw
 from pysofft.wignerWeights import makeweights2
 from pysofft.soft import Inverse_SO3_Naive_fft_pc,Forward_SO3_Naive_fft_pc,coefLoc_so3,sampLoc_so3,totalCoeffs_so3
 from pysofft.soft import (sampLoc_so3,
+                          calc_prod_lm,
                           calc_mean_C_array,
                           calc_int_C_array,
                           _calc_int_C_array,
@@ -275,6 +276,9 @@ class Soft(SoftInterface):
         r_split_upper=r_split_ids[1]
         mean_C = calc_int_C_array(self.bw,f_coeff,g_coeff,r_split_lower,r_split_upper,lm_split_ids,self._wigners_transposed,True,radial_sampling_points)
         return mean_C
+
+    def calc_prod_lm(self,f_coeff,g_coeff,lm_split_ids):
+        return calc_prod_lm(self.bw,f_coeff,g_coeff,lm_split_ids,self._wigners_transposed,True)
     
     #testing 
     def combine_coeffs(self,f_coeff,g_coeff,split_ids):
