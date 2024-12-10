@@ -114,16 +114,16 @@ class HDF5_DB(HDF5Interface):
         obj_type = h5_obj.attrs.get('type',False)
         if isinstance(h5_obj,h5._hl.dataset.Dataset):
             ans = HDF5_DB.load_single_dataset(h5_obj)
-        elif item_type=='list':
+        elif obj_type=='list':
             ans = HDF5_DB._load_list(h5_obj,'','')
-        elif item_type=='tuple':
+        elif obj_type=='tuple':
             ans = HDF5_DB._load_tuple(h5_obj,'','')
         else:
             for key, item in h5_file[path].items():
                 #xprint(key)
                 item_type = item.attrs.get('type',False)
                 if isinstance(item, h5._hl.dataset.Dataset):                  
-                    ans[key] = load_single_Dataset(item)
+                    ans[key] = HDF5_DB.load_single_dataset(item)
                 elif isinstance(item, h5._hl.group.Group):
                     if item_type=='list':
                         ans[key] = HDF5_DB._load_list(h5_file,path,key)
