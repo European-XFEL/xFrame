@@ -16,12 +16,11 @@ class AGIPD(DetectorInterface):
     number_of_modules=16    
     groups = np.array([[[12,13,14,15],[8,9,10,11]],[[0,1,2,3],[4,5,6,7]]],dtype = int)
     modules_per_group=4
-    module_width_in_pixel = 512+7
+    module_width_in_pixel = 512#+7
     module_height_in_pixel = 128
     data_shape = (16,512,128)
-    sensitive_pixel_mask = np.full((16,519,128),True)
-    framed_sensitive_pixel_mask = np.full((16,521,130),False)
-    sensitive_pixel_mask[:,64:][:,::65]=False
+    sensitive_pixel_mask = np.full((16,module_width_in_pixel,128),True)
+    framed_sensitive_pixel_mask = np.full((16,module_width_in_pixel+2,130),False)
     framed_sensitive_pixel_mask[:,1:-1,1:-1]=sensitive_pixel_mask
     asic_slices = [
         [
@@ -40,9 +39,12 @@ class AGIPD(DetectorInterface):
         
         modules=[]
         modules.append(AGIPDmodule(0))
+        self.doubled_width_pixel_mask = np.full((16,self.module_width_in_pixel,128),False)
+        self.doubled_width_pixel_mask[0,...]=modules[0].doubled_with_pixel_module_mask
         for id in np.arange(1,self.number_of_modules,1):
             newModule=AGIPDmodule(id,pixel_grid=modules[0].pixel_grid)
             modules.append(newModule)
+            self.doubled_width_pixel_mask[id,...]=newModule.doubled_with_pixel_module_mask
         modules=np.array(modules)
         self.modules=modules
         
@@ -145,8 +147,8 @@ class AGIPDmodule:
     _widePixelSize= np.array([.4,.2]) # pixel size in millimeter
     _standardPixelSize3D=np.array([.2,.2,0]) # pixel size in millimeter 
     _widePixelSize3D= np.array([.4,.2,0]) # pixel size in millimeter
-    _widePixelColumnSeparation=65
-    _widthInPixel=512+7
+    _widePixelColumnSeparation=64 #65 no! the doubled pixels are not dead (insensitive)
+    _widthInPixel=512 #+7 no! the doubled pixels are not dead (insensitive)
     _heightInPixel=128
     def _construct_local_pixel_grid(_widthInPixel,_heightInPixel,_widePixelColumnSeparation,_widePixelSize,_standardPixelSize):       
         localPixelGridInPixels=np.stack(np.meshgrid(np.arange(_widthInPixel+1), np.arange(_heightInPixel+1),indexing='ij' ),2)
@@ -172,7 +174,9 @@ class AGIPDmodule:
     localPixelGrid=_construct_local_pixel_grid(_widthInPixel,_heightInPixel,_widePixelColumnSeparation,_widePixelSize,_standardPixelSize)
     localFramedPixelGrid = _construct_local_framed_pixel_grid(_widthInPixel+2,_heightInPixel+2,_widePixelColumnSeparation,_widePixelSize,_standardPixelSize)
     localFramedPixelCenters = _construct_local_framed_pixel_centers(localFramedPixelGrid,_standardPixelSize3D,_widePixelSize3D,_widePixelColumnSeparation)
-
+    doubled_with_pixel_module_mask = np.zeros((_widthInPixel,_heightInPixel),bool)
+    doubled_with_pixel_module_mask[_widePixelColumnSeparation-1:_widthInPixel:_widePixelColumnSeparation] = True
+    
     def __init__(self,id,detection_plane = False, pixel_grid = False):
         self.pixel_grid=np.zeros([self._widthInPixel+1,self._heightInPixel+1,self._spaceDim])
         self.framed_pixel_grid=np.zeros([self._widthInPixel+3,self._heightInPixel+3,self._spaceDim])
@@ -208,6 +212,3 @@ class AGIPDmodule:
         self.pixel_grid=base+transformationMatrix.dot(self.localPixelGrid.reshape(-1,3).T).T.reshape(shape)
         self.framed_pixel_grid=base+transformationMatrix.dot(self.localFramedPixelGrid.reshape(-1,3).T).T.reshape(framed_shape)        
         self.framed_pixel_centers=base+transformationMatrix.dot(self.localFramedPixelCenters.reshape(-1,3).T).T.reshape(framed_center_shape)       
-
-
-        

@@ -270,8 +270,17 @@ class MTIP:
                                            n_processes_for_weight_generation = n_processes)
         weight_dict = load_fourier_transform_weights(hankel_struct,allow_weight_saving=opt.fourier_transform.allow_weight_saving)
 
+        #print(weight_dict.keys())
         cls.fourier_transform_weights = weight_dict.pop('weights')
         cls.preinit_fourier_struct = SphericalFourierTransformStruct(**weight_dict)
+        cls.preinit_fourier_struct.dimension = hankel_struct.dimension
+        cls.preinit_fourier_struct.n_radial_points = hankel_struct.n_radial_points
+        cls.preinit_fourier_struct.angular_bandwidth = hankel_struct.angular_bandwidth
+        cls.preinit_fourier_struct.hankel_type = hankel_struct.hankel_type
+        cls.preinit_fourier_struct.n_processes_for_weight_generation = hankel_struct.n_processes_for_weight_generation
+        
+        #print(hankel_struct)
+        #print(cls.preinit_fourier_struct)
             
     @classmethod
     def load_mtip_data(cls):
@@ -339,9 +348,12 @@ class MTIP:
         if 'n_phi' in harmonic_transform_opt:
             struct.n_polar_angles = harmonic_transform_opt['n_phi']
         if 'n_theta' in harmonic_transform_opt:
-            struct.n_azimutal_angles = harmonic_transform_opt['n_theta']        
+            struct.n_azimutal_angles = harmonic_transform_opt['n_theta']
+        #print(struct)
+        #print(weights[0].shape)
+        #sys.exit()
         sft = SphericalFourierTransform(struct,weights = weights)
-
+        #sys.exit()
         if self.dimensions == 2:
             bandwidth = self.fourier_transform_weights['bandwidth']
             cht_forward,cht_inverse = sft.harm.forward_cmplx, sft.harm.inverse_cmplx

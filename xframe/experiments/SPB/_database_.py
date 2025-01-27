@@ -260,9 +260,11 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         #log.info('simultaneouse frames in mem = {} [MBytes]'.format(simultanous_frames_in_mem))
         #make sure all but the last chunk part are in multiples of 'in_multiples_of'
         #log.info('in multiples of = {}'.format(in_multiples_of))
+        print(f"cunks multiples of value = {in_multiples_of}")
         if in_multiples_of is not None:
             simultanous_frames_in_mem = simultanous_frames_in_mem//in_multiples_of *in_multiples_of
             #log.info('simultanous_frames_in_mem = {}'.format(simultanous_frames_in_mem))
+        print(f"simultaneouse frames in mem  = {simultanous_frames_in_mem}")
         #log.info('n_frames = {}'.format(n_frames))
         split_ids = np.concatenate((np.arange(0,n_frames,simultanous_frames_in_mem),[n_frames-1])).astype(int)
         #log.info('split_ids={}'.format(split_ids))
@@ -290,31 +292,41 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
 
     ## load data from VDS files 
     def _load_data_chunk_worker(self,modules,slices,module_id_lookup,run,data_slices,output_slices,data_mode,**opt):
+        #print(f"modules = {modules} \n and slices {slices}")
+        #print(f"local name = {opt['local_name']}")
+        h5_file = super().load('vds',path_modifiers={'run':run,'data_mode':data_mode,'module':modules[0]},as_h5_object = True)
+        current_module = modules[0]
         for m,s_id in zip(modules,slices):
-            #log.info('mdule {}'.format(m))
+            #log.info('mdule {}'.format(m))\
             m_id = module_id_lookup[m]
             data,mask,gain = opt['outputs'][:3]
+            if m != current_module:
+                h5_file.close()
+                h5_file = super().load('vds',path_modifiers={'run':run,'data_mode':data_mode,'module':m},as_h5_object = True)
+                current_module=m                
             d_slice = data_slices[s_id]
             o_slice = output_slices[s_id]
-            with super().load('vds',path_modifiers={'run':run,'data_mode':data_mode,'module':m},as_h5_object = True) as h5_file:                
-                vds = h5_file[self.data_path]
-                vds_mask = h5_file[self.mask_path]
-                vds_gain = h5_file[self.gain_path]                
-                #for d_slice,o_slice in zip(data_slices,output_slices):
-                #log.info('out_slice shape = {}'.format(o_slice))
-                #log.info('data_slice shape = {}'.format(vds[d_slice].shape))
-                vds.read_direct(data,d_slice,(m_id,o_slice))
-                #data[m_id,o_slice]=vds[d_slice]
-                #print(data)
-                nan_mask = np.isnan(vds[d_slice])
-                if nan_mask.any():
-                    log.info('module {}, slice {}, out_slice {}'.format(m,d_slice,o_slice))
-                    log.info('{}% nans found '.format(np.sum(nan_mask)/np.prod(nan_mask.shape)*100))
-                if data_mode =='proc':
-                    vds_mask.read_direct(mask,d_slice,(m_id,o_slice))
-                    vds_gain.read_direct(gain,d_slice,(m_id,o_slice))
-                # inverting the mask so that unmasked values are 1/True and masked values are 0/False
-                mask[m_id,o_slice] = ~mask[m_id,o_slice]
+            vds = h5_file[self.data_path]
+            vds_mask = h5_file[self.mask_path]
+            vds_gain = h5_file[self.gain_path]                
+            #for d_slice,o_slice in zip(data_slices,output_slices):
+            #log.info('out_slice shape = {}'.format(o_slice))
+            #log.info('data_slice shape = {}'.format(vds[d_slice].shape))
+            #print(f'd slice ={d_slice} worker')
+            #print(f'o slice = {o_slice} worker')
+            vds.read_direct(data,d_slice,(m_id,o_slice))
+            #data[m_id,o_slice]=vds[d_slice]
+            #print(data)
+            nan_mask = np.isnan(vds[d_slice])
+            if nan_mask.any():
+                log.info('module {}, slice {}, out_slice {}'.format(m,d_slice,o_slice))
+                log.info('{}% nans found '.format(np.sum(nan_mask)/np.prod(nan_mask.shape)*100))
+            if data_mode =='proc':
+                vds_mask.read_direct(mask,d_slice,(m_id,o_slice))
+                vds_gain.read_direct(gain,d_slice,(m_id,o_slice))
+            # inverting the mask so that unmasked values are 1/True and masked values are 0/False
+            mask[m_id,o_slice] = ~mask[m_id,o_slice]
+        h5_file.close()
                 
     def _load_data_chunk_worker2(self,module,module_id_lookup,run,data_slices,output_slices,data_mode,**opt):
         m = module
@@ -352,7 +364,6 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
         n_frames = len(frame_ids)
         with self.load('vds',path_modifiers={'run':run,'data_mode':data_mode,'module':0},as_h5_object = True) as h5_file:
             chunk_shape = (len(modules),n_frames) + h5_file[self.data_path].shape[1:]
-        
         frame_slices,out_slices = split_into_simple_slices(frame_ids,return_sliced_args=True)
         data,mask,gain = self.comm_module.request_mp_evaluation(self._load_data_chunk_worker , mp_type='shared_array_multi_new' , out_shapes = [chunk_shape,chunk_shape,chunk_shape], out_dtypes = [np.dtype('float32'),np.dtype('bool'),np.dtype('uint8')],argArrays = [modules,np.arange(len(frame_slices))], const_args = [run,frame_slices,out_slices,data_mode], callWithMultipleArguments = True,splitMode='modulus',n_processes = n_processes)
         data = np.swapaxes(data,0,1)

@@ -15,6 +15,7 @@ from .expLibrary import filters
 from .expLibrary.filters import Filter,FilterSequence,FilterTools
 from .expLibrary.rois import ROIManager
 from .expLibrary.misk import Selection
+from .expLibrary.regrid2 import AgipdRegridderSimple
 
 from multiprocessing import cpu_count
 from xframe import settings
@@ -344,7 +345,8 @@ class ExperimentWorker(ExperimentWorkerInterface):
         #    if not success:
         #        log.warning('Process {} didnt synchronice after 20 min stop waiting in process {}'.format(p_id,process_id))
         synchronize(timeout = 60*20)
-                
+        
+        
     def get_data(self,opt:DataSelection):
         ex_opt = settings.experiment
         run = opt['run']
@@ -356,6 +358,7 @@ class ExperimentWorker(ExperimentWorkerInterface):
         module_id_lookup = {m:m_id for m_id,m in enumerate(modules)} 
         frame_range = opt['frame_range']
         good_cells = self.opt['good_cells']
+
         
         self.roi_manager.used_modules = np.asarray(modules)
         #log.info('modules = {}'.format(modules))
@@ -379,15 +382,23 @@ class ExperimentWorker(ExperimentWorkerInterface):
                 xprint('Loading data chunk {} of {} with {} patterns'.format(c_id+1,len(chunks),len(chunk)))                
                 chunk_shape = (len(modules),len(chunk))+data_shape[1:]
                 len_chunk = len(chunk)
-                frame_slices,out_slices = split_into_simple_slices(chunk,return_sliced_args=True)
+                #print(f'selected frame ids = {chunk}')
+                
+                max_n_processes = ex_opt.n_processes
+                if not isinstance(max_n_processes,int) or isinstance(max_n_processes,bool):
+                    max_n_processes = Multiprocessing.get_free_cpus()
+                #print(f'max n processes = {max_n_processes} min slices = {max(1,max_n_processes//16+1)}')
+                frame_slices,out_slices = split_into_simple_slices(chunk,return_sliced_args=True,min_n_slices = max(1,max_n_processes//16+1))
+                #print(f"frame slices = {frame_slices}\n out slices = {out_slices}")
                 #log.info(frame_slices)
                 slice_length = [(s.stop-s.start) for s in frame_slices]
+                
                 #log.info('mean slice_length = {} std = {}'.format(np.mean(slice_length),np.std(slice_length)))
                 
                 output_shapes =  [chunk_shape,chunk_shape,chunk_shape,(len_chunk,)]
                 output_dtypes = [np.dtype('float32'),np.dtype('bool'),np.dtype('uint8'),np.dtype('bool')] 
                 mp_mode = Multiprocessing.MPMode_SharedArray(output_shapes,output_dtypes)
-                data,mask,gain,filtered_mask= self.comm_module.request_mp_evaluation(self._process_data_chunk_worker,mp_mode,input_arrays = [modules], const_inputs = [np.arange(len(frame_slices)),run,frame_slices,out_slices,self.data_mode,apply_filter_sequence,custom_mask,frame_mask,module_id_lookup], call_with_multiple_arguments = True, n_processes = n_processes)
+                data,mask,gain,filtered_mask= self.comm_module.request_mp_evaluation(self._process_data_chunk_worker,mp_mode,input_arrays = [modules,np.arange(len(frame_slices))], const_inputs = [run,frame_slices,out_slices,self.data_mode,apply_filter_sequence,custom_mask,frame_mask,module_id_lookup], call_with_multiple_arguments = True, n_processes = n_processes)
                 #data,mask,gain,filtered_mask= self.comm_module.request_mp_evaluation(self._process_data_chunk_worker2,mp_mode,input_arrays = [modules], const_inputs = [run,frame_slices,out_slices,self.data_mode,apply_filter_sequence,custom_mask,frame_mask,module_id_lookup], call_with_multiple_arguments = True, split_mode = 'modulus', n_processes = n_processes)                
                 data = data.swapaxes(0,1)
                 mask = mask.swapaxes(0,1)
@@ -434,8 +445,10 @@ class ExperimentWorker(ExperimentWorkerInterface):
         data_shape = self.detector.data_shape
         grid = self.detector.pixel_grid[:,:-1,:-1][mask].reshape(data_shape+(3,))        
         data_grid_spher = pLib.pixel_grid_to_scattering_grid(grid,self.x_ray_wavelength,approximation = approximation, out_coord_sys = 'spherical')
-        
-        return {'pixel_grid':pixel_grid,'lab_pixel_grid':grid,'framed_pixel_grid':framed_pixel_grid,'framed_lab_pixel_grid':framed_grid,'framed_pixel_centers':framed_pixel_centers,'framed_lab_pixel_centers':framed_centers,'mask':mask,'framed_mask':self.detector.framed_sensitive_pixel_mask,'data_shape':data_shape,'asic_slices':self.detector.asic_slices,'data_grid_spherical':data_grid_spher}
+        unit = '2 pi / Angstrom'
+        unit_lab = 'mm'
+        coordinate_sys = out_coord_sys
+        return {'pixel_grid':pixel_grid,'lab_pixel_grid':grid,'framed_pixel_grid':framed_pixel_grid,'framed_lab_pixel_grid':framed_grid,'framed_pixel_centers':framed_pixel_centers,'framed_lab_pixel_centers':framed_centers,'mask':mask,'framed_mask':self.detector.framed_sensitive_pixel_mask,'data_shape':data_shape,'asic_slices':self.detector.asic_slices,'data_grid_spherical':data_grid_spher,'unit':unit,'unit_lab':unit_lab,'coordinate_sys':coordinate_sys}
     
 
     ## satisfy interface ##

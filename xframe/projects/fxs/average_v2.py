@@ -62,7 +62,7 @@ class ProjectWorker(ProjectWorkerInterface):
                                                      n_processes = opt.multi_processing.n_processes)
         self.dim = _struct.dimension
         input_proj_dict = db.load(file_paths[0],h5_path = 'projection_matrices')
-        self.input_proj_matrices = tuple(input_proj_dict[f'{i}'] for i in range(_struct.angular_bandwidth))
+        self.input_proj_matrices = tuple(input_proj_dict[int(f'{i}')] for i in range(_struct.angular_bandwidth))
         rec_ids = []
         errors = []
         for file_id,path in enumerate(file_paths):

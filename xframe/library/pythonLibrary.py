@@ -1071,11 +1071,11 @@ def grow_mask(mask,n_pixels):
 
 
 def make_string_tex_conform(string):
-    string = string.replace('_','\_')
-    string = string.replace('&','\&')
-    string = string.replace('{','\{')
-    string = string.replace('}','\}')
-    string = string.replace('%','\%')
+    string = string.replace('_',r'\_')
+    string = string.replace('&',r'\&')
+    string = string.replace('{',r'\{')
+    string = string.replace('}',r'\}')
+    string = string.replace('%',r'\%')
     #log.info('corrected string = {}'.format(string))
     return string
 
@@ -1110,7 +1110,7 @@ def convert_to_slice_if_possible(frame_ids):
                 frame_ids = slice(start,stop,step)                    
     return frame_ids
 
-def split_into_simple_slices(sequence,return_length=False,return_sliced_args=False,mod=False):
+def split_into_simple_slices(sequence,min_n_slices = 16,return_length=False,return_sliced_args=False,mod=False):
     '''
     splits a 1D non decreasing list of integers into slices which correspond to
     1. if mod = False
@@ -1120,6 +1120,7 @@ def split_into_simple_slices(sequence,return_length=False,return_sliced_args=Fal
     slices = []
     arg_slices = []
     lengths = []
+    print(f'min_n_slices = {min_n_slices}')
     if isinstance(mod,int) and (not isinstance(mod,bool)):
         eq_class_ids = sequence%mod
         for c_id in range(mod):
@@ -1146,6 +1147,30 @@ def split_into_simple_slices(sequence,return_length=False,return_sliced_args=Fal
                 slices.append(slice(c[0],c[-1]+1))
                 arg_slices.append(slice(ca[0],ca[-1]+1))
                 lengths.append(len(c))
+    #if there are to few slices start to iteratively split the largest ones
+    #into two parts untill min_n_slices many slices are defined.
+    while len(slices)<min_n_slices:
+        largest_slice_id = np.argsort(lengths)[-1]
+        l_slice = slices[largest_slice_id]
+        l_arg_slice = arg_slices[largest_slice_id]
+        mod = l_slice.step
+        if not isinstance(l_slice.step,int):
+            mod = 1
+        length = lengths[largest_slice_id]
+        new_length = [length//2,length - length//2]
+        new_slices = [slice(l_slice.start,l_slice.start+mod*new_length[0],l_slice.step),slice(l_slice.start+mod*new_length[0],l_slice.stop,l_slice.step)]
+        new_arg_slices =  [slice(l_arg_slice.start,l_arg_slice.start+mod*new_length[0],l_arg_slice.step),slice(l_arg_slice.start+mod*new_length[0],l_arg_slice.stop,l_arg_slice.step)]
+        slices[largest_slice_id]=new_slices[0]
+        slices.append(new_slices[1])
+        arg_slices[largest_slice_id]=new_arg_slices[0]
+        arg_slices.append(new_arg_slices[1])
+        lengths[largest_slice_id] = new_length[0]
+        lengths.append(new_length[1])
+        
+    sort_ids = np.argsort([s.start for s in slices])
+    slices = [slices[_id] for _id in sort_ids]
+    arg_slices = [arg_slices[_id] for _id in sort_ids]
+    lengths = [lengths[_id] for _id in sort_ids]
             
     if return_length and return_sliced_args:
         return slices,arg_slices,lengths

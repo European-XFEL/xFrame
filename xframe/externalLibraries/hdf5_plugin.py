@@ -53,9 +53,9 @@ class HDF5_DB(HDF5Interface):
                             if isinstance(h5_obj,h5._hl.dataset.Dataset):
                                 data = HDF5_DB.load_single_dataset(h5_obj)
                             elif obj_type=='list':
-                                data = HDF5_DB._load_list(h5_obj,'','')
+                                data = HDF5_DB._load_list(h5_obj,'','.')
                             elif obj_type=='tuple':
-                                data = HDF5_DB._load_tuple(h5_obj,'','')
+                                data = HDF5_DB._load_tuple(h5_obj,'','.')
                             else:
                                 data=HDF5_DB.recursively_load_dict_from_group(h5file, entry_point)
                         else:

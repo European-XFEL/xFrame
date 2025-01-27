@@ -3,6 +3,7 @@ import numpy.ma as mp
 import scipy.integrate as spIntegrate
 import logging
 from itertools import repeat
+import sys
 
 log=logging.getLogger('root')
 

@@ -609,7 +609,16 @@ class MPMode_SharedArray(MPMode):
     def pre_processing(self,n_processes):
         ## delete any existing and create new shared memory objects
         delete_shared_arrays()
-        if self.reduce_arguments:
+        if isinstance(self.reduce_arguments,(list,tuple)):
+            new_shapes = []
+            for shape,reduce_arg in zip(self._initial_output_shapes,self.reduce_arguments):
+                if reduce_arg:
+                    new_out_shape = (n_processes,)+shape
+                else:
+                    new_out_shape = shape
+                new_shapes.append(new_out_shape)
+            self.output_shapes = new_shapes
+        elif self.reduce_arguments:
             new_shapes = [(n_processes,)+shape for shape in self._initial_output_shapes]
             self.output_shapes = new_shapes
             
@@ -624,7 +633,7 @@ class MPMode_SharedArray(MPMode):
             
         if mp_arguments.split_together:
             output_indices = output_indices[0]
-        if self.reduce_arguments:
+        if isinstance(self.reduce_arguments,bool) and self.reduce_arguments:
             output_indices = slice(local_name,local_name+1)
         return output_indices
         
