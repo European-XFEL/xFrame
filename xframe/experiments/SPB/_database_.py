@@ -178,7 +178,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
                         module = re.search(r_module,line)[0][:-1]
                         y_direction = np.array(re.findall(r_float,line)+['0.0']).astype(float)
                         x_direction = np.array(re.findall(r_float,lines[id+1])+['0.0']).astype(float)
-                        base = np.array(re.findall(r_float,lines[id+2])+re.findall(r_float,lines[id+3])+['0.0']).astype(float)*0.2 #0.2mm pixelwidth | geom file etries are measured in pixel width
+                        base = np.array(re.findall(r_float,lines[id+2])+re.findall(r_float,lines[id+3])+['0.0']).astype(float)*0.2*1e-3 #0.2mm pixelwidth | geom file etries are measured in pixel width
                         data[module]=plane3D(base=base,x_direction =x_direction,y_direction = y_direction)
 
                 planes= tuple(data[str(module)] for module in modules)

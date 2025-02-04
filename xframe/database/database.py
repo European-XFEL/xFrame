@@ -81,7 +81,7 @@ class FileAccess():
                 if len(name)>0:
                     path = os.path.expanduser(name)
             if path is None:
-                raise AssertionError(f'Saving to path {name} is not possible. Wrong path definition.')           
+                raise AssertionError(f'Accessing path {name} is not possible. Wrong path definition.')           
         return path
     def create_path_if_nonexistent(self,path):
         dirname=os.path.dirname(path)
@@ -188,6 +188,7 @@ class DefaultDB(FileAccess,DatabaseInterface):
                 'sh':'TextAccess',
                 'zsh':'TextAccess',
                 'fish':'TextAccess',
+                'geom':'TextAccess',
                 'yaml':'YAML_access',
                 'matplotlib':'MatplotlibAccess',
                 'cv':'OpenCV_access',

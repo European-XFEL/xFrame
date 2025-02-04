@@ -9,7 +9,7 @@ class RegionOfInterest(abc.ABC):
     def __init__(self,parameters:dict,geometry:dict,modules=np.arange(16,dtype = int)):
         self.parameters = parameters
         self.geometry = geometry
-        self.pixel_grid_spher = self.geometry['data_grid_spherical']
+        self.pixel_grid_spher = self.geometry['q_pixel_centers']
         #The following assumes spherical grid in form of r,theta,phi
         self.pixel_grid_polar = self.pixel_grid_spher[...,::2]        
         self.pixel_grid_cart = spherical_to_cartesian(self.pixel_grid_polar)
@@ -20,10 +20,11 @@ class RegionOfInterest(abc.ABC):
         self.mask_complete = self.generate()
         self.mask_true_modules = self.calc_used_modules(self.mask_complete)
         self._used_modules = self.mask_true_modules
+        #print(self._used_modules.dtype,len(self._used_modules))
         ## mask data only using the data_modules
         self.used_module_ids = np.arange(len(self._used_modules))
         #log.info(modules)
-        #log.info(self.mask_complete.shape)
+        #print(self.mask_complete.shape)
         self.mask =  self.mask_complete[self._used_modules]
 
     @property
@@ -52,7 +53,7 @@ class RegionOfInterest(abc.ABC):
             if module_mask.any():
                 used_modules.append(module)
         #return as tuple so that it throws an error if one tries to modify it
-        return np.array(used_modules)
+        return np.array(used_modules,dtype = int)
     
 
 class Rectangle(RegionOfInterest):
@@ -128,6 +129,7 @@ class ROIManager():
     def add_rois(self,_dict):
         current_module = self._current_module
         for key,val in _dict.items():
+            #print(key)
             name = key
             _type = val['class']
             parameters = val['parameters']

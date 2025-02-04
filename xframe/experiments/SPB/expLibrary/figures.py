@@ -16,10 +16,11 @@ def Intensity_histogramm(values,n_patterns,run,caption):
     
 def mean_2d(mean,run,caption,geometry,lab_grid=False):
     if lab_grid:
-        print_grid = geometry['framed_lab_pixel_grid']
+        print_grid = geometry['lab_framed_pixel_centers']
     else:
-        print_grid = spherical_to_cartesian(geometry['framed_pixel_grid'])
-    print_mask = geometry['framed_mask']
+        print_grid = spherical_to_cartesian(geometry['q_framed_pixel_centers'])
+    print_mask = np.zeros(print_grid.shape[:-1],bool)
+    print_mask[:,1:-1,1:-1]=True
     layout = {
         'title': 'Run:{} Pixelwise Mean'.format(run),
         'x_label': 'x',
@@ -33,7 +34,8 @@ def max_2d(maximum,run,caption,geometry,lab_grid=False):
         print_grid = geometry['framed_lab_pixel_grid']
     else:
         print_grid = spherical_to_cartesian(geometry['framed_pixel_grid'])
-    print_mask = geometry['framed_mask']
+    print_mask = np.zeros(print_grid.shape[:-1],bool)
+    print_mask[:,1:-1,1:-1]=True
     layout = {
         'title': 'Run:{} Pixelwise Maximum'.format(run),
         'x_label': 'x',
@@ -47,7 +49,8 @@ def std_2d(maximum,run,caption,geometry,lab_grid=False):
         print_grid = geometry['framed_lab_pixel_grid']
     else:
         print_grid = spherical_to_cartesian(geometry['framed_pixel_grid'])
-    print_mask = geometry['framed_mask']
+    print_mask = np.zeros(print_grid.shape[:-1],bool)
+    print_mask[:,1:-1,1:-1]=True
     layout = {
         'title': 'Run:{} Pixelwise Standard Deviation'.format(run),
         'x_label': 'x',

@@ -514,7 +514,7 @@ class agipd_heat_multi():
         for ax in axes.ravel()[n_densities:]:
             ax.axis('off')
         ax_tuple = tuple(axes.flat)
-        g_grid=grid[:,:-1,:-1][print_mask].reshape(-1,512,128,3)
+        g_grid=grid[print_mask].reshape(-1,512,128,3)
 
         if scale=='log':
             norm = matplotlib.colors.LogNorm(vmin=vmin,vmax=vmax)
@@ -551,58 +551,44 @@ class agipd_heat_multi():
     def show(cls,densities,grid,print_mask,shape = (1,1),layouts=[{'x_label':r'$q_x \quad [\AA^-1] $','y_label':r'$q_y \quad [\AA^-1]$'}],scale='log',vmin=None,vmax=None):
         fig = cls.get_fig(densities,grid,print_mask,shape = shape, layouts = layouts, scale = scale,vmin=vmin,vmax=vmax)
         fig.show()
-                
-class agipd_heat():
-    @classmethod
-    def get_fig(cls,density, grid,print_mask,fill_value = 0,gradients=False,layout={'x_label':r'$q_x \quad [\AA^-1] $','y_label':r'$q_y \quad [\AA^-1]$'},scale='log',vmin=None,vmax=None,cmap = 'viridis'):
-        # assumes grid and density is ordered by modules
-        cmap=plt.get_cmap(cmap).copy()
-        fig = plt.figure()
-        ax = fig.add_axes((0.1, 0.2, 0.8, 0.7))
-               
-        print_data=np.full(print_mask.shape,fill_value,dtype=float)#np.zeros(print_mask.shape)
-        print_data[print_mask]=density.flatten()
-        g_grid=grid[:,:-1,:-1][print_mask].reshape(-1,512,128,3)
 
-        if scale=='log':
-            norm = matplotlib.colors.LogNorm(vmin=vmin,vmax=vmax)
-        else:
-            norm = None
-        log.info('gradients = {}'.format(gradients))
-        
-        for m_id in range(len(grid)):
-            x = grid[m_id,:,:,0]
-            y = grid[m_id,:,:,1]
-            c = np.swapaxes(print_data[m_id],0,0)
-            if (scale=='log') and (c.max()==0):
-                continue
-            #heatmap = ax.pcolormesh(x, y, c, norm=norm ,cmap = cmap,vmin=density[density>0].min()*0.1,vmax=density.max())
-            heatmap = ax.pcolormesh(x, y, c, norm=norm ,cmap = cmap)
-            if not isinstance(gradients,bool):
-                log.info('fu8uuuu')
-                X = g_grid[m_id,...,0]                
-                Y = g_grid[m_id,...,1]
-                U = gradients[m_id,...,0]
-                V = gradients[m_id,...,1]
-                q = ax.quiver(X, Y, U, V, scale=np.abs(gradients).max()*0.9, scale_units='inches')
 
-            ax.set_aspect(1)
-            r = np.abs(x.max()-x.min())*0.01
-            circ = plt.Circle((0,0), radius=r, linewidth=2, color='r')
-            circ.set_fill(True)
-            ax.add_patch(circ)
-        apply_layout_to_ax(ax,layout)
-        divider = axes_divider.make_axes_locatable(ax)
-        cax = divider.append_axes("right", size="5%", pad=0.05)
-        bar = fig.colorbar(ax.collections[0],cax =cax)
-        apply_layout_to_figure(fig,layout)
-        return fig
+def agipd_heatmap(density, corners,layout={'x_label':r'$q_x \quad [\AA^-1] $','y_label':r'$q_y \quad [\AA^-1]$'},scale='log',vmin=None,vmax=None,cmap = 'viridis',figsize=(10,10),bad_color='white'):
+    #Plots agipd data using pcolormesh (i.e draing a quad for each individual pixel)
+    #figsize (60,60) is the smalest size which lets you see all pixels without aliasing.
+    
+    plt.rcParams.update({'font.size': np.min(figsize)})
 
-    @classmethod
-    def show(cls,density, grid,print_mask,fill_value = 0,gradients=False,layout={'x_label':r'$q_x \quad [\AA^-1]$','y_label':r'$q_y \quad [\AA^-1]$'},scale='log',vmin=None,vmax=None,cmap = 'inferno'):
-        fig = cls.get_fig(density,grid,print_mask,fill_value=fill_value,gradients = gradients, layout = layout, scale = scale,vmin=vmin,vmax=vmax,cmap = cmap)
-        fig.show()
+    cmap=plt.get_cmap(cmap).copy()
+    cmap.set_bad(color = bad_color)
+    fig = plt.figure(figsize = figsize)
+    ax = fig.add_axes((0.1, 0.2, 0.8, 0.7))
+           
+    print_data=density
+    X,Y = corners[...,0],corners[...,1]
 
+    if scale=='log':
+        norm = matplotlib.colors.LogNorm(vmin=vmin,vmax=vmax)
+    else:
+        norm = None
+    
+    for m_id in range(len(corners)):
+        C = print_data[m_id]
+        if (scale=='log') and (C.max()==0):
+            continue
+        heatmap = ax.pcolormesh(X[m_id], Y[m_id],C, norm=norm ,cmap = cmap,shading = 'flat')
+        ax.set_aspect(1)
+        r = np.abs(X[m_id].max()-X[m_id].min())*0.1
+        ax.vlines(0,-r,r,color = 'r',linewidth=1)
+        ax.hlines(0,-r,r,color = 'r',linewidth=1)
+    apply_layout_to_ax(ax,layout)
+    divider = axes_divider.make_axes_locatable(ax)
+    cax = divider.append_axes("right", size="3%", pad="1%")
+    bar = fig.colorbar(ax.collections[0],cax =cax)
+    apply_layout_to_figure(fig,layout)
+    return fig
+
+    
 class centering_heat:
     @classmethod
     def get_fig(cls,convolution,sigma_mask,center,errors,grid, layout_conv, layout_mask,scale='lin'):

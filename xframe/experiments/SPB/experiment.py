@@ -6,6 +6,7 @@ from xframe.library import physicsLibrary as pLib
 from xframe.library.pythonLibrary import convert_to_slice_if_possible
 from xframe.library.pythonLibrary import split_into_simple_slices
 from xframe.library.pythonLibrary import xprint
+from xframe.library.mathLibrary import spherical_to_cartesian
 
 from xframe.interfaces import ExperimentWorkerInterface
 from xframe.interfaces import CommunicationInterface
@@ -82,7 +83,7 @@ class ExperimentWorker(ExperimentWorkerInterface):
         self.comm_module=comm_module
         self.db = database.experiment
         if isinstance(detector,bool):
-            detector = AGIPD(self.db)
+            detector = AGIPD(geometry_path='geometry')
         self.detector = detector
         #if isinstance(calibrator,bool):
         #    calibrator = AGIPD_VDS_Calibrator()
@@ -429,29 +430,40 @@ class ExperimentWorker(ExperimentWorkerInterface):
     def _get_geometry_rois(self, approximation='None'):
         mask = self.detector.sensitive_pixel_mask
         data_shape = self.detector.data_shape
-        grid = self.detector.pixel_grid[:,:-1,:-1][mask].reshape(data_shape+(3,))        
-        data_grid_spher = pLib.pixel_grid_to_scattering_grid(grid,self.x_ray_wavelength,approximation = approximation, out_coord_sys = 'spherical')
-        return {'data_grid_spherical':data_grid_spher,'data_shape':data_shape,'asic_slices':self.detector.asic_slices}
+        lab_pixel_centers = self.detector.framed_pixel_centers[:,1:-1,1:-1,:]#[mask].reshape(data_shape+(3,))        
+        q_pixel_centers = pLib.pixel_grid_to_scattering_grid(lab_centers,self.x_ray_wavelength,approximation = approximation, out_coord_sys = 'spherical')
+        return {'q_pixel_centers':q_pixel_centers,'data_shape':data_shape,'asic_slices':self.detector.asic_slices}
 
     def get_geometry(self, approximation='None',out_coord_sys='spherical'):
-        grid = self.detector.pixel_grid
-        framed_grid = self.detector.framed_pixel_grid
+        corners = self.detector.pixel_corners
         framed_centers = self.detector.framed_pixel_centers
-        pixel_grid = pLib.pixel_grid_to_scattering_grid(grid,self.x_ray_wavelength,approximation = approximation, out_coord_sys = out_coord_sys)
-        framed_pixel_grid = pLib.pixel_grid_to_scattering_grid(framed_grid,self.x_ray_wavelength,approximation = approximation, out_coord_sys = out_coord_sys)
-        framed_pixel_centers = pLib.pixel_grid_to_scattering_grid(framed_centers,self.x_ray_wavelength,approximation = approximation, out_coord_sys = out_coord_sys)
+        q_pixel_corners = pLib.pixel_grid_to_scattering_grid(corners,self.x_ray_wavelength,approximation = approximation, out_coord_sys = out_coord_sys)
+        q_framed_pixel_centers = pLib.pixel_grid_to_scattering_grid(framed_centers,self.x_ray_wavelength,approximation = approximation, out_coord_sys = out_coord_sys)
 
-        mask = self.detector.sensitive_pixel_mask
+        wide_pixel_mask = self.detector.wide_pixel_mask
         data_shape = self.detector.data_shape
-        grid = self.detector.pixel_grid[:,:-1,:-1][mask].reshape(data_shape+(3,))        
-        data_grid_spher = pLib.pixel_grid_to_scattering_grid(grid,self.x_ray_wavelength,approximation = approximation, out_coord_sys = 'spherical')
+        q_pixel_centers = q_framed_pixel_centers[:,1:-1,1:-1,:]
+        lab_pixel_centers = framed_centers[:,1:-1,1:-1,:] 
         unit = '2 pi / Angstrom'
-        unit_lab = 'mm'
+        unit_lab = 'm'
         coordinate_sys = out_coord_sys
-        return {'pixel_grid':pixel_grid,'lab_pixel_grid':grid,'framed_pixel_grid':framed_pixel_grid,'framed_lab_pixel_grid':framed_grid,'framed_pixel_centers':framed_pixel_centers,'framed_lab_pixel_centers':framed_centers,'mask':mask,'framed_mask':self.detector.framed_sensitive_pixel_mask,'data_shape':data_shape,'asic_slices':self.detector.asic_slices,'data_grid_spherical':data_grid_spher,'unit':unit,'unit_lab':unit_lab,'coordinate_sys':coordinate_sys}
+        return {'q_pixel_corners':q_pixel_corners,'lab_pixel_corners':corners,'q_framed_pixel_centers':q_framed_pixel_centers,'lab_framed_pixel_centers':framed_centers,'wide_pixel_mask':wide_pixel_mask,'data_shape':data_shape,'q_pixel_centers':q_pixel_centers,'lab_pixel_centers':lab_pixel_centers,'asic_slices':self.detector.asic_slices,'unit':unit,'unit_lab':unit_lab,'coordinate_sys':coordinate_sys}
     
 
+    def plot_data(self,data,geometry,scale='log',use_reciprocal_coords = True, vmin=None,vmax=None,cmap='inferno',figsize=(10,10),bad_color='black'):
+        from xframe.presenters import matplotlibPresenter
+        if use_reciprocal_coords:
+            layout = {'x_label':r'$q_x \quad [\AA^-1] $','y_label':r'$q_y \quad [\AA^-1]$'}
+            corners = spherical_to_cartesian(geometry['q_pixel_corners'])
+        else:
+            layout = {'x_label':r'$x \quad [m] $','y_label':r'$y \quad [m]$'}
+            corners = geometry['lab_pixel_corners']
+        fig = matplotlibPresenter.agipd_heatmap(data,corners,layout = layout,scale=scale,vmin=vmin,vmax=vmax,cmap=cmap,figsize=figsize,bad_color= bad_color)
+        return fig
+    
     ## satisfy interface ##
     ## currently empty since experiment and analysis workers are not disconnected in separate processes yet##
     def run(self):
         pass           
+
+    

@@ -130,6 +130,9 @@ def dependency_inject_SOFT():
         
 def setup_default_database():
     xframe.database.default = xframe.database.database.DefaultDB(**xframe.settings.general.dict()['IO'])
+    # temporarily set proj and exp databases to default until they are redefined when selecting a project/experiment.
+    xframe.database.project = xframe.database.default
+    xframe.database.experiment = xframe.database.default
 
 
 def lookup_projexp(path_list):
