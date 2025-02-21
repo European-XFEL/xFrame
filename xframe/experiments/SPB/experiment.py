@@ -390,7 +390,8 @@ class ExperimentWorker(ExperimentWorkerInterface):
                     max_n_processes = Multiprocessing.get_free_cpus()
                 #print(f'max n processes = {max_n_processes} min slices = {max(1,max_n_processes//16+1)}')
                 frame_slices,out_slices = split_into_simple_slices(chunk,return_sliced_args=True,min_n_slices = max(1,max_n_processes//16+1))
-                #print(f"frame slices = {frame_slices}\n out slices = {out_slices}")
+                print(f'n_slices = {len(frame_slices)}')
+                #print(f"frame slices = {frame_slices} \n out slices = {out_slices}")
                 #log.info(frame_slices)
                 slice_length = [(s.stop-s.start) for s in frame_slices]
                 
@@ -442,12 +443,14 @@ class ExperimentWorker(ExperimentWorkerInterface):
 
         wide_pixel_mask = self.detector.wide_pixel_mask
         data_shape = self.detector.data_shape
+        framed_mask = np.zeros(q_framed_pixel_centers.shape[:-1],dtype=bool)
+        framed_mask[:,1:-1,1:-1] = True
         q_pixel_centers = q_framed_pixel_centers[:,1:-1,1:-1,:]
         lab_pixel_centers = framed_centers[:,1:-1,1:-1,:] 
         unit = '2 pi / Angstrom'
         unit_lab = 'm'
         coordinate_sys = out_coord_sys
-        return {'q_pixel_corners':q_pixel_corners,'lab_pixel_corners':corners,'q_framed_pixel_centers':q_framed_pixel_centers,'lab_framed_pixel_centers':framed_centers,'wide_pixel_mask':wide_pixel_mask,'data_shape':data_shape,'q_pixel_centers':q_pixel_centers,'lab_pixel_centers':lab_pixel_centers,'asic_slices':self.detector.asic_slices,'unit':unit,'unit_lab':unit_lab,'coordinate_sys':coordinate_sys}
+        return {'q_pixel_corners':q_pixel_corners,'lab_pixel_corners':corners,'q_framed_pixel_centers':q_framed_pixel_centers,'lab_framed_pixel_centers':framed_centers,'wide_pixel_mask':wide_pixel_mask,'data_shape':data_shape,'q_pixel_centers':q_pixel_centers,'lab_pixel_centers':lab_pixel_centers,'asic_slices':self.detector.asic_slices,'unit':unit,'unit_lab':unit_lab,'coordinate_sys':coordinate_sys,'framed_mask':framed_mask}
     
 
     def plot_data(self,data,geometry,scale='log',use_reciprocal_coords = True, vmin=None,vmax=None,cmap='inferno',figsize=(10,10),bad_color='black'):

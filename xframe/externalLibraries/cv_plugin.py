@@ -49,7 +49,7 @@ class CV_Plugin(OpenCVInterface,PresenterInterface):
     
 
     @classmethod
-    def get_polar_image(cls,data,n_pixels=False,scale='lin',colormap='viridis',vmin=False,vmax=False,print_colorscale=False,transparent_backgound=False):
+    def get_polar_image(cls,data,n_pixels=False,scale='lin',colormap='viridis',vmin=False,vmax=False,print_colorscale=False,transparent_backgound=False,in_rgb_format= False):
         Nr,Nphi=data.shape
         pdata=data.copy()
         use_log_scale= (scale=='log')
@@ -122,7 +122,8 @@ class CV_Plugin(OpenCVInterface,PresenterInterface):
             img_text = cv.putText(cscale, vmax_txt, (int(n_pixels*0.80),h_color_bar-int(h_black*0.2)), font, font_size, font_color, font_thickness, cv.LINE_AA)
             pic=np.concatenate((pic,cscale),axis=0)
             
-
+        if in_rgb_format:
+            pic = cv.cvtColor(pic, cv.COLOR_BGR2RGB) 
         if transparent_backgound:
             # First create the image with alpha channel
             pic_rgba = cv.cvtColor(pic, cv.COLOR_RGB2RGBA)
@@ -130,12 +131,11 @@ class CV_Plugin(OpenCVInterface,PresenterInterface):
             # Then assign the mask to the last channel of the image
             pic_rgba[:n_pixels, :n_pixels, 3] = ((~bg_mask).astype(np.uint8)*255)
             pic=pic_rgba.copy()
-
         return pic
 
 
     @classmethod
-    def get_cart_image(cls,data,scale='lin',colormap='viridis',vmin=False,vmax=False,print_colorscale=False):
+    def get_cart_image(cls,data,scale='lin',colormap='viridis',vmin=False,vmax=False,print_colorscale=False,in_rgb_format=False):
         Nx,Ny=data.shape
         pdata=data.copy()
         n_pixels = Nx
@@ -194,12 +194,14 @@ class CV_Plugin(OpenCVInterface,PresenterInterface):
             font_thickness = int(font_size*2)
             img_text = cv.putText(cscale, vmin_txt, (int(n_pixels*0),h_color_bar-int(h_black*0.2)), font, font_size, font_color, font_thickness, cv.LINE_AA)
             img_text = cv.putText(cscale, vmax_txt, (int(n_pixels*0.80),h_color_bar-int(h_black*0.2)), font, font_size, font_color, font_thickness, cv.LINE_AA)
-            pic=np.concatenate((pic,cscale),axis=0)            
+            pic=np.concatenate((pic,cscale),axis=0)
+        if in_rgb_format:
+            pic = cv.cvtColor(pic, cv.COLOR_BGR2RGB) 
         return pic
 
 
     @classmethod
-    def get_cart_image_complex(cls,data,scale='lin',saturation=1,vmin=False,vmax=False):
+    def get_cart_image_complex(cls,data,scale='lin',saturation=1,vmin=False,vmax=False,in_rgb_format=False):
         Nx,Ny=data.shape
         hue,intensity = get_phase_and_intensity(data)
         n_pixels = Nx
@@ -240,11 +242,13 @@ class CV_Plugin(OpenCVInterface,PresenterInterface):
         saturation = np.full_like(pic,saturation*255)
         hue*=255/(2*np.pi)
         hsv = np.stack((hue.astype(np.uint8),saturation,pic),axis=-1)
-        out = cv.cvtColor(hsv,cv.COLOR_HSV2BGR_FULL)      
+        out = cv.cvtColor(hsv,cv.COLOR_HSV2BGR_FULL)
+        if in_rgb_format:
+            out = cv.cvtColor(out, cv.COLOR_BGR2RGB) 
         return out
     
     @classmethod
-    def get_polar_image_complex(cls,data,n_pixels=False,scale='lin',saturation=1,vmin=False,vmax=False,transparent_backgound=False):
+    def get_polar_image_complex(cls,data,n_pixels=False,scale='lin',saturation=1,vmin=False,vmax=False,transparent_backgound=False,in_rgb_format=False):
         Nr,Nphi=data.shape
         hue,pdata = get_phase_and_intensity(data)
         use_log_scale= (scale=='log')
@@ -306,7 +310,8 @@ class CV_Plugin(OpenCVInterface,PresenterInterface):
 
         hsv = np.stack((hue_polar.astype(np.uint8),saturation_polar.astype(np.uint8),pic),axis = -1)
         out = cv.cvtColor(hsv,cv.COLOR_HSV2BGR_FULL)    
-        
+        if in_rgb_format:
+            out = cv.cvtColor(out, cv.COLOR_BGR2RGB) 
         if transparent_backgound:
             # First create the image with alpha channel
             pic_rgba = cv.cvtColor(out, cv.COLOR_RGB2RGBA)

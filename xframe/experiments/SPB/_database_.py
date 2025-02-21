@@ -305,6 +305,7 @@ class ExperimentDB(DefaultDB,DatabaseInterface):
                 h5_file = super().load('vds',path_modifiers={'run':run,'data_mode':data_mode,'module':m},as_h5_object = True)
                 current_module=m                
             d_slice = data_slices[s_id]
+            #print(d_slice)
             o_slice = output_slices[s_id]
             vds = h5_file[self.data_path]
             vds_mask = h5_file[self.mask_path]

@@ -2000,11 +2000,32 @@ class CumulativeVarianceMasked:
         self.m2 = m2
         self.bessels_correction = bessels_correction
         
+    @classmethod    
+    def from_dataset(cls,dataset,masks = True,axis=0):
+        '''
+        Creates object from an array(dataset) calculating var and mean along a specified axis.
+        '''
+        obj = cls()
+        tmp = np.moveaxis(dataset,axis,0)
+        if isinstance(np.ndarray,masks):
+            tmp_mask = np.moveaxis(masks,axis,0)
+            for d,m in zip(tmp,tmp_mask):
+                obj.update(d,mask = m)
+        else:
+            for d in tmp:
+                obj.update(d)
+                
+        return obj
+    
     def update(self,val:np.ndarray|int|float|complex,mask=True):
         # updates the running mean and variance by a single new value
         self.count += np.ones(val.shape,dtype=int)*mask
         delta = mask*(val - self.mean)
-        self.mean += np.where(self.count>0,delta / self.count,0)
+        nzero_mask = self.count>0
+        delta_tmp = delta.copy()
+        delta_tmp[nzero_mask] /= self.count[nzero_mask].astype(float)
+        self.mean += delta_tmp
+        #self.mean += np.where(self.count>0,delta / self.count,0)
         delta2 = mask*val - self.mean
         self.m2 += (delta * delta2.conj()).real
         return self
@@ -2018,7 +2039,10 @@ class CumulativeVarianceMasked:
         count_a = np.array(self.count)
         self.count += count
         delta = mean-self.mean
-        temp = delta*np.where(self.count>0,count/self.count,0)
+        nzero_mask = self.count>0
+        count = count.astype(float)
+        count[nzero_mask]/=self.count[nzero_mask] 
+        temp = delta*count
         self.mean = self.mean + temp
         self.m2 = self.m2 + m2 + (delta*count_a*temp.conj()).real
         return self
@@ -2051,6 +2075,18 @@ class CumulativeVariance:
         self.mean = mean
         self.m2 = m2
         self.bessels_correction = bessels_correction
+    
+    @classmethod    
+    def from_dataset(cls,dataset,axis=0):
+        '''
+        Creates object from an array(dataset) calculating var and mean along a specified axis.
+        '''
+        obj = cls()
+        tmp = np.moveaxis(dataset,axis,0)
+        for d in tmp:
+            obj.update(d)
+        return obj
+        
     def update(self,val:np.ndarray|int|float|complex):
         # updates the running mean and variance by a single new value
         self.count += 1
@@ -2091,6 +2127,7 @@ class CumulativeVariance:
         return (self.mean,self.count,self.m2)
     def copy(self):
         return CumulativeVariance(mean = np.array(self.mean),count = self.count ,m2=np.array(self.m2))
+
 
 #################
 ####alignment####

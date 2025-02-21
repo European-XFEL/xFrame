@@ -71,7 +71,7 @@ def get_max_diffs(array):
 
 
 class SimpleRegridder2D:
-    def __init__(self,pixel_centers,new_grid,in_mask = True,data_shape=None, interpolation = 'nearest',coord_sys='spherical',interpolation_constants=False):
+    def __init__(self,pixel_centers,new_grid,data_shape,in_mask = True, interpolation = 'linear',coord_sys='spherical',interpolation_constants=False):
         '''
         pixel_centerns: ndarray of grid points. These are the grid points in which data is given
         new_grid: ndarray of target (new) grid points. These are the grid points ontowhich the data should be interpolated
@@ -81,6 +81,9 @@ class SimpleRegridder2D:
         coord_sys: string. 'cartesian' or 'spherical'. specifies the coordinate type which is used to interprete the grid points in pixel_centers and new_grid
         interpolation_constants: dict|other. posibility to provide precomputed interpolation_constants to skip their computation in instance creation.
         '''
+        if interpolation!='linear':
+            print('Warning: Switching to linear interpolation, nearest is to buggy currently.')
+            interpolation='linear'
         self.out_shape = new_grid.shape[:-1]
         self.in_shape = pixel_centers.shape[:-1]
         self.in_mask = in_mask
@@ -151,7 +154,7 @@ class SimpleRegridder2D:
         if isinstance(interpolation_constants,dict):
             constants_fit_to_grids = self.check_interpolation_constants(interpolation_constants)
         if not constants_fit_to_grids:
-            lookup_array,out_mask,counts = create_lookup_array_2D(self.pixel_centers,self.new_grid,self.in_mask,self.data_shape,return_counts = True)
+            lookup_array,out_mask,counts = create_lookup_array_2D(self.pixel_centers,self.new_grid,in_mask=self.in_mask,data_shape=self.data_shape,return_counts = True,coord_sys='spherical')
             data = {'lookup_array':lookup_array,'out_mask':out_mask}
             interpolation_constants = self.assemble_interpolation_dict(data)
         return interpolation_constants    
@@ -238,14 +241,14 @@ class AgipdRegridderSimple:
     @staticmethod
     def get_interpolation_constants_name(geometry,new_grid_shape,interpolation):
 
-        pixel_hash = hash(tuple(geometry['framed_pixel_centers'].reshape(-1)[:1000])+tuple(geometry['framed_mask'].flatten()[:1000]))
+        pixel_hash = hash(tuple(geometry['q_framed_pixel_centers'].reshape(-1)[:2000]))
         #log.info('new_grid shape = {}'.format(new_grid_shape))
         new_grid_hash = hash(new_grid_shape + (AgipdRegridderSimple.version,))
         return '{}_{}_{}'.format(interpolation,pixel_hash,new_grid_hash)
     
     
-    def __init__(self,geometry,new_grid_shape, interpolation = 'nearest', interpolation_constants=False,mask_threshold = 0.99):        
-        spherical_pixel_centers = geometry['framed_pixel_centers']
+    def __init__(self,geometry,new_grid_shape, interpolation = 'nearest', interpolation_constants=False,mask_threshold = 1-1e-10):        
+        spherical_pixel_centers = geometry['q_framed_pixel_centers']
         self.default_interpolation_constants = {
             'data':{str(m_id):False for m_id in range(len(spherical_pixel_centers))},
             'mask':{str(m_id):False for m_id in range(len(spherical_pixel_centers))},
@@ -255,6 +258,7 @@ class AgipdRegridderSimple:
         #self.pixel_centers = geometry['framed_pixel_centers']
         self._mask_threshold = [mask_threshold]
         self.geometry = geometry
+        self.in_data_shape = geometry['data_shape']
         self.sensitve_pixel_mask = geometry['framed_mask']
         self.interpolation = interpolation
         self.new_grid_shape = new_grid_shape
@@ -305,19 +309,17 @@ class AgipdRegridderSimple:
                 centers = self.cart_pixel_centers[mid]
                 #delaunay = Delaunay(centers.reshape(-1,2))
                 rough_module_mask = rough_module_masks[mid]
+                #print(f'{rough_module_mask.shape}')
                 in_mask = in_masks[mid]
                 new_points = cart_new_grid[rough_module_mask]
-                regridder = SimpleRegridder2D(centers,new_points,coord_sys='cartesian')
-                mask = rough_module_mask.copy()
-                mask[mask] = regridder.apply(in_mask).astype(bool)                
+                #print(f'P{kwargs['local_name']} in_mask shape = {in_mask.shape} nonzeros = {in_mask.astype(int).sum()}')
+                regridder = SimpleRegridder2D(centers,new_points,self.in_data_shape[1:],coord_sys='cartesian',in_mask = in_mask, interpolation = 'linear')
+                mask = rough_module_mask.copy()                
+                mask[mask] = (regridder.apply(np.ones(self.in_data_shape[1:],dtype=float)).flatten())>1e-10
                 module_masks[_id] = mask                
             return np.asarray(module_masks)
         new_grid = self.new_grid
-        in_masks = np.ones(self.sensitve_pixel_mask.shape,dtype = bool)
-        in_masks[:,0,:]=0
-        in_masks[:,-1,:]=0
-        in_masks[:,:,0]=0
-        in_masks[:,:,-1]=0
+        in_masks = self.sensitve_pixel_mask
         # calculate rough module boundary box
         module_boundaries = []
         for dim in range(2):
@@ -334,6 +336,8 @@ class AgipdRegridderSimple:
         min_mask = cart_grid>=module_boundaries[:,None,None,:,0]
         max_mask = cart_grid<=module_boundaries[:,None,None,:,1]
         temp_module_masks = min_mask[...,0] & min_mask[...,1] & max_mask[...,0] & max_mask[...,1]
+        #temp_module_masks = np.ones((16,)+cart_grid.shape[:-1],dtype=bool)
+        #print(f'temp mod mask shape = {temp_module_masks.shape}')
         module_masks = Multiprocessing.comm_module.request_mp_evaluation(delaunay_mask_finding,input_arrays=[np.arange(n_modules)],const_inputs = [temp_module_masks,cart_grid,in_masks] ,call_with_multiple_arguments = True,split_mode='modulus',n_processes= False)
         #log.info(f'module_masks .shape = {module_masks.shape} | {module_masks.dtype}')
         return module_masks
@@ -350,9 +354,9 @@ class AgipdRegridderSimple:
             module_pixel_centers = polar_pixel_centers[m_id]
             new_points = new_grid[mask]
                 
-            r = SimpleRegridder2D(module_pixel_centers,new_points,in_mask=self.sensitve_pixel_mask[m_id],data_shape=(512,128),interpolation = self.interpolation,interpolation_constants = constants['data'][str(m_id)])
+            r = SimpleRegridder2D(module_pixel_centers,new_points,self.in_data_shape[1:],in_mask=self.sensitve_pixel_mask[m_id],interpolation = self.interpolation,interpolation_constants = constants['data'][str(m_id)])
             if self.interpolation == 'linear':
-                rm = SimpleRegridder2D(module_pixel_centers,new_points, in_mask = self.sensitve_pixel_mask[m_id],data_shape=(512,128),interpolation = 'nearest',interpolation_constants = constants['mask'][str(m_id)])
+                rm = SimpleRegridder2D(module_pixel_centers,new_points,self.in_data_shape[1:],in_mask = self.sensitve_pixel_mask[m_id],interpolation = 'linear',interpolation_constants = constants['mask'][str(m_id)])
             else:
                 rm = r
             data_regridders[str(m_id)] = r
@@ -412,7 +416,7 @@ class AgipdRegridderSimple:
                     for m in modules:
                         module_mask = module_masks[m]
                         out_d_part[module_mask]= data_regridders[str(m)].apply(data_part[m])
-                        out_m_part[module_mask]= mask_regridders[str(m)].apply(mask_part[m])#>mask_threshold[0]             
+                        out_m_part[module_mask]= mask_regridders[str(m)].apply(mask_part[m].astype(float))>mask_threshold[0]             
             elif ndim == in_mask.ndim:
                 data_dtype = data.dtype
                 mask_dtype = mask.dtype
@@ -426,7 +430,7 @@ class AgipdRegridderSimple:
                     #log.info(f'masks shape = {module_masks.shape}')
                     #print(f' data part shape = {data[m].shape} mask part shape = {mask[m].shape}')
                     out_d[module_mask] = data_regridders[str(m)].apply(data[m])
-                    out_m[module_mask] = mask_regridders[str(m)].apply(mask[m])#>mask_threshold[0]
+                    out_m[module_mask] = mask_regridders[str(m)].apply(mask[m].astype(float))>mask_threshold[0]
             else:
                 raise AssertionError(f'Too many input dimensions. Input has to have {ndim} or {ndim+1} dimensions.')
             return out_d,out_m
