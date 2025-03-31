@@ -139,9 +139,9 @@ class HDF5_DB(HDF5Interface):
     @staticmethod
     def save_numpy_array(h5_file,path,key,array,meta_dict={}):
         dtype=array.dtype
-        if dtype==np.complex_:
+        if dtype==np.dtype('complex'):
             h5_file[path].create_dataset(key,data=array.astype('<c16'))
-        elif dtype == np.bool_ :
+        elif dtype == np.dtype('bool'):
             #h5_file[path].create_dataset(key,data=array.astype(int))
             h5_file[path].create_dataset(key,data=array)
         elif 'str' in dtype.name:

@@ -26,6 +26,7 @@ cache_aware = True
 L1_cache = 64 #32 # Cache size in kB
 L2_cache = 512 #256 # Cache size in kB
 loglevel = 'WARNING' #['WARNING','INFO','DEBUG']
+silent_mode = False
 
 default_project_db_name= 'ProjectDB'
 default_experiment_db_name= 'ExperimentDB'

@@ -2007,14 +2007,13 @@ class CumulativeVarianceMasked:
         '''
         obj = cls()
         tmp = np.moveaxis(dataset,axis,0)
-        if isinstance(np.ndarray,masks):
+        if isinstance(masks,np.ndarray):
             tmp_mask = np.moveaxis(masks,axis,0)
             for d,m in zip(tmp,tmp_mask):
                 obj.update(d,mask = m)
         else:
             for d in tmp:
                 obj.update(d)
-                
         return obj
     
     def update(self,val:np.ndarray|int|float|complex,mask=True):

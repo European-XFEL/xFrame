@@ -105,8 +105,8 @@ class InvariantExtractor:
         log.info('loaded ccd')                
         log.info(f'ccd shape = {ccd["cross_correlation"]["I1I1"].shape}')
         opt = settings.project
-        average_intensity = ccd.get('average_intensity',False)
-
+        average_intensity = ccd['average_intensity']
+        
         self.average_intensity = average_intensity
         self.data_average_intensity = np.array(average_intensity.data)
         self.xray_wavelength = ccd['xray_wavelength']
@@ -169,7 +169,8 @@ class InvariantExtractor:
                 
                 ## Invariant extraction
                 xprint('\t Solving linear system for invariants Bl|Bn ... ',end='\r')
-                b_coeff = Deg2Invar.from_ccn(ccn_mod,dim=self.dimensions,mode=dopt.invariant_extraction.method,xray_wavelength = self.xray_wavelength,max_order = self.max_order,qs = self.data_radial_points,assume_zero_odd_orders = dopt.invariant_extraction.assume_zero_odd_orders)                
+                b_coeff = Deg2Invar.from_ccn(ccn_mod,dim=self.dimensions,mode=dopt.invariant_extraction.method,xray_wavelength = self.xray_wavelength,max_order = self.max_order,qs = self.data_radial_points,assume_zero_odd_orders = dopt.invariant_extraction.assume_zero_odd_orders)
+                #print(f'There are nan"s = {np.isnan(b_coeff).any()} ')
                 mask,q_id_limits = self.calc_deg_2_invariant_masks(dopt,b_coeff.shape)
                 self.b_coeff_masks[dset_name] = mask
                 self.b_coeff_q_id_limits[dset_name] = q_id_limits

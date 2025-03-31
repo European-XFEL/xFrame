@@ -130,7 +130,7 @@ class SharedArray(SharedMemory):
     def __init__(self,name=None,create=False,dtype=float,shape=(0,)):
         self.dtype = dtype
         self.shape = shape
-        self._array_undefined_value = False
+        self._array_undefined_value = None
         self.array = self._array_undefined_value
         self.creating_instance = False
         if create:

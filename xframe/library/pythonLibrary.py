@@ -13,6 +13,7 @@ import logging
 from io import StringIO
 import sys
 from contextlib import contextmanager
+from xframe.settings import general
 
 sa = 'Shared_Array module'
 
@@ -21,9 +22,10 @@ log=logging.getLogger('root')
 doublePrecision=1e-16
 
 def xprint(txt,**kwargs):
-    if log.level > logging.INFO:
-        print(txt,**kwargs)
-    log.info(txt)
+    if not general.silent_mode:
+        if log.level > logging.INFO:
+            print(txt,**kwargs)
+        log.info(txt)
     
     
 def hash_numpy_in_tuple(_tuple):       
