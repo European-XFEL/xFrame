@@ -69,7 +69,7 @@ def ccd_associated_legendre_matrices_single_m(thetas,l_max,m):
 
 def ccd_associated_legendre_matrices_single_l(thetas,l_max,l):
     r"""
-    Calculates the elements of the upper triangular matrix $P^m_l(\cos(\theta_{q_1}))*P^m_l(\cos(\theta_{q_2}))*\frac{1}{\sqrt{2*l+1}}$ of schmidt semi-normalized associated spherical harmonics at a specific order $m$.
+    Calculates the elements of the upper triangular matrix $P^m_l(\cos(\theta_{q_1}))*P^m_l(\cos(\theta_{q_2}))*\frac{1}{\sqrt{2*l+1}}$ of schmidt semi-normalized associated spherical harmonics at a specific order $l$.
     """
     q_matrices = np.zeros((len(thetas),l_max+1))
     values,ls,ms= mLib.gsl.legendre_sphPlm_array_single_l(l,l_max,np.cos(thetas),return_orders = True)
@@ -701,6 +701,56 @@ class _Conversion3DimFromCCN:
                 last_triangular_matrix_column = ccd_associated_legendre_matrices_single_l(thetas,l,l)
                 bl[...,l]= ccn[...,-1]/last_triangular_matrix_column[...,-1]
                 ccn = ccn[...,:-1]-bl[...,l,None]*last_triangular_matrix_column[...,:-1]
+        
+        b_coeff = np.moveaxis(bl,-1,0)
+        return b_coeff
+
+
+    @staticmethod
+    def back_substitution_diff(ccn,xray_wavelength,momentum_transfer_points,max_order=None,assume_zero_odd_orders = False,**kwargs):
+        #log.info(f'max_order = {max_order}')
+        # Get Pl arguments
+        qs = momentum_transfer_points
+        thetas = ewald_sphere_theta_pi(xray_wavelength,qs)
+        
+        if max_order is None:
+            max_order = ccn.shape[-1]-1
+            
+        ccn = ccn[...,:max_order+1]
+        bl = np.zeros(ccn.shape,dtype=complex)
+        if assume_zero_odd_orders:
+            l_stride = 2
+            orders = np.arange(2,max_order+1,2)
+            lmask = np.ones(max_order+1,dtype=bool)
+            lmask[2]= False
+            #lmask[1]= True
+            ccn = ccn[...,lmask]
+            #lazy back substitution + least squares 
+            # reversed orders shoud be decreasing L,L-1,... or L,L-2,...
+            for l in orders[::-1]:
+                # xprint(f'l = {l}')
+                last_triangular_matrix_column = ccd_associated_legendre_matrices_single_l(thetas,l,l)
+                #xprint(last_triangular_matrix_column.shape)
+                last_triangular_matrix_column = last_triangular_matrix_column[...,lmask]
+                # least squares step
+                a = (last_triangular_matrix_column[...,-2:]**2).sum(axis=-1)
+                ab = (ccn[...,-2:]*last_triangular_matrix_column[...,-2:]).sum(axis=-1)
+                bl[...,l]= ab.conj()/a 
+                ccn = ccn[...,:-2]-bl[...,l,None]*last_triangular_matrix_column[...,:-2]
+                lmask = lmask[...,:-2]
+        else:
+            orders = np.arange(1,max_order+1)
+            lmask = np.ones(max_order+1,dtype=bool)
+            lmask[1] = False
+            ccn = ccn[...,lmask]
+            #lazy back substitution
+            # reversed orders shoud be decreasing L,L-1,... or L,L-2,...
+            for l in orders[::-1]:
+                #xprint(l)
+                last_triangular_matrix_column = ccd_associated_legendre_matrices_single_l(thetas,l,l)[...,lmask]
+                bl[...,l]= ccn[...,-1]/last_triangular_matrix_column[...,-1]
+                ccn = ccn[...,:-1]-bl[...,l,None]*last_triangular_matrix_column[...,:-1]
+                lmask = lmask[...,:-1]
         
         b_coeff = np.moveaxis(bl,-1,0)
         return b_coeff

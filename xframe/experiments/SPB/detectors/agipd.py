@@ -12,14 +12,14 @@ from xframe import database
 
 log=logging.getLogger('root')
 
-class AGIPD():
+class AGIPD:
     dimensions=3
     number_of_modules=16    
     groups = np.array([[[12,13,14,15],[8,9,10,11]],[[0,1,2,3],[4,5,6,7]]],dtype = int)
     modules_per_group=4
     module_width_in_pixel = 512#+7
     module_height_in_pixel = 128
-    data_shape = (16,512,128)
+    data_shape = (number_of_modules,module_width_in_pixel,module_height_in_pixel)
     framed_pixel_mask = np.full((16,module_width_in_pixel+2,module_height_in_pixel+2),False)
     framed_pixel_mask[:,1:-1,1:-1]=True
     asic_slices = [
@@ -29,7 +29,15 @@ class AGIPD():
         ]
         for i in range(8)]
     
-    def __init__(self,geometry_path = None):
+    def __init__(self,geometry_path = None,super_sampling=1):
+        self.super_sampling = super_sampling
+        if super_sampling >1:
+            self.module_width_in_pixel*=super_sampling
+            self.module_height_in_pixel*=super_sampling
+            self.data_shape = (self.number_of_modules,self.module_width_in_pixel,self.module_height_in_pixel)
+            self.framed_pixel_mask = np.full((self.number_of_modules,self.module_width_in_pixel+2,self.module_height_in_pixel+2),False)
+            self.framed_pixel_mask[:,1:-1,1:-1]=True
+        
         self.database=database.experiment           
         self._origin = np.zeros(3,dtype = float)
         self.quadrants=np.zeros([2,2])
@@ -37,11 +45,17 @@ class AGIPD():
         self.framed_pixel_centers=np.zeros([self.number_of_modules,self.module_width_in_pixel+2, self.module_height_in_pixel+2,self.dimensions])
         
         modules=[]
-        modules.append(AGIPDmodule(0))
-        self.wide_pixel_mask = np.full((16,self.module_width_in_pixel,128),False)
+        if super_sampling > 1:
+            modules.append(AGIPDmodule2(0,super_sampling=super_sampling))
+        else:
+            modules.append(AGIPDmodule(0))
+        self.wide_pixel_mask = np.full((16,self.module_width_in_pixel,self.module_height_in_pixel),False)
         self.wide_pixel_mask[0,...]=modules[0].horz_wide_pixel_mask[:,None]
         for id in np.arange(1,self.number_of_modules,1):
-            newModule=AGIPDmodule(id,pixel_corners=modules[0].pixel_corners.copy())
+            if super_sampling > 1:
+                newModule=AGIPDmodule2(id,pixel_corners=modules[0].pixel_corners.copy(),super_sampling=super_sampling)
+            else:
+                newModule=AGIPDmodule(id,pixel_corners=modules[0].pixel_corners.copy())
             modules.append(newModule)
             self.wide_pixel_mask[id,...]=newModule.horz_wide_pixel_mask[:,None]
         modules=np.array(modules)
@@ -192,12 +206,12 @@ class AGIPDmodule:
     Each 64'th and 64'th+1 pixel is of doubled width, i.e. 0.4x0.2 mm (exept the last pixel row).
     These are pixels horizontally in between (64,64) asics, the start and end of moduels are normal pixels:
     
-    moduel:
+    module:
      a00 || a10 || a20 || a30 || a40 || a50 || a60 || a70 
      a01 || a11 || a21 || a31 || a41 || a51 || a61 || a71
     each | stands for one of the doubled with pixels.
- 
-
+    
+    
     For specifics about the pixel structure in each module look at the paper from Allagholi et al. (ISSN 16005775) 
     The Adaptive Gain Integrating Pixel Detector at the European XFEL.
     Section 4.2
@@ -210,7 +224,7 @@ class AGIPDmodule:
     _wide_pixel_column_separation = 64 #65 no! the doubled pixels are not dead (insensitive)
     _width_in_pixel=512 #+7 no! the doubled pixels are not dead (insensitive)
     _height_in_pixel=128
-
+    
     horz_wide_pixel_mask = construct_horz_wide_pixel_mask(_width_in_pixel,_wide_pixel_column_separation)
     _local_horz_pixel_corners,_local_vert_pixel_corners = construct_local_hv_pixel_corners(_height_in_pixel,_pixel_size,_wide_pixel_size,horz_wide_pixel_mask)
     local_pixel_corners = construct_local_pixel_corners(_local_horz_pixel_corners,_local_vert_pixel_corners)
@@ -218,6 +232,77 @@ class AGIPDmodule:
         
     
     def __init__(self,id,detection_plane = False, pixel_corners = False):
+        self.pixel_corners=np.zeros([self._width_in_pixel+1,self._height_in_pixel+1,self._spaceDim])
+        self.framed_pixel_centers=np.zeros([self._width_in_pixel+2,self._height_in_pixel+2,self._spaceDim])
+        if isinstance(detection_plane,plane3D):
+            self._detection_plane = detection_plane
+        else:
+            self._detection_plane = plane3D()#detection_plane
+            
+        self.id=id
+        if isinstance(pixel_corners,np.ndarray):
+            self.pixel_corners=pixel_corners
+        else:
+            self._update_pixel_corners()
+    @property
+    def detection_plane(self):
+        return self._detection_plane
+    @detection_plane.setter
+    def detection_plane(self, plane:plane3D):
+        self._detection_plane = plane
+        self._update_pixel_corners()
+
+    def _update_pixel_corners(self):
+        plane = self._detection_plane
+        base = plane.standardForm['base']
+        x_direction = plane.standardForm['x_direction']
+        y_direction = plane.standardForm['y_direction']
+        
+        transformation_matrix = np.array([x_direction,y_direction,np.zeros(3)]).T
+        shape = self.pixel_corners.shape
+        framed_center_shape = self.framed_pixel_centers.shape
+        self.pixel_corners = base + transformation_matrix.dot(self.local_pixel_corners.reshape(-1,3).T).T.reshape(shape)
+        self.framed_pixel_centers = base + transformation_matrix.dot(self.local_framed_pixel_centers.reshape(-1,3).T).T.reshape(framed_center_shape)       
+
+
+class AGIPDmodule2:
+    ''' 
+    Each module consists of a rigid sensor of 128x512+7 pixels. Standard pixels are squares of width 0.2 mm. 
+    Each 64'th and 64'th+1 pixel is of doubled width, i.e. 0.4x0.2 mm (exept the last pixel row).
+    These are pixels horizontally in between (64,64) asics, the start and end of moduels are normal pixels:
+    
+    module:
+     a00 || a10 || a20 || a30 || a40 || a50 || a60 || a70 
+     a01 || a11 || a21 || a31 || a41 || a51 || a61 || a71
+    each | stands for one of the doubled with pixels.
+    
+    
+    For specifics about the pixel structure in each module look at the paper from Allagholi et al. (ISSN 16005775) 
+    The Adaptive Gain Integrating Pixel Detector at the European XFEL.
+    Section 4.2
+    '''    
+    _spaceDim=3
+    _number_of_gain_stages=3
+    _number_of_memory_cells=352
+    _pixel_size=np.array([.2,.2])*1e-3 # pixel size in meters
+    _wide_pixel_size= np.array([.4,.2])*1e-3 # pixel size in meters
+    _wide_pixel_column_separation = 64 #65 no! the doubled pixels are not dead (insensitive)
+    _width_in_pixel=512 #+7 no! the doubled pixels are not dead (insensitive)
+    _height_in_pixel=128
+    
+    def __init__(self,id,detection_plane = False, pixel_corners = False,super_sampling=1):
+        self.super_sampling=super_sampling
+        self._pixel_size=self._pixel_size.copy()/super_sampling
+        self._wide_pixel_size=self._wide_pixel_size.copy()/super_sampling
+        self._wide_pixel_column_separation*=super_sampling
+        self._width_in_pixel*=super_sampling
+        self._height_in_pixel*=super_sampling
+
+        self.horz_wide_pixel_mask = construct_horz_wide_pixel_mask(self._width_in_pixel,self._wide_pixel_column_separation)
+        self._local_horz_pixel_corners,self._local_vert_pixel_corners = construct_local_hv_pixel_corners(self._height_in_pixel,self._pixel_size,self._wide_pixel_size,self.horz_wide_pixel_mask)
+        self.local_pixel_corners = construct_local_pixel_corners(self._local_horz_pixel_corners,self._local_vert_pixel_corners)
+        self.local_framed_pixel_centers = construct_local_framed_pixel_centers(self._local_horz_pixel_corners,self._local_vert_pixel_corners,self._pixel_size)
+        
         self.pixel_corners=np.zeros([self._width_in_pixel+1,self._height_in_pixel+1,self._spaceDim])
         self.framed_pixel_centers=np.zeros([self._width_in_pixel+2,self._height_in_pixel+2,self._spaceDim])
         if isinstance(detection_plane,plane3D):

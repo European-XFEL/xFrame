@@ -15,12 +15,21 @@ log = logging.getLogger('root')
 
 
 class PolarHarmonicTransform:
+    '''
+    Computes the Circular/Polar Harmonic Transform of datasets given on a regular polar grid.
+    For each radial coordinate the Fourier series coefficients are computed along the angular coordinate.
+    According to https://en.wikipedia.org/wiki/Fourier_series the fourier series coefficients are normalized by 1/period.
+    Therefore we have to set norm=forward in numpy.fft calls to have the same normalization.
+    '''
     def __init__(self,max_order=32):
+        
         self.max_order = max_order
         self.n_points = 2*max_order        
         self.forward_cmplx = self._generate_forward_cmplx()
+        self.forward_cmplx_masked = self._generate_forward_cmplx_masked()
         self.inverse_cmplx = self._generate_inverse_cmplx()
         self.forward_real = self._generate_forward_real()
+        self.forward_real_masked = self._generate_forward_real_masked()
         self.inverse_real = self._generate_inverse_real()
         self.phis = np.arange(self.n_points)*2*np.pi/self.n_points
         self.angular_shape = (self.n_points,)
@@ -28,26 +37,46 @@ class PolarHarmonicTransform:
     def _generate_forward_cmplx(self):
         fft = np.fft.fft
         n_points = self.n_points
-        def forward_cmplx(data):
-            return fft(data,axis=-1)/n_points
+        def forward_cmplx(data,out = None):
+            return fft(data,axis=-1,norm='forward',out = out)
         return forward_cmplx
+    def _generate_forward_cmplx_masked(self):
+        fft = np.fft.fft
+        nsum =np.sum
+        div = np.divide
+        def forward_complex_masked(data,mask,out = None):
+            n_unmasked_points = nsum(mask,axis=-1)
+            nonzero = n_unmasked_points!=0
+            coeff = fft(data*mask,axis=-1,norm='backward',out = out)
+            div(coeff,n_unmasked_points.astype(float),out=coeff,where = nonzero)
+            return coeff,nonzero
+        return forward_complex_masked
     def _generate_inverse_cmplx(self):
         ifft = np.fft.ifft
-        n_points = self.n_points
-        def inverse_cmplx(data):
-            return ifft(data*n_points,axis=-1)
+        def inverse_cmplx(data,out = None):
+            return ifft(data,axis=-1,norm='forward',out = out)
         return inverse_cmplx
     def _generate_forward_real(self):
         fft = np.fft.rfft
-        n_points = self.n_points
-        def forward_real(data):
-            return fft(data,axis=-1)/n_points
+        def forward_real(data,out = None):
+            return fft(data,axis=-1,norm='forward',out = out)
         return forward_real
+    def _generate_forward_real_masked(self):
+        fft = np.fft.rfft
+        nsum =np.sum
+        div = np.divide
+        def forward_real_masked(data,mask,out = None):
+            n_unmasked_points = nsum(mask,axis=-1)
+            nonzero = n_unmasked_points!=0
+            coeff = fft(data*mask,axis=-1,norm='backward',out = out)
+            div(coeff,n_unmasked_points.astype(float),out=coeff,where = nonzero)
+            return coeff,nonzero
+        return forward_real_masked
     def _generate_inverse_real(self):
         ifft = np.fft.irfft
         n_points = self.n_points
-        def inverse_real(data):
-            return ifft(data*n_points,n_points,axis=-1)
+        def inverse_real(data,n_points=n_points,out = None):
+            return ifft(data,n_points,axis=-1,norm='forward',out = out)
         return inverse_real
     def get_empty_coeff(self,pre_shape=None,real=False):
         if real:

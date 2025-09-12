@@ -311,7 +311,7 @@ class heatPolar2D:
             #            log.info('phi shape={}'.format(phi.shape))
         else:
             shape=data.shape
-            rValues=np.arange(0,shape[0])
+            rValues=np.arange(0,shape[0]+1)
             phiValues=np.zeros(shape[1]+1)
             phiValues[:-1]=np.arange(shape[1])*2*np.pi/(shape[1])
             

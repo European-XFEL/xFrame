@@ -142,6 +142,11 @@ class SettingsConverter:
                     out_dict[key]=cls.recursive_convert_list(val)
                 elif isinstance(val, (dict,DictNamespace)):
                     out_dict[key]=cls.recoursive_convert_settings(val)
+                elif callable(val):
+                    module = val.__module__
+                    if module == 'numpy':
+                        module = 'np'
+                    out_dict[key]={'command':f'{module}.{val.__name__}'}
                 else:
                     out_dict[key]=val
                     #raise ValueError('Cannot convert {} type for settings key {}'.format(type(val),key))

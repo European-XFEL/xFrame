@@ -453,15 +453,16 @@ class ExperimentWorker(ExperimentWorkerInterface):
         return {'q_pixel_corners':q_pixel_corners,'lab_pixel_corners':corners,'q_framed_pixel_centers':q_framed_pixel_centers,'lab_framed_pixel_centers':framed_centers,'wide_pixel_mask':wide_pixel_mask,'data_shape':data_shape,'q_pixel_centers':q_pixel_centers,'lab_pixel_centers':lab_pixel_centers,'asic_slices':self.detector.asic_slices,'unit':unit,'unit_lab':unit_lab,'coordinate_sys':coordinate_sys,'framed_mask':framed_mask}
     
 
-    def plot_data(self,data,geometry,scale='log',use_reciprocal_coords = True, vmin=None,vmax=None,cmap='inferno',figsize=(10,10),bad_color='black'):
+    def plot_data(self,data,geometry,scale='log',use_reciprocal_coords = True, vmin=None,vmax=None,cmap='inferno',figsize=(10,10),bad_color='black',layout = {}):
         from xframe.presenters import matplotlibPresenter
         if use_reciprocal_coords:
-            layout = {'x_label':r'$q_x \quad [\AA^-1] $','y_label':r'$q_y \quad [\AA^-1]$'}
+            plt_layout = {'x_label':r'$q_x \quad [\AA^{-1}] $','y_label':r'$q_y \quad [\AA^{-1}]$'}
             corners = spherical_to_cartesian(geometry['q_pixel_corners'])
         else:
-            layout = {'x_label':r'$x \quad [m] $','y_label':r'$y \quad [m]$'}
+            plt_layout = {'x_label':r'$x \quad [m] $','y_label':r'$y \quad [m]$'}
             corners = geometry['lab_pixel_corners']
-        fig = matplotlibPresenter.agipd_heatmap(data,corners,layout = layout,scale=scale,vmin=vmin,vmax=vmax,cmap=cmap,figsize=figsize,bad_color= bad_color)
+        plt_layout.update(layout)
+        fig = matplotlibPresenter.agipd_heatmap(data,corners,layout = plt_layout,scale=scale,vmin=vmin,vmax=vmax,cmap=cmap,figsize=figsize,bad_color= bad_color)
         return fig
     
     ## satisfy interface ##
