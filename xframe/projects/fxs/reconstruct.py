@@ -10,6 +10,11 @@ os.chdir(plugin_dir)
 
 from xframe.library import mathLibrary as mLib
 from xframe.library.mathLibrary import SampleShapeFunctions,ExponentialRamp,LinearRamp
+from xframe.library.math_transforms import (SphericalFourierTransform,
+                                            HankelTransformWeights,
+                                            get_harmonic_transform,
+                                            HankelWeightStruct,
+                                            SphericalFourierTransformStruct)
 from xframe.library.gridLibrary import uniformGrid_func
 from xframe.library.gridLibrary import ReGrider
 from xframe.library.gridLibrary import NestedArray
@@ -30,7 +35,7 @@ from .projectLibrary.ft_grid_pairs import radial_grid_func_zernike
 from .projectLibrary.ft_grid_pairs import spherical_ft_grid_pair_zernike
 from .projectLibrary.ft_grid_pairs import polar_ft_grid_pair_zernike
 from .projectLibrary.ft_grid_pairs import polarFTGridPair_SinCos_new
-from .projectLibrary.fourier_transforms import generate_ft,load_fourier_transform_weights
+from .projectLibrary.fourier_transforms import load_fourier_transform_weights
 from .projectLibrary.misk import getAnalysisRecipeFacotry
 from .projectLibrary.misk import get_analysis_process_factory
 from .projectLibrary.misk import generate_calc_center
@@ -51,7 +56,7 @@ from .projectLibrary.fxs_Projections import generate_fix_point_inversion
 from .projectLibrary.fxs_Projections import RealProjection
 from .projectLibrary.fxs_invariant_tools import generate_estimate_number_of_particles_new,generate_estimate_number_of_particles_new_2
 from .projectLibrary.fxs_IO_methods import generate_error_routines
-from .projectLibrary.fxs_IO_methods import HIOProjection
+from .projectLibrary.fxs_IO_methods import HIOProjection,DRSProjection
 from .projectLibrary.fxs_IO_methods import generate_main_error_routine
 from .projectLibrary.fxs_IO_methods import error_reduction
 from .projectLibrary.harmonic_transforms import HarmonicTransform
@@ -64,9 +69,7 @@ from xframe import database
 from xframe import Multiprocessing
 import xframe
 
-
 log=logging.getLogger('root')
-
 
 opt = None
 db = None
@@ -170,13 +173,14 @@ class ProjectWorker(ProjectWorkerInterface):
             errors = []
             for result_dict in processed_results_list:
                 grid_pair = result_dict.pop('grid_pair')
+                ft_struct = result_dict.pop('fourier_transform_struct')
                 errors.append(result_dict['error_dict']['main'][-1])
                 projection_matrices = result_dict.pop('projection_matrices')                
             r_ids=np.argsort(errors)
             log.info('error sorted reconstruction = {} \n errors ={}'.format(r_ids,np.array(errors)[r_ids]))
             processed_results_dict={str(_id):processed_results_list[_id] for _id in r_ids}
             reciprocity_coefficient = _get_reciprocity_coefficient(settings.project.fourier_transform)
-            data_dict={'configuration':{'internal_grid':grid_pair,'xray_wavelength':self.mtip.load_mtip_data()[0]['xray_wavelength'],'reciprocity_coefficient':reciprocity_coefficient},'reconstruction_results':processed_results_dict,'projection_matrices':projection_matrices,'stats':stats}
+            data_dict={'configuration':{'internal_grid':grid_pair,'xray_wavelength':self.mtip.load_mtip_data()[0]['xray_wavelength'],'reciprocity_coefficient':reciprocity_coefficient},'reconstruction_results':processed_results_dict,'projection_matrices':projection_matrices,'stats':stats,'fourier_transform_struct':ft_struct}
             save('reconstructions',data_dict)
         except Exception as e:
             log.info(f'Error during postprocessing / saving with message:\n {e}')
@@ -239,41 +243,45 @@ class MTIP:
         loops_str += f'\t{loop_name}:'+' '*(max_loop_name_size-len(loop_name))+ f'\t {iterations}x( '+''.join(methods_string)+')\n'
    
     @classmethod
-    def preinit(cls):
+    def preinit(cls,init_data = None):
         ''' 
         This Method prepares needed quantities which require multiprocessing that are equal for all MTIP instances before __init__ is called in a multi process environment. This is currently done only to preload the fourier transform weights.
         '''
+        if init_data is None:
+            tmp = cls.load_mtip_data()
+        else:
+            tmp = init_data
         opt = settings.project
         cls.dimensions = opt.dimensions
-        tmp = cls.load_mtip_data()
         cls.mtip_data = tmp[0]
         cls.data_q_limits = tmp[1]
         cls.data_number_of_radial_points = tmp[2]
+        cls.max_q = opt.grid.max_q
+        max_order = opt.grid.max_order
+        n_radial_points = opt.grid.n_radial_points
+        reciprocity_coefficient = opt.fourier_transform.reciprocity_coefficient
+        ft_type = opt.fourier_transform.type
+        n_processes = opt.multi_process.n_weight_generating_processes
 
-        # create fourier transform weights
-        ht_opt={
-            'dimensions':opt.dimensions,
-            **opt.grid,            
-        }
-        max_q = opt.grid.max_q
-        if not isinstance(max_q,float):
-            max_q = cls.data_q_limits[1]
-        cls.max_q=max_q
-        # generate mock angular grid parameters to use the standard grid routine to get the internal radial grid.
-        if opt.dimensions ==2:
-            grid_param = {'phis':np.array([1.0,2.0])}
-        elif opt.dimensions ==3:
-            grid_param = {'phis':np.array([1.0,2.0]),'thetas':np.array([1.0,2.0])}
-        mock_grid_pair = get_grid({**opt.fourier_transform,**ht_opt,**grid_param,'max_q':max_q,'n_radial_points_from_data':cls.data_number_of_radial_points})        
-        qs = mock_grid_pair.reciprocalGrid.__getitem__((slice(None),)+(0,)*cls.dimensions) # expression is just grid[:,0,0,0] in 3D case ans grid[:,0,0] in 2D
-        cls.reciprocal_radial_points = qs
-        rs = mock_grid_pair.realGrid.__getitem__((slice(None),)+(0,)*cls.dimensions) # expression is just grid[:,0,0,0] in 3D case ans grid[:,0,0] in 2D
-        cls.real_radial_points = rs        
-        n_radial_points = len(qs)
-        r_max = np.max(rs)
-        #cls.fourier_transform_weights = cls.load_fourier_transform_weights(n_radial_points,r_max)
-        cls.fourier_transform_weights = load_fourier_transform_weights(opt.dimensions,opt.fourier_transform,opt.grid,database.project)
-        cls.preinit_was_called = True
+        hankel_struct = HankelWeightStruct(dimension = opt.dimensions,
+                                           n_radial_points = n_radial_points,
+                                           angular_bandwidth = max_order+1,
+                                           hankel_type = ft_type,
+                                           n_processes_for_weight_generation = n_processes)
+        weight_dict = load_fourier_transform_weights(hankel_struct,allow_weight_saving=opt.fourier_transform.allow_weight_saving)
+
+        #print(weight_dict.keys())
+        cls.fourier_transform_weights = weight_dict.pop('weights')
+        cls.preinit_fourier_struct = SphericalFourierTransformStruct(**weight_dict)
+        cls.preinit_fourier_struct.dimension = hankel_struct.dimension
+        cls.preinit_fourier_struct.n_radial_points = hankel_struct.n_radial_points
+        cls.preinit_fourier_struct.angular_bandwidth = hankel_struct.angular_bandwidth
+        cls.preinit_fourier_struct.hankel_type = hankel_struct.hankel_type
+        cls.preinit_fourier_struct.n_processes_for_weight_generation = hankel_struct.n_processes_for_weight_generation
+        
+        #print(hankel_struct)
+        #print(cls.preinit_fourier_struct)
+            
     @classmethod
     def load_mtip_data(cls):
         opt = settings.project
@@ -283,7 +291,7 @@ class MTIP:
         data_number_of_radial_points = len(data['data_radial_points'])
         #log.info('data points = {}'.format(data['data_radial_points']))
         return [data,data_q_limits,data_number_of_radial_points]
-    
+        
 
     def __init__(self,process_factory):
         set_globals()
@@ -295,6 +303,7 @@ class MTIP:
         self.grid_pair = False
         self.routines = False
         self.projection_objects=False
+        self.transform_objects = False
         self.mtip_part_names = False
         self.mtip_io_names = False
         self.phasing_loop = False        
@@ -302,10 +311,11 @@ class MTIP:
 
     def assemble_operators(self):
         #order is important, e.g. assemble_error_routines depents on self.projection_objects
-        transforms,grid_pair,max_order=self.assemble_transform_op_and_grid()        
+        transforms,grid_pair,max_order,transform_objects=self.assemble_transform_op_and_grid()
+        self.transform_objects = transform_objects
         reciprocal_projection,rp_obj=self.assemble_reciprocal_projection_op(grid_pair,max_order)
-        real_projections,hio_projection,real_projection_obj,shrink_wrap_obj=self.assemble_real_projection_op(grid_pair,rp_obj,transforms)
-        self.projection_objects = {'reciprocal':rp_obj,'hio':hio_projection,'real':real_projection_obj,'sw':shrink_wrap_obj}
+        real_projections,IO_projections,real_projection_obj,shrink_wrap_obj=self.assemble_real_projection_op(grid_pair,rp_obj,transforms)
+        self.projection_objects = {'reciprocal':rp_obj,'real':real_projection_obj,'sw':shrink_wrap_obj,**IO_projections}
         orientation_fixing=self.assemble_orientation_fixing_op(grid_pair)
         errors = self.assemble_error_routines(grid_pair)
         misk = self.assemble_misk_oppesators(grid_pair)
@@ -314,65 +324,60 @@ class MTIP:
         #log.info(f'{transforms}\n {reciprocal_projection}\n{real_projections}\n{orientation_fixing}\n{errors}\n {misk}')
         operators={**transforms,**real_projections,**reciprocal_projection,**orientation_fixing,**errors,**misk}
         return operators,grid_pair
-    
-    def generate_fourier_transforms(self,harm_trf):
-        dimensions = self.dimensions
-        ft_opt = opt.fourier_transform
-        ft_type = ft_opt['type']
-        pos_orders= np.arange(harm_trf.max_order+1)
-        pi_in_q = ft_opt.get('pi_in_q',None)
-
-        reciprocity_coefficient=_get_reciprocity_coefficient(ft_opt)
-        
-        use_gpu = opt['GPU']['use']                    
-        weights_dict = self.fourier_transform_weights
-        r_max = np.max(self.real_radial_points)
-        #log.info('Use GPU = {}'.format(use_gpu))
-        fourierTransform,inverseFourierTransform=generate_ft(r_max,weights_dict,harm_trf,dimensions,pos_orders=pos_orders,reciprocity_coefficient=reciprocity_coefficient,use_gpu = use_gpu,mode = ft_type)
-        
-        #d= np.ones((settings.project.grid.n_radial_points,pos_orders.max()*2+1))
-        #d2 = inverseFourierTransform(fourierTransform(d))
-        #log.info(d2[:,0])
-        return fourierTransform,inverseFourierTransform
 
     def assemble_transform_op_and_grid(self):
-        ht_opt={
-            'dimensions':opt.dimensions,
-            **opt.grid            
-        }
-        #log.info(f'ht opt = {ht_opt}')
-        # Create harmonic transforms (needs to happen before grid selection since harmonic transform plugin can choose the angular part of the grid.)
-        cht=HarmonicTransform('complex',ht_opt)
-        #ht_data_type = opt['harmonic_transform']['data_type']
+        max_q = self.max_q
+        max_q_is_set =  isinstance(max_q,float) or (isinstance(max_q,int) and (not isinstance(max_q,bool)))
+        if not max_q_is_set:
+            self.max_q = max_q = self.data_q_limits[1]
+        Nr,Nq = HankelTransformWeights._read_n_points(opt.grid.n_radial_points)
+        
+        harmonic_transform_opt = { i:opt.grid.get(i,0) for i in ['n_phi','n_theta']}
+        max_nonzero_r = opt.grid.max_nonzero_r
+        if max_nonzero_r is None:
+            r_support = None
+        else:
+            r_support =  opt.particle_radius*max_nonzero_r
+
+
+        weights = self.fourier_transform_weights
+        struct = self.preinit_fourier_struct
+        struct.max_q = max_q
+        struct.max_nonzero_r = r_support
+        struct.use_gpu = opt.GPU.use
+        if 'n_phi' in harmonic_transform_opt:
+            struct.n_polar_angles = harmonic_transform_opt['n_phi']
+        if 'n_theta' in harmonic_transform_opt:
+            struct.n_azimutal_angles = harmonic_transform_opt['n_theta']
+        #print(struct)
+        #print(weights[0].shape)
+        #sys.exit()
+        sft = SphericalFourierTransform(struct,weights = weights)
+        #sys.exit()
         if self.dimensions == 2:
-            ht =  HarmonicTransform('real',ht_opt)
+            bandwidth = self.fourier_transform_weights['bandwidth']
+            cht_forward,cht_inverse = sft.harm.forward_cmplx, sft.harm.inverse_cmplx
+            ht =  get_harmonic_transform(bandwidth, dimensions = dimensions, options=harmonic_transform_opt) # HarmonicTransform('real',ht_opt)
+            ht_forward,ht_inverse = ht.forward_real,ht.inverse_real
         elif self.dimensions == 3:
-            ht=cht
-        cht_forward,cht_inverse = cht.forward, cht.inverse
-        #log.info(cht_forward)
-        #log.info(f'spat shape = {cht._sh._sh.spat_shape} ht_opt = {ht_opt}')
-        ht_forward,ht_inverse = ht.forward, ht.inverse
-        #log.info(ht_forward)
-        #xprint("ht grid param = {}".format(cht.grid_param))
-        #log.info(f'spat shape = {cht._sh._sh.spat_shape}')
-        grid_pair=get_grid({**opt.fourier_transform,**ht_opt,**cht.grid_param,'max_q':self.max_q,'n_radial_points_from_data':self.data_number_of_radial_points})
-        # fourier transforms
-        ft_forward,ft_inverse=self.generate_fourier_transforms(cht)
-        #log.info(f'grid shape = {grid_pair.realGrid[:].shape}')
-        #log.info("test ft:")
-        #a = np.ones(grid_pair.realGrid.shape)
-        #a[20:]=0
-        #for i in range(20):
-        #    a=ft_inverse(ft_forward(a))
-        #log.info('mean at 10 = {} mian at 40 = {}'.format(np.mean(a[10]),np.mean(a[40])))
-        #raise Exception()
+            ht = sft.harm
+            cht_forward,cht_inverse = sft.harm.forward_cmplx, sft.harm.inverse_cmplx 
+            if settings.project.projections.reciprocal.use_real_spherical_harmonics:
+                ht_forward,ht_inverse = sft.harm.forward_real, sft.harm.inverse_real
+            else:
+                ht_forward,ht_inverse = cht_forward,cht_inverse
+                   
+        grid_pair={'real':sft.real_grid,'reciprocal':sft.reciprocal_grid}
+        ft_forward,ft_inverse=sft.forward_cmplx,sft.inverse_cmplx
         
         transform_op={'fourier_transform':ft_forward,'inverse_fourier_transform':ft_inverse,'harmonic_transform':ht_forward,'inverse_harmonic_transform':ht_inverse,'complex_harmonic_transform':cht_forward,'complex_inverse_harmonic_transform':cht_inverse}
-        return transform_op,grid_pair,ht.max_order
+        transform_objects = {'fourier_transform':sft,'harmonic_transform':ht}
+        #xprint(f'\n max order = {ht.max_order} \n')
+        return transform_op,grid_pair,ht.max_order,transform_objects
 
     def assemble_reciprocal_projection_op(self,grid_pair,max_order):
         #opt=opt['projections']['reciprocal']
-        rp=ReciprocalProjection(grid_pair.reciprocalGrid,self.mtip_data,max_order)
+        rp=ReciprocalProjection(grid_pair['reciprocal'],self.mtip_data,max_order)
         self.rprojection = rp
         self.results['n_particles']=[]
         self.results['n_particles_fraction']=[]
@@ -394,28 +399,27 @@ class MTIP:
     def assemble_real_projection_op(self,grid_pair,rp_obj,transforms):
         #log.info('assemble real projection')
         r_opt=opt.projections.real
-        r_grid=grid_pair.realGrid
-        q_grid=grid_pair.reciprocalGrid
+        r_grid=grid_pair['real']
+        q_grid=grid_pair['reciprocal']
 
         # create autocorrelation
         pr = rp_obj.full_projection_matrices
-        icht = transforms['inverse_harmonic_transform']
+        harm_obj = self.transform_objects['harmonic_transform']
+        icht = transforms['complex_inverse_harmonic_transform']
         ift = transforms['inverse_fourier_transform']
         #log.info(f'len pr = {len(rp_obj.used_orders)}')
         #log.info(f'pr shapes = {[p.shape for p in pr]}')
         #log.info(f'len pr = {len(pr)}')
 
         if self.dimensions ==3:
-            pr_padded = []
+            pr_padded = harm_obj.get_empty_coeff(pre_shape=(q_grid.shape[0],))
+            #xprint(f'pr_padded shape = {pr_padded.shape}')
             for l,p in enumerate(pr):
                 n_ms = 2*l+1
                 if p.shape[1]!= n_ms:
-                    p_padded = np.zeros((p.shape[0],n_ms),dtype=p.dtype)
-                    p_padded[:,:p.shape[1]]=p
-                    pr_padded.append(p_padded)
+                    pr_padded[:,l**2:l**2+p.shape[1]]=p
                 else:
-                    pr_padded.append(p)
-                        
+                    pr_padded[:,l**2:(l+1)**2]=p                        
             #xprint(f'pr shape = {[p.shape for p in pr_padded]}')
             auto_correlation_guess = ift(icht(pr_padded)).real
         elif self.dimensions ==2:
@@ -427,7 +431,7 @@ class MTIP:
         real_projection_obj = RealProjection(r_opt.projections,metadata)
 
         sw_opt=r_opt['shrink_wrap']
-        sw_obj = ShrinkWrapParts(r_grid,q_grid,real_projection_obj.initial_support)
+        sw_obj = ShrinkWrapParts(r_grid,q_grid,real_projection_obj.initial_support,options=sw_opt)
         #real_support_projection=generate_real_support_projection(initial_support_mask)
         
         #other_real_projections=generate_other_real_projections(r_opt.non_support_projections,metadata)
@@ -438,20 +442,21 @@ class MTIP:
         #hio = generate_HIO(r_opt['HIO'])
         hio_opt = r_opt.HIO
         hio = HIOProjection(hio_opt.beta[0],considered_projections=hio_opt.get('considered_projections',['all']))
+        drs = DRSProjection(hio_opt.beta[0])
         #hio = generate_HIO({'beta':self.beta})
         
         #real_projection_op={'real_support_projection':real_support_projection,'other_real_projections':other_real_projections,'multiply_ft_gaussian':multiply_ft_gaussian,'calculate_support_mask':calculate_support_mask,'hybrid_input_output':hio.projection,'real_projection':real_projection_obj.projection}
         
-        real_projection_op={'multiply_ft_gaussian':multiply_ft_gaussian,'calculate_support_mask':calculate_support_mask,'hybrid_input_output':hio.projection,'error_reduction':error_reduction,'real_projection':real_projection_obj.projection}
+        real_projection_op={'multiply_ft_gaussian':multiply_ft_gaussian,'calculate_support_mask':calculate_support_mask,'hybrid_input_output':hio.projection,'error_reduction':error_reduction,'real_projection':real_projection_obj.projection,'douglas_rachford_output':drs.projection}
         
-        return real_projection_op,hio,real_projection_obj,sw_obj
+        return real_projection_op,{'hio':hio,'drs':drs},real_projection_obj,sw_obj
     
     def assemble_orientation_fixing_op(self,grid_pair):
         ft_opt=opt['fourier_transform']
-        r_grid=grid_pair.realGrid
-        q_grid=grid_pair.reciprocalGrid
+        r_grid=grid_pair['real']
+        q_grid=grid_pair['reciprocal']
         calc_center_routine=generate_calc_center(r_grid)
-        negative_shift_routine = generate_shift_by_operator(grid_pair.reciprocalGrid,opposite_direction = True)
+        negative_shift_routine = generate_shift_by_operator(grid_pair['reciprocal'],opposite_direction = True)
         #negative_shift_routine=generate_negative_shift_operator(q_grid,ft_opt['type'])
         #negative_shift_routine=generate_negative_shift_operator(q_grid,ft_opt['type'])
         orientation_fixing_op={'calc_center':calc_center_routine,'negative_shift':negative_shift_routine}
@@ -476,8 +481,8 @@ class MTIP:
         
     def assemble_misk_oppesators(self,grid_pair):
         dtype = np.dtype(complex)
-        abs_value = generate_absolute_value(grid_pair.realGrid[:].shape[:-1],dtype,cache_aware = settings.general.cache_aware,L2_cache = settings.general.L2_cache)        
-        square = generate_square(grid_pair.realGrid[:].shape[:-1],dtype,cache_aware = settings.general.cache_aware,L2_cache = settings.general.L2_cache)
+        abs_value = generate_absolute_value(grid_pair['real'][:].shape[:-1],dtype,cache_aware = settings.general.cache_aware,L2_cache = settings.general.L2_cache)        
+        square = generate_square(grid_pair['reciprocal'][:].shape[:-1],dtype,cache_aware = settings.general.cache_aware,L2_cache = settings.general.L2_cache)
         if self.dimensions == 3:
             calc_deg2_invariant = harmonic_coeff_to_deg2_invariants_3d
         elif self.dimensions == 2:
@@ -521,8 +526,8 @@ class MTIP:
             [(0,1,1,2),['id','id','approximate_unknowns','id']],
             [(0,1,2,3),[('id',()),('id',()),('save_to_dict',(self.results,'fxs_unknowns','replace')),'id']],
             [(0,1,2,1,3),['id','mtip_projection','id','id']],
-            [(0,1,2,3),['id','inverse_harmonic_transform','id','id']],
-            [(0,0,3,1,2),['id','project_to_modified_intensity','save_number_of_particles','id']],
+            [(0,1,2,2,3),['id','inverse_harmonic_transform','inverse_harmonic_transform','id','id']],
+            [(0,0,4,2,1,3),['id','project_to_modified_intensity','save_number_of_particles','id']],
             [(0,1,2,1),['calc_reciprocal_errors','id']],
             [(1,),['id']]
         ]
@@ -595,13 +600,41 @@ class MTIP:
             routine_sketches[name]=sketch
             routine_sketches[name+'_ft_stab']=sketch_ft_stab
 
+        def gps_PI_input(real_projected,real_input):
+            #print(real_input.shape)
+            return 2*real_projected[0]-real_input
+        
+        self.process_factory.addOperators({'gps_reciprocal_input':gps_PI_input})
+        routine_sketches['DRS']=[
+            [(1,1),['copy','real_projection']],
+            [(0,1,1,0,0,1),['id','id','gps_reciprocal_input','calc_real_errors']],
+            [(0,1,2),['id','id','fourier_transform']],
+            [(0,1,2,2),['id','id','MTIP_start']],
+            [(0,1,2,2),['id','id','inverse_fourier_transform','id']],
+            [(0,1,2,3),['douglas_rachford_output','copy']],
+            [(1,0),['id','id']]
+            ]
+
+        
+        routine_sketches['DRS_ftstab']=[
+            [(1,1),['copy','real_projection']],
+            [(0,1,1,0,1,0),['id','id','gps_reciprocal_input','calc_real_errors']],
+            [(0,1,2),['id','id','fourier_transform']],
+            [(0,1,2,2,2,2),['id','id','MTIP_start','inverse_fourier_transform','id']],
+            [(0,1,2,2,3,4),['id','id','inverse_fourier_transform','diff','id']],
+            [(0,1,2,3,4),['id','id','add_above_zero_index','id']],
+            [(0,1,2,3),['douglas_rachford_output','id']],
+            [(1,0),['id','id']]
+            ]
+            
         routine_sketches['SW']=[
             'copy',
             ['abs_value','copy'],
             [(0,1),['fourier_transform','id']],
             [(0,1),['multiply_ft_gaussian','id']],
             [(0,1),['inverse_fourier_transform','id']],
-            [(0,1),['calculate_support_mask']]
+            [(0,1),['calculate_support_mask']],
+            
         ]
         routine_sketches['SW_center']=[
             [(0,0,0),['copy','fourier_transform','copy']],
@@ -759,7 +792,7 @@ class MTIP:
             ['fourier_transform'],
             ['square_grid'],
             ['harmonic_transform'],
-            ['calc_deg2_invariant']
+            [(0,0),['calc_deg2_invariant']]
         ]
         calc_deg2_invariant = self.process_factory.buildProcessFromSketch(calc_deg2_invariant_sketch)
         return calc_deg2_invariant
@@ -787,11 +820,11 @@ class MTIP:
         #I = I.real
         #I[I<0]=0
         #rho_guess = inverse_fourier_transform(I.astype(complex))
-        #real_grid=self.grid_pair.realGrid
-        #reciprocal_grid=self.grid_pair.reciprocalGrid
+        #real_grid=self.grid_pair['real']
+        #reciprocal_grid=self.grid_pair['reciprocal']
         #db.save("/gpfs/exfel/theory_group/user/berberic/MTIP/test/inital_density/d1_low_res.vts",[np.abs(rho_guess),rho_guess.real],grid_type='spherical',grid = real_grid[:])
         #db.save("/gpfs/exfel/theory_group/user/berberic/MTIP/test/inital_density/Intensity_guess.vts",[np.abs(I),rho_guess.real],grid_type='spherical',grid = reciprocal_grid[:])
-        real_grid=self.grid_pair.realGrid
+        real_grid=self.grid_pair['real']
         real_density_guess_method=self.generate_density_guess_method(opt['density_guess'],real_grid)
         
         #### generate main error routines ####
@@ -816,6 +849,7 @@ class MTIP:
             order = loop_opt.order
                 
             methods = {key:read_method_settings(key,loop_opt['methods'][key]) for key in order}
+            #xprint(methods)
             # HIO parameter #
             n_hio_betas = len(hio_opt.beta)
             if n_hio_betas-1 < loop_number:
@@ -828,12 +862,13 @@ class MTIP:
             #log.info(f'{loop_name} : threshold = {sw_threshold} from thresholds = {sw_opt.thresholds}')
             # support #
             enforce_initial_support_opt = supp_opt.enforce_initial_support
+            enforce_initial_support_delay = enforce_initial_support_opt['delay']
             if enforce_initial_support_opt.apply:
                 enforce_initial_support_error_limit=[enforce_initial_support_opt['if_error_bigger_than']]
             else:
                 enforce_initial_support_error_limit=[np.inf]
 
-            def change_to_ft_stab(process_opt,process_name,enforce_initial_support_list):
+            def change_to_ft_stab(process_opt,process_name,enforce_initial_support_list,loop_iteration):
                 apply_ft_stabilization = False
                 process_not_ft_stabilized = (process_name[-8:]!='_ft_stab')
                 if process_not_ft_stabilized:
@@ -846,6 +881,11 @@ class MTIP:
                                 enforced_support_in_last_iterations = (np.array(enforce_initial_support_list[-delay:])==True).any()
                                 #log.info(f'support_enforced_list = {enforce_initial_support_list}')
                                 apply_ft_stabilization = not enforced_support_in_last_iterations
+                        elif process_opt.ft_stab == 'delayed':
+                            delay = max(int(process_opt.ft_stab_delay),1)                            
+                            apply_ft_stabilization = loop_iteration>delay
+                            #xprint(f'ftstab: {apply_ft_stabilization}|{loop_iteration}')
+                        
                 #log.info(f'apply_ft_stabilization = {apply_ft_stabilization}')
                 #if process_name[:2]=="ER":
                 #    xprint(f'apply_ft_stabilization = {apply_ft_stabilization}')
@@ -854,35 +894,45 @@ class MTIP:
                     
                 
             def loop(state):
-                if 'SW' in methods:
-                    update_shrink_wrap(0,loop_number)                
+                if ('SW' in methods) and (max_iterations>0):
+                    update_shrink_wrap(0,loop_number)
                 error_dict = state['error_dict']
                 #log.info(f'initial error dict = \n {error_dict}')
                 hist = state['density_pair_history']
                 enforce_initial_support_list = state.get('enforce_initial_support_list',[])
                 #log.info(enforce_initial_support_list)
-                iteration = 0
                 step = 0
                 real_pr =  self.projection_objects['real']
                 copy = np.array
                 latest_intensity = False
                 sw_step = 0
-                for iteration in range(1,max_iterations+1):
+                start_iteration = state['iteration']
+                iteration = start_iteration
+                for iteration in range(start_iteration,start_iteration+max_iterations):
                     #error_target_is_reached = check_error_target(error_dict)
                     #if error_target_is_reached:
                     #    break
                     for key in order:                    
                         process=methods[key]['process']
                         repeats=methods[key]['iterations']
+                        if repeats<=0:
+                            continue
+                        #xprint(f'executing {repeats} x {key}')
                         process_opt = methods[key].get('options',{})
                         #log.info('Loop:{} Running {} steps of {} with error_limit {}:'.format(iteration,repeats,key,relative_error_limit))
                         if key=='SW':
                             support = process.run(state['density_pair_history'][-1][1])
-                            enforce_initial_support = error_dict['main'][-1:]>enforce_initial_support_error_limit
+                            support_real = inverse_fourier_transform(fourier_transform(support.astype(complex))).real
+                            support_real[support_real>1]=1
+                            support_real[support]=1
+                            support_real[support_real<0]=0
+                            
+                            enforce_initial_support = error_dict['main'][-1:]>enforce_initial_support_error_limit or (iteration<enforce_initial_support_delay)
                             enforce_initial_support_list.append(enforce_initial_support)
                             real_pr.enforce_initial_support = enforce_initial_support
-                            real_pr.support = support
+                            real_pr.support = support_real
                             state['mask'] = real_pr.support #mask #mask
+                            #xprint(f'enforce_initial_support = {enforce_initial_support}, support type = {real_pr.support.dtype}, iteration = {iteration}')
                             sw_step+=1
                             update_shrink_wrap(sw_step,loop_number)
                         elif key == 'SW_center':
@@ -905,12 +955,13 @@ class MTIP:
                             else:
                                 latest_intensity = False                        
                                 
-                            if change_to_ft_stab(process_opt,key,enforce_initial_support_list):
+                            if change_to_ft_stab(process_opt,key,enforce_initial_support_list,iteration):
                                 #log.info('\n\n changing to ft stab \n')
                                 process = routines[key+'_ft_stab']
                             errs={}
                             for i in range(repeats):
                                 self.projection_objects['hio'].beta = hio_beta_ramp.eval(step)
+                                self.projection_objects['drs'].lamb = hio_beta_ramp.eval(step)
                                 #log.info(f'beta value = {self.projection_objects["hio"].beta}')
                                 hist = state['density_pair_history']
                                 # Break loop if relative error limits are breached. Start new loop with best known reconstruction.
@@ -923,7 +974,7 @@ class MTIP:
                                 #        break                            
                                 #log.info('current density shapes reciprocal={} real={}'.format(density_pairs[-1][0].shape,density_pairs[-1][1].shape))
                                         
-                                new_density_pair = process.run(*hist[-1])                            
+                                new_density_pair = process.run(*hist[-1])
                                 copied_density_pair = tuple(copy(a) for a in new_density_pair)
                                 state['density_pair_history']=hist[1:]+(copied_density_pair,)
                                 main_error = main_error_routine(error_dict)
@@ -932,36 +983,54 @@ class MTIP:
                                 #        #methods['ER']['process'] = routines['ER_ft_stab']
                                 #        pass
                                 error_dict['main'].append(main_error)
-                                
-                                if  state['best_error'] > main_error:                                
+                                #xprint(f"{state['best_error'] > main_error}|{iteration+1}{loop_opt.get('best_density_not_in_first_n_iterations',np.inf)}{iteration+1>loop_opt.get('best_density_not_in_first_n_iterations',np.inf)} | error {main_error}")
+                                if  (state['best_error'] > main_error) and (iteration+1>loop_opt.get('best_density_not_in_first_n_iterations',np.inf)):                                
                                     state['best_error'] = main_error
                                     state['best_density_pair'] = copied_density_pair
                                     state['best_iteration'] = iteration
                                     state['best_mask'] = state['mask']                                
                                 step+=1                                
                             #log.info(f'{error_dict}')
-                            errs = {category+'_'+key:error_dict[category][key][-1]  for category in error_dict for key in error_dict[category] if category != 'main'}                        
-                            errs['main'] = error_dict['main'][-1]
-                            xprint('P{}: {} Loop:{} Method:{} Last Errors: \n{}  Best Error: {}\n number of particles = {}, max_density={}'.format(Multiprocessing.get_process_name(),loop_name,iteration,key,errs,state['best_error'],self.rprojection.number_of_particles,np.max(new_density_pair[1])))
+                            if repeats > 0:
+                                errs = {category+'_'+key:error_dict[category][key][-1]  for category in error_dict for key in error_dict[category] if category != 'main'}                        
+                                errs['main'] = error_dict['main'][-1]
+                                xprint('P{}:  Loop:{} Part:{} Method:{} Last Errors: \n{}  Best Error: {}\n number of particles = {}, max_density={}'.format(Multiprocessing.get_process_name(),iteration+1,loop_name,key,errs,state['best_error'],self.rprojection.number_of_particles,np.max(new_density_pair[1])))
 
                 if state['best_iteration']>loop_opt.get('best_density_not_in_first_n_iterations',np.inf):
                     log.info('Selecting density with lowest error metric and continue.')
                     state['density_pair_history']=state['density_pair_history'][1:]+(state['best_density_pair'],)
                     real_pr.support = state['best_mask']
                     state['mask']=state['best_mask']
+                state['iteration']=iteration
                 state['enforce_initial_support_list']=enforce_initial_support_list
                 return state,iteration
             return loop
         loops = [generate_loop_method(name,loop_opt.sub_loops[name],_id) for _id,name in enumerate(loop_opt.sub_loops.order) ]        
         self.loops=loops
-
+        #xprint(f'loops = {loops}')
         #### assemble main loop ####
-        def create_initial_state():
+        def create_initial_state(initial_density_pair=None,initial_support=None):
             initial_support = self.projection_objects['real'].initial_support
-            real_density_guess = real_density_guess_method()
-            #log.info('density guess type = {}'.format(real_density_guess.dtype))
-            reciprocal_density_guess=fourier_transform(real_density_guess)
-            real_density_guess = inverse_fourier_transform(reciprocal_density_guess)
+            initial_support = inverse_fourier_transform(fourier_transform(initial_support.astype(complex))).real
+            initial_support[~self.projection_objects['real']._initial_mask]=1
+            initial_support[initial_support>1]=1
+            initial_support[initial_support<0]=0
+            
+            if initial_density_pair is None:
+                real_density_guess = real_density_guess_method()
+                #log.info('density guess type = {}'.format(real_density_guess.dtype))
+                reciprocal_density_guess=fourier_transform(real_density_guess)
+                real_density_guess = inverse_fourier_transform(reciprocal_density_guess)
+            else:
+                real_density_guess = initial_density_pair[0]
+                reciprocal_density_guess = initial_density_pair[1]
+            if not isinstance(initial_support,np.ndarray):
+                initial_support = self.projection_objects['real'].initial_support
+            else:
+                self.projection_objects['real'].initial_support = initial_support
+                
+                
+            
             #real_density_guess.imag = 0
             #real_density_guess[real_density_guess.real<0]=0
             #real_density_guess[~initial_support]=0
@@ -971,6 +1040,7 @@ class MTIP:
 
             #first loop
             initial_state = {
+                'iteration':0,
                 'density_pair_history':density_pairs,
                 'error_dict':error_dict,
                 'mask':initial_support,
@@ -993,6 +1063,12 @@ class MTIP:
             log.info("last density shape = {}".format(out_last_density_pair[1].shape))
             calc_deg2_invariant=routines['calc_deg2_invariant']
             last_deg2_invariant = calc_deg2_invariant.run(out_last_density_pair[1])
+            #cht = self.transform_objects['harmonic_transform']
+            #ft = self.transform_objects['fourier_transform']
+            #ftd = ft.forward_cmplx(out_last_density_pair[1])
+            #I = ftd*ftd.conj()
+            #Ilm = cht.forward_cmplx(I)
+            #last_deg2_invariant = harmonic_coeff_to_deg2_invariants_3d(Ilm)
             #last_deg2_invariant = calc_deg2_invariant.run(state['density_pair_history'][-1][1])
             
             #log.info("fraction shapes ={}".format([i.shape for i in self.results.get('n_particles_fraction',np.array([]))]))
@@ -1017,13 +1093,17 @@ class MTIP:
                         'n_particles':np.array(self.results.get('n_particles',[])),
                         'n_particles_gradients':np.array(self.results.get('n_particles_gradients',[])),
                         'n_particles_fraction':np.array(self.results.get('n_particles_fraction',[])),
-                        "grid_pair":{"real_grid":self.grid_pair.realGrid,
-                                     "reciprocal_grid":self.grid_pair.reciprocalGrid},
+                        "grid_pair":{"real_grid":self.grid_pair['real'],
+                                     "reciprocal_grid":self.grid_pair['reciprocal']},
                         'projection_matrices':masked_projection_matrices,
-                        'last_deg2_invariant':last_deg2_invariant}
+                        'last_deg2_invariant':last_deg2_invariant,
+                        'fourier_transform_struct':self.transform_objects['fourier_transform'].struct.__dict__}
             return resultDict
         def main_loop(*args,**kwargs):
-            initial_state = create_initial_state()
+            if 'state' in kwargs:
+                initial_state = kwargs["initial_state"]
+            else:
+                initial_state = create_initial_state()
             initial_densities = tuple(d.copy() for d in initial_state['best_density_pair'])
             initial_mask = initial_state['mask'].copy()
             iterations = []
@@ -1035,7 +1115,7 @@ class MTIP:
                 state = next_state
             out = generate_output(state,iterations,initial_densities,initial_mask)
             return out        
-        return main_loop
+        return main_loop,create_initial_state
         
         
     def init_error_dict(self):
@@ -1277,4 +1357,4 @@ class MTIP:
         log.info('Setting up phasing routines (HIO,ER,etc.)')
         self.routines = self.assemble_MTIP_routines()
         log.info('Assemble phasing loop (HIO,ER,etc.)')
-        self.phasing_loop = self.assemble_phasing_loop()
+        self.phasing_loop,self.create_initial_state = self.assemble_phasing_loop()

@@ -1,72 +1,128 @@
 structure_name: 'tutorial'
 dimensions: 3
-particle_radius: 250
+particle_radius: 200
 
 grid:
-  n_radial_points: 128
-  max_order: 64
-
+  n_radial_points:
+    command: (2048,256)
+  max_order: 63
+  n_phi: 128
+  n_theta: 64
+  max_nonzero_r:
+    command: '1.8'
+    
 density_guess:
-  type: 'bump' #'bump','ball'
+  type: bump
   bump:
-    slope: 0.3 #rho(r) = e^(-slope*r_max^2/(r_max^2-r^2))
+    slope: 0.5
   amplitude_function: random
   random:
-    SNR: 2
+    SNR: 1
 
 projections:
   real:
     shrink_wrap:
-      sigmas: [[20,[False,5],-2],False]
-      thresholds: [0.09,0.09]
+      sigmas:
+      - - 20
+        - - false
+          - 15
+        - -1.0 #4.666
+      - 5 #335
+      thresholds:
+      - 0.09 #- 0.07
+      - 0.09 #- 0.07
+      force_connected: True
     HIO:
       beta:
-        command: '[[0.5,0.4,-1/250,500],[0.01,0.002,-1/200,200]]'
+        command: '[[1,1,-1/700,1600],[0.6,0.05,-1/200,200]]'
+      considered_projections:
+        command: '["all"]'
     projections:
-      apply: [support,value_threshold,limit_imag]
+      apply:
+      - support
+      - value_threshold
+      - limit_imag
       support:
         initial_support:
-          type: 'max_radius'
+          type: max_radius
+          max_radius: 200
         enforce_initial_support:
-          apply: True
-          if_error_bigger_than: 6e-3
+          apply: true
+          if_error_bigger_than: 1 #7e-4
+          delay: 3
       value_threshold:
-        threshold: [0,False]
+        threshold:
+        - 0
+        - false
       limit_imag:
-        threshold: 2
-        
+        threshold:
+          command: '1e-7'
+          #command: '1e-20'
   reciprocal:
     number_of_particles:
       initial: 1
-    use_averaged_intensity: True
+      estimate: false
+    use_averaged_intensity: true
+    use_real_spherical_harmonics: False
     q_mask:
-      type: 'none'
+      type: from_projection_matrices
     used_order_ids:
-      command: 'np.arange(64)'
-
+      command: np.arange(64)
+    regrid:
+      interpolation: cubic
+    odd_orders_to_0: true
+    SO_freedom:
+      use: false
 multi_process:
-  n_parallel_reconstructions: True
+  n_parallel_reconstructions: 10 # 'auto' 
+  use: true
+  n_weight_generating_processes: false
 GPU:
-  use: True
-
+  use: False
+  n_gpu_workers:
+    command: max(Multiprocessing.free_cpus//10,1)
 main_loop:
   sub_loops:
-    order: ['main','refinement']
+    order:
+    - main
+    - refinement
     main:
       methods:
         HIO:
           iterations: 60
+          ft_stab: true
         ER:
           iterations: 40
+          #ft_stab: false
+          ft_stab: 'delayed'
+          ft_stab_delay: 5          #ft_stab: 'link_to_enforce_initial_support'
+          #link_to_enforce_initial_support:
+          #  delay: 4
         SW:
           iterations: 1
-      iterations: 5
-      order: ['HIO','SW','ER']
+      iterations: 15
+      order:
+      - HIO
+      - SW
+      - ER
+      best_density_not_in_first_n_iterations:
+        command: "np.inf"
     refinement:
       methods:
         ER:
-          iterations: 100
+          iterations: 10
+          ft_stab: true
+          #ft_stab: 'link_to_enforce_initial_support'
+          #link_to_enforce_initial_support:
+          #  delay: 0
+        HIO:
+          iterations: 10
+          ft_stab: true
         SW:
-          iterations: 1
-      iterations: 1
-      order: ['SW','ER']
+          iterations: 0
+      iterations: 2
+      order:
+        - HIO
+        - ER
+      best_density_not_in_first_n_iterations:
+        command: np.inf

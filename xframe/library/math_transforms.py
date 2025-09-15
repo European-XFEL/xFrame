@@ -858,6 +858,15 @@ class SphericalFourierTransform:
             grid = np.stack(np.meshgrid(rs,thetas,phis,indexing='ij'),3)
         return grid
     @property
+    def qs(self):
+        return self.ht.grids["reciprocal"]
+    @property
+    def rs(self):
+        return self.ht.grids["real"]
+    @property
+    def phis(self):
+        return self.harm.phis
+    @property
     def reciprocal_grid(self):
         qs = self.ht.grids["reciprocal"]
         phis = self.harm.phis

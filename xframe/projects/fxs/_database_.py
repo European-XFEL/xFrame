@@ -931,13 +931,15 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             
         if options.get('save_model_vtk',False):
             try:
-                density = options['model_density']
-                grid = options['grid']
-                if grid.shape[-1]==3:
+                density,scattering_amplitude = options['model_density_pair']
+                intensity = np.abs(scattering_amplitude)**2
+                grids = options['grids']
+                if grids[0].shape[-1]==3:
                     grid_type = 'spherical'
-                elif grid.shape[-1]==2:
+                elif grids[0].shape[-1]==2:
                     grid_type = 'polar'
-                self.save('model_density',[density],dset_names=['model_density'],grid=grid,grid_type=grid_type,path_modifiers = path_modifiers)
+                self.save('model_density',[density],dset_names=['model_density'],grids=grids[0],grid_type=grid_type,path_modifiers = path_modifiers)
+                self.save('model_intensity',[intensity],dset_names=['model_intensity'],grids=grids[1],grid_type=grid_type,path_modifiers = path_modifiers)
             except Exception as e:
                 log.warning(f'Failed to save model density! with error {e}')
                 log.info(traceback.format_exc())

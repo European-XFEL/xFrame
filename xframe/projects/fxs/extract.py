@@ -13,7 +13,7 @@ os.chdir(plugin_dir)
 #from analysisLibrary.classes import ReciprocalProjectionData
 from .projectLibrary import fxs_invariant_tools as i_tools
 from .projectLibrary.ft_grid_pairs import max_order_from_n_angular_steps, get_grid
-from .projectLibrary.fourier_transforms import generate_ft,load_fourier_transform_weights
+from .projectLibrary.fourier_transforms import fourier_transform_from_settings
 from .projectLibrary.harmonic_transforms import HarmonicTransform
 from .projectLibrary.hankel_transforms import generate_weightDict
 from .projectLibrary.misk import generate_calc_center
@@ -22,7 +22,7 @@ from xframe.library.gridLibrary import SampledFunction,NestedArray,GridFactory
 from xframe.library.mathLibrary import nearest_positive_semidefinite_matrix
 from xframe.library.pythonLibrary import xprint
 from xframe.library.mathLibrary import polar_spherical_dft_reciprocity_relation_radial_cutoffs,distance_from_line_2d
-from xframe.library.math_transforms import get_harmonic_transform
+from xframe.library.math_transforms import get_harmonic_transform,SphericalFourierTransform
 from xframe.interfaces import ProjectWorkerInterface
 from xframe import database,settings
 from xframe.library.mathLibrary import SampleShapeFunctions
@@ -77,7 +77,6 @@ class InvariantExtractor:
         self.extraction_routines = {
             'cross_correlation': self.extract_bl_from_cc,
             #'pdb': self.pre_init_from_pdb,
-            'shapes': self.extract_bl_from_shapes,
             'density': self._bl_from_density
         }
         self.b_coeff={'I1I1':False}
@@ -129,6 +128,7 @@ class InvariantExtractor:
             if isinstance(opt.cross_correlation.datasets_to_process,(list,tuple)):
                 if not (dset_name in opt.cross_correlation.datasets_to_process):
                     continue
+                
             if dset_name in cc_arrays:
                 ## Cross Correlation
                 xprint('\t Modifying Cross Correlation ... ',end='\r')
@@ -274,127 +274,14 @@ class InvariantExtractor:
             elif self.dimensions ==2:
                 factor = 1 # 2*np.pi
             self.b_coeff['I1I1'][0]=average_intensity[:,None]*average_intensity[None,:]*factor
-        #log.info(f'max bls = \n {[np.abs(b).max() for b in self.b_coeff["I1I1"]]}\n')
-        
-    def extract_bl_from_shapes(self):        
-        opt = settings.project        
-        shape_opt = opt.shapes
+    
 
-        if shape_opt.GPU.use:
-            settings.general.n_control_workers = shape_opt.GPU.n_gpu_workers
-            Multiprocessing.comm_module.restart_control_worker()
-        self.reciprocity_coefficient = _get_reciprocity_coefficient(shape_opt.fourier_transform)        
-        #self.pi_in_q = shape_opt.fourier_transform.pi_in_q
-        
-        # create_grid
-        centers = np.asarray(shape_opt['shapes']['centers'])
-        log.info('centers = {}'.format(centers))
-        sizes = np.asarray(shape_opt['shapes']['sizes'])
-        types = np.asarray(shape_opt['shapes']['types'])
-        density_values = np.asarray(shape_opt['shapes']['densities'])
-        random_orientation = np.asarray(shape_opt['shapes']['random_orientation'])
-        max_particle_radius = shape_opt.get('shape_size','not given')
-        if not isinstance(max_particle_radius,(float,int)):
-            max_particle_radius = np.max(centers[:,0]+sizes)
-        else:
-            max_particle_radius/=2 #since mag radius is half the size of the shape.
-            
-        oversampling = shape_opt.grid.oversampling
-        if isinstance(shape_opt.grid.max_q,bool):
-            max_r = oversampling*max_particle_radius
-            n_radial_points = shape_opt.grid.n_radial_points
-            max_q = polar_spherical_dft_reciprocity_relation_radial_cutoffs(max_r,n_radial_points,reciprocity_coefficient = self.reciprocity_coefficient)
-        else:
-            max_q = shape_opt.grid.max_q#*(self.reciprocity_coefficient/np.pi)
-            n_radial_points = shape_opt.n_radial_points
-            max_r = polar_spherical_dft_reciprocity_relation_radial_cutoffs(max_q,n_radial_points,self.reciprocity_coefficient)
-        self.data_max_q = max_q
-        log.info('maxR = {} maxQ ={} reciprocity_coefficient = {}'.format(max_r,max_q,self.reciprocity_coefficient))
+    
+    def _bl_from_density(self,density,ft : SphericalFourierTransform | None = None):
+        if not isinstance(ft,SphericalFourierTransform):
+            ft = fourier_transform_from_settings()
 
-        ht_opt = {'dimensions':self.dimensions,'max_order':self.max_order,**shape_opt.grid}
-        log.info('max order = {}'.format(self.max_order))
-        cht = HarmonicTransform('complex',ht_opt)
-        #weight_dict = generate_weightDict_zernike_spherical(max_order,n_radial_points)        
-        grid_opt={'dimensions':opt.dimensions,'type':shape_opt.fourier_transform.type,'max_q':max_q,'n_radial_points':n_radial_points,**cht.grid_param,'reciprocity_coefficient':self.reciprocity_coefficient}
-        grid_pair = get_grid(grid_opt)
-        if opt.dimensions==3:
-            self.data_radial_points =  grid_pair.reciprocalGrid[:,0,0,0]
-            self.data_angular_points = grid_pair.reciprocalGrid[0,0,:,2]
-        elif opt.dimensions==2:
-            self.data_radial_points =  grid_pair.reciprocalGrid[:,0,0]
-            self.data_angular_points = grid_pair.reciprocalGrid[0,:,1]
-        self.data_max_q = np.max(self.data_radial_points)
-
-        log.info('grid shape = {}'.format(grid_pair.realGrid[:].shape))
-        log.info(f'grid extends: min {spherical_to_cartesian(grid_pair.realGrid[:]).min()} max {spherical_to_cartesian(grid_pair.realGrid[:]).max()}')
-
-        density = np.zeros(grid_pair.realGrid[:].shape[:-1],dtype = float)
-        for shape_type,center,size,dval,rand_rot in zip(types,centers,sizes,density_values,random_orientation):
-            log.info(f'\n t {type}\n c {center}\n s {size}\n d {dval}\n r {random_orientation}')
-            if shape_type == 'sphere':
-                norm = 'standard'
-                f = SampleShapeFunctions.get_disk_function(size,lambda points: np.full(points.shape[:-1],dval),center=center,norm=norm,random_orientation=rand_rot,coordSys='spherical')
-            elif shape_type == 'tetrahedron':
-                f = SampleShapeFunctions.get_tetrahedral_function(size,lambda points: np.full(points.shape[:-1],dval),center=center)
-            elif shape_type == 'cube':
-                norm = 'inf'
-                log.info('size = {}'.format(sizes[i]))
-                f = SampleShapeFunctions.get_disk_function(size,lambda points: np.full(points.shape[:-1],dval),center=center,norm=norm,random_orientation=rand_rot)
-            else:
-                norm = 'inf'
-                f = SampleShapeFunctions.get_disk_function(size,lambda points: np.full(points.shape[:-1],dval),center=center,norm=norm,random_orientation=rand_rot)
-            density += f(grid_pair.realGrid[:])
-        log.info(f'radial density = {density.mean(axis=(1,2))} shape = {density.shape}')
-            
-        log.info('densty shape = {} grid shape = {} , max_R = {}'.format(density.shape,grid_pair.realGrid[:].shape,grid_pair.realGrid[...,0].max()))
-
-        self._bl_from_density(density,shape_opt,opt.structure_name,n_radial_points,grid_pair,cht)
-
-
-    def generate_fourier_transforms(self, grid_pair, harm_trf):
-        opt = settings.project
-        dimensions = opt.dimensions
-        if dimensions==3:
-            r_max = grid_pair.realGrid[:,0,0,0].max()
-        elif dimensions ==2:
-            r_max = grid_pair.realGrid[:,0,0].max()
-        n_radial_points = grid_pair.reciprocalGrid.shape[0]
-        
-        weights_dict = load_fourier_transform_weights(opt.dimensions,opt.shapes.fourier_transform,opt.shapes.grid,database.project)
-
-        ft_opt = opt.shapes.fourier_transform
-        ft_type = ft_opt['type']
-        #pi_in_q = ft_opt['pi_in_q']
-        reciprocity_coefficient = _get_reciprocity_coefficient(ft_opt)
-        use_gpu = opt.shapes.GPU.use
-        log.info('reciprocity_coefficient = {}'.format(reciprocity_coefficient))
-        fourierTransform,inverseFourierTransform=generate_ft(r_max,weights_dict,harm_trf,dimensions,reciprocity_coefficient=reciprocity_coefficient,use_gpu = use_gpu,mode = ft_type)      
-        return fourierTransform,inverseFourierTransform
-
-    def _bl_from_density(self,density,opt,name,n_radial_points,grid_pair,cht):
-        self.reciprocity_coefficient = _get_reciprocity_coefficient(opt.fourier_transform)        
-        db = database.project
-        ft,ift = self.generate_fourier_transforms(grid_pair,cht)
-        #log.info('start b_coeff calculation')
-        #log.info('density shape = {}'.format(density.shape))
-        #log.info('grid shape = {}'.format(grid_pair.real.shape))
-        
-        if settings.project.dimensions ==2:
-            grid_type = 'polar'
-        elif settings.project.dimensions ==3:
-            grid_type = 'spherical'
-        
-        if opt.save_vtk_density:
-            log.info(f'saving density {type(density)}')
-            db.save('model_density', [density], grid = grid_pair.realGrid[:], grid_type=grid_type,path_modifiers={'name':name})
-            log.info(f'alive')
-        if opt.save_vtk_intensity:
-            db.save('model_intensity', [np.abs(ft(density.astype(complex))).real], grid = grid_pair.reciprocalGrid[:], grid_type=grid_type,path_modifiers={'name':name})
-        
-        log.info('max_density = {}'.format(density.max()))
-        n_particles=opt.n_particles
-        
-        self.b_coeff['I1I1'] = i_tools.density_to_deg2_invariants(density.astype(complex),ft,settings.project.dimensions,cht=cht)
+        self.b_coeff['I1I1'] = i_tools.density_to_deg2_invariants(density.astype(complex),ft.forward_cmplx,settings.project.dimensions,cht=ft.harm)
         bl_shape = self.b_coeff['I1I1'].shape
         self.b_coeff_masks['I1I1'] = np.full(bl_shape,True)
         q_id_limits = np.zeros((bl_shape[0],)+(2,2),dtype=int)
@@ -407,12 +294,15 @@ class InvariantExtractor:
         #self.b_coeff_masks['I2I1'] = np.full(self.b_coeff['I2I1'].shape,True)
         #self.b_coeff[0] *= n_particles
         #log.info(self.b_coeff.shape)
+        
 
         if settings.project.dimensions ==2:
-            self.average_intensity = SampledFunction(NestedArray(self.data_radial_points,1),np.sqrt(np.diag(self.b_coeff[0])),coord_sys='cartesian')
+            radial_points = ft.reciprocal_grid[:,0,0]
+            self.average_intensity = SampledFunction(NestedArray(radial_points,1),np.sqrt(np.diag(self.b_coeff[0])),coord_sys='cartesian')
         elif settings.project.dimensions ==3:
+            radial_points = ft.reciprocal_grid[:,0,0,0]
             average_data = np.sqrt(np.diag(self.b_coeff['I1I1'][0]).real/(4*np.pi))
-            self.average_intensity = SampledFunction(NestedArray(self.data_radial_points,1),average_data,coord_sys='cartesian')
+            self.average_intensity = SampledFunction(NestedArray(radial_points,1),average_data,coord_sys='cartesian')
 
     def from_data(self,data):
         self.dimensions = data['dimensions']
@@ -649,6 +539,7 @@ class InvariantExtractor:
         #cht = HarmonicTransform('complex',{'dimensions':3,'max_order':self.max_order,'n_phi':0,'n_theta':0})
         #new_proj_matrices,error_target_reached = i_tools.enforce_spherical_harmonic_transform_constraint(self.data_projection_matrices['I1I1'][:self.max_order+1],n_iterations,cht,rel_err_limit = 1e-6)
         return new_projection_matrices
+    
     ##################
     ## main routine ##
     def extract(self):

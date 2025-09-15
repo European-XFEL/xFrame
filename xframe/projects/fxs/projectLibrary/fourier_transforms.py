@@ -11,10 +11,11 @@ from .hankel_transforms import generate_ht
 from .misk import _get_reciprocity_coefficient
 from .hankel_transforms import generate_weightDict
 from xframe.library.mathLibrary import SphericalIntegrator,PolarIntegrator
-from xframe.library.math_transforms import HankelTransformWeights,HankelWeightStruct
+from xframe.library.math_transforms import HankelTransformWeights,HankelWeightStruct,SphericalFourierTransformStruct
+from xframe.library.math_transforms import SphericalFourierTransform,SphericalFourierTransformStruct
 
 from xframe import database
-
+from xframe import settings 
 
 def load_fourier_transform_weights(struct:HankelWeightStruct=HankelWeightStruct(),allow_weight_saving = False):
     db = database.project
@@ -27,8 +28,26 @@ def load_fourier_transform_weights(struct:HankelWeightStruct=HankelWeightStruct(
             db.save('ft_weights',weights_dict,path_modifiers={'name':struct.weight_name})                    
     return weights_dict
 
-#####################################
-###  generate fourier transforms  ###
+def fourier_transform_from_settings(allow_weight_saving = False):
+    opt = settings.project
+    struct = SphericalFourierTransformStruct(
+        dimension = opt.dimensions,
+        n_radial_points = opt.grid.n_radial_points,
+        angular_bandwidth = opt.grid.max_order+1,
+        hankel_type = opt.fourier_transform.type,
+        n_processes_for_weight_generation = opt.multi_process.n_weight_generating_processes,
+        max_q = opt.grid.max_q,
+        max_nonzero_r = opt.grid.max_nonzero_r*opt.particle_radius,
+        use_gpu = opt.GPU.use,
+        n_polar_angles = opt.grid.get('n_phi',0),
+        n_azimutal_angles = opt.grid.get('n_theta',0)
+    )
+
+    weights = load_fourier_transform_weights(struct,allow_weight_saving = allow_weight_saving)
+    sft = SphericalFourierTransform(struct,weights = weights['weights'])
+    return sft
+############################################
+###  generate fourier transforms Legacy  ###
 def select_harmonic_transforms(harm_trf,dimensions,use_gpu):
     if (dimensions == 3) and use_gpu:
         trfs = harm_trf.transforms_by_indices['direct']

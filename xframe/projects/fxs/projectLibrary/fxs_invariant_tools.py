@@ -669,7 +669,6 @@ class _Conversion3DimFromCCN:
         :return: $B_l$ coeff.
         :rtype ndarray: complex, shape $= (n_orders,n_q,n_q)$
         """
-        #log.info(f'max_order = {max_order}')
         # Get Pl arguments
         qs = momentum_transfer_points
         thetas = ewald_sphere_theta_pi(xray_wavelength,qs)
@@ -682,6 +681,8 @@ class _Conversion3DimFromCCN:
         if assume_zero_odd_orders:
             l_stride = 2
             orders = np.arange(0,max_order+1,2)
+            if max_order%2==1:
+                ccn=ccn[...,:-1]
             #lazy back substitution + least squares 
             # reversed orders shoud be decreasing L,L-1,... or L,L-2,...
             for l in orders[::-1]:
@@ -1126,7 +1127,12 @@ class Deg2Invar:
     conversion = _Conversion
     regularization = _Regularization
     @staticmethod
-    def from_ccn(ccn,dim = 3,**metadata):
+    def from_ccn(ccn,dim = 3,
+                 max_order = 32,
+                 qs = None,
+                 assume_zero_odd_orders=False,
+                 xray_wavelength = 1.2398419, # Wavelength in Angstrem, 1.239... = 10keV
+                 mode = 'back_substitution',**metadata):
         r"""
         Routine that distributes requests for deg2_invariants to the respective routines in the 2 and 3 dimensional case.
         :param cc: cross-correlation data
@@ -1135,9 +1141,8 @@ class Deg2Invar:
         :type int: 2 or 3    
         """
         #log.info(metadata.keys())        
-        max_order = metadata['max_order']
-        momentum_transfer_points = metadata['qs']
-        assume_zero_odd_orders = metadata['assume_zero_odd_orders']
+        momentum_transfer_points = qs
+        assume_zero_odd_orders = assume_zero_odd_orders
         
         if dim == 2:
             b_coeff = np.zeros((max_order+1,)+cc_mask.shape[:2],dtype = complex)
@@ -1145,10 +1150,6 @@ class Deg2Invar:
             b_coeff[::stride,...] = np.moveaxis(ccn[...,:max_order+1:stride],-1,0) 
     
         elif dim == 3:
-            #b_coeff = np.zeros((len(order_mask),)+cc_mask.shape[:2],dtype = complex)
-            xray_wavelength = metadata['xray_wavelength']
-            mode = metadata.get('mode','back_substitution')
-            #log.info('start extraction in mode = {}'.format(mode_specified))
             try:
                 extractor = getattr(Deg2Invar.conversion.dim3.from_ccn,mode)
             except AttributeError as e:
