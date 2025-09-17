@@ -780,10 +780,10 @@ class HankelTransform:
 
     @property
     def real_radial_points(self):        
-        return self.grid['real']
+        return self.grids['real']
     @property
     def reziprocal_radial_points(self):
-        return self.grid['reciprocal']
+        return self.grids['reciprocal']
 
 
 

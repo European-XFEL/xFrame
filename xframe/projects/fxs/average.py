@@ -52,7 +52,8 @@ class ProjectWorker(ProjectWorkerInterface):
         opt = self.opt
         assert len(opt.reconstruction_files)>0,'No reconstruction_files specified in settings. Stopping!'
         db = self.db
-        file_paths = [os.path.join(db.get_path('reconstructions',is_file=False),path) for path in opt.reconstruction_files]
+
+        file_paths = [os.path.join(db.get_path('reconstructions',is_file=False),path).format(today = db.get_time_string()) for path in opt.reconstruction_files]
         _struct = SphericalFourierTransformStruct(**db.load(file_paths[0],h5_path='fourier_transform_struct'))
         _struct.use_gpu=self.opt.GPU.use
         self.fourier_struct = _struct
@@ -66,7 +67,7 @@ class ProjectWorker(ProjectWorkerInterface):
         rec_ids = []
         errors = []
         for file_id,path in enumerate(file_paths):
-            dat = db.load(path,as_h5_object=True)
+            dat = db.load(path,as_h5_object=True,path_modifiers = {'today':db.get_time_string()})
             rec_results=dat['reconstruction_results']
             if opt.selection.use_selection_file:
                 keys = db.load('selection',h5_path=path)

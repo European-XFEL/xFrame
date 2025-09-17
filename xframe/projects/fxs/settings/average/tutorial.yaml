@@ -28,12 +28,12 @@ alignment:
     apply: True
   rotational:
     apply: True
-    r_limits: [200,400] # in angstroem
+    r_limits: [None,None] # in angstroem
     consider_point_inverse: True
   
 averaging:
   n_recostrutions: all  
-  mode: 'pairwise' # single_reference
+  mode: 'pairwise_shared2' # single_reference
   n_random_orders: 10  
   single_reference:
     reference_selection_mode: 'least_error' #'custom' , 'first_id' 

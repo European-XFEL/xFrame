@@ -1056,7 +1056,7 @@ class _Regularization:
         eig_vals,eig_vect =  _Regularization._invariant_eigenvalues(scaled_bl,sort_mode=sort_mode)
         neg_mask = (eig_vals<=0)
         eig_vals[neg_mask]=0
-        V_scaled=eig_vect[:,:rank]*np.sqrt(eig_vals[:rank])
+        V_scaled = eig_vect[:,:rank]*np.sqrt(eig_vals[:rank])
         # xprint(f'V_scaled = {V_scaled.shape}, scaling = {scaling.shape}')
         eig_vals[neg_mask]=1
         V_inv_scaled = (V_scaled/eig_vals[:rank]).T
@@ -1848,7 +1848,9 @@ def deg2_invariant_apply_precision_filter(bl,precision):
 
 
 def intensity_to_deg2_invariant(intensity,intensity2=False,cht=None):
-    if cht is None:
+    from xframe.library.mathLibrary import shtns
+    from xframe.library.math_transforms import PolarHarmonicTransform
+    if not isinstance(cht,(PolarHarmonicTransform,shtns.ShSmall)):
         cht = get_harmonic_transform_from_array(intensity)
     dimensions = intensity.ndim
     harm_coeff = cht.forward_cmplx(intensity.astype(complex))
@@ -1912,7 +1914,7 @@ def harmonic_coeff_to_deg2_invariants_3d(Ilm,Ilm2 = None):
     return Bl
 
 
-def intensity_to_cc_3d(intensity,xray_wavelength,qs,phis=False,cc_mode='Pl',cht = False,intensity2 = False):
+def intensity_to_cc_3d(intensity,xray_wavelength,qs,phis=False,cc_mode='back_substitution',cht = False,intensity2 = False):
     bl = intensity_to_deg2_invariant(intensity,intensity2=intensity2,cht = cht)
     if not isinstance(phis,np.ndarray):
         phis = np.linspace(0,2*np.pi,2*(len(bl)-1)+1)
@@ -1974,7 +1976,8 @@ def deg2_invariant_to_cc_3d(bl,xray_wavelength,data_grid,orders=False,mode='back
         for l in np.arange(l_max+1):
             qq_matrix = ccd_associated_legendre_matrices_single_l(thetas,l_max,l)
             cns += bl[l,...,None]*qq_matrix
-        cc = mLib.circularHarmonicTransform_real_inverse(cns,2*(cns.shape[-1]-1))
+        cht  = get_harmonic_transform(cns.shape[-1],dimensions = 2,n_phi=cns.shape[-1]*2)
+        cc = cht.inverse_real(cns) #,2*cns.shape[-1])
         
     return cc
 
