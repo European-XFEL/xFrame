@@ -1145,7 +1145,7 @@ class Deg2Invar:
         assume_zero_odd_orders = assume_zero_odd_orders
         
         if dim == 2:
-            b_coeff = np.zeros((max_order+1,)+cc_mask.shape[:2],dtype = complex)
+            b_coeff = np.zeros((max_order+1,)+ccn.shape[:2],dtype = complex)
             stride = int(assume_zero_odd_orders)+1
             b_coeff[::stride,...] = np.moveaxis(ccn[...,:max_order+1:stride],-1,0) 
     
@@ -1883,11 +1883,11 @@ def harmonic_coeff_to_deg2_invariants(dimensions,harm_coeff,harm_coeff2 = None):
         deg2_invariants = harmonic_coeff_to_deg2_invariants_3d(harm_coeff,Ilm2=harm_coeff2)
     return deg2_invariants
 
-def harmonic_coeff_to_deg2_invariants_2d(Ims,Ims2=False):
+def harmonic_coeff_to_deg2_invariants_2d(Ims,Ims2=None):
     r"""
     Calculates the degree 2 invariants $B_m$ via $B_m = I_{m} I^*_{m}$.    
     """
-    if isinstance(Ims2,bool):
+    if Ims2 is None:
         Bm = np.array(tuple(Im[:,None]*Im[None,:].conj() for Im in Ims.T))
     else:
         Bm = np.array(tuple(Im1[:,None]*Im2[None,:].conj() for Im1,Im2 in zip(Ims.T,Ims2.T)))

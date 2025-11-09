@@ -654,9 +654,6 @@ class HankelTransform:
                 return out_inverse
         else:
             def ht(harmonic_coeff):
-                print(f'{harmonic_coeff.shape}')
-                print(f'{fw.shape}')
-                print(f'{out_forward.shape}')
                 #out_forward[:]=fw@harmonic_coeff
                 np.sum(fw*harmonic_coeff[:,None,:],axis=0,out=out_forward)
                 #log.info('harmonic shape = {}'.format(harmonic_coeff.shape))
@@ -678,7 +675,8 @@ class HankelTransform:
         n_radial_points = forward_weights.shape[1]
 
         m_max=self.bandwidth
-        nq = n_radial_points
+        nq = self.Nq #n_radial_points
+        nr = self.Nr
         nm = m_max*2
     
         if 'trapz' in self.mode:
@@ -687,7 +685,7 @@ class HankelTransform:
             apply_weights(__global double2* out, 
             __global double2* w, 
             __global double2* rho, 
-            long nq,long nm)
+            long nr,long nq,long nm)
             {
       
             long i = get_global_id(0); 
@@ -697,10 +695,10 @@ class HankelTransform:
             // computed by the thread
             double2 value = 0;
             // wlm is of shape (sum_q,nq,m) where sum_q = nq-1
-            for (int q = 0; q < nq-1; ++q)
+            for (int r = 0; r < nr-1; ++r)
             {
-            double2 wqqm = w[q*nq*nm + i*nm + j];
-            double2 rqm = rho[(q+1)*nm + j];
+            double2 wqqm = w[r*nq*nm + i*nm + j];
+            double2 rqm = rho[(r+1)*nm + j];
             value.x += wqqm.x * rqm.x - wqqm.y * rqm.y;
             value.y += wqqm.x * rqm.y + wqqm.y * rqm.x;
             }
@@ -716,7 +714,7 @@ class HankelTransform:
             apply_weights(__global double2* out, 
             __global double2* w, 
             __global double2* rho, 
-            long nq,long nm)
+            long nr,long nq,long nm)
             {
       
             long i = get_global_id(0); 
@@ -726,10 +724,10 @@ class HankelTransform:
             // computed by the thread
             double2 value = 0;
             // wlm is of shape (sum_q,nq,m) where sum_q = nq-1
-            for (int q = 0; q < nq; ++q)
+            for (int r = 0; r < nr; ++r)
             {
-            double2 wqqm = w[q*nq*nm + i*nm + j];
-            double2 rqm = rho[q*nm + j];
+            double2 wqqm = w[r*nq*nm + i*nm + j];
+            double2 rqm = rho[r*nm + j];
             value.x += wqqm.x * rqm.x - wqqm.y * rqm.y;
             value.y += wqqm.x * rqm.y + wqqm.y * rqm.x;
             }
@@ -745,10 +743,10 @@ class HankelTransform:
                 'name': 'forward_hankel',
                 'functions': ({
                     'name': 'apply_weights',
-                    'dtypes' : (complex,complex,complex,np.int64,np.int64),
-                    'shapes' : ((nq,nm),forward_weights.shape,(nq,nm),None,None),
-                    'arg_roles' : ('output','const_input','input','const_input','const_input'),
-                    'const_inputs' : (None,forward_weights,None,np.int64(nq),np.int64(nm)),
+                    'dtypes' : (complex,complex,complex,np.int64,np.int64,np.int64),
+                    'shapes' : ((nq,nm),forward_weights.shape,(nr,nm),None,None,None),
+                    'arg_roles' : ('output','const_input','input','const_input','const_input','const_input'),
+                    'const_inputs' : (None,forward_weights,None,np.int64(nr),np.int64(nq),np.int64(nm)),
                     'global_range' : (nq,nm),
                     'local_range' : None
                 },)
@@ -759,11 +757,11 @@ class HankelTransform:
                 'name': 'inverse_hankel',
                 'functions': ({
                     'name': 'apply_weights',
-                    'dtypes' : (complex,complex,complex,np.int64,np.int64),
-                    'shapes' : ((nq,nm),inverse_weights.shape,(nq,nm),None,None),
-                    'arg_roles' : ('output','const_input','input','const_input','const_input'),
-                    'const_inputs' : (None,inverse_weights,None,np.int64(nq),np.int64(nm)),
-                    'global_range' : (nq,nm),
+                    'dtypes' : (complex,complex,complex,np.int64,np.int64,np.int64),
+                    'shapes' : ((nr,nm),inverse_weights.shape,(nq,nm),None,None,None),
+                    'arg_roles' : ('output','const_input','input','const_input','const_input','const_input'),
+                    'const_inputs' : (None,inverse_weights,None,np.int64(nq),np.int64(nr),np.int64(nm)),
+                    'global_range' : (nr,nm),
                     'local_range' : None
                 },)
             }

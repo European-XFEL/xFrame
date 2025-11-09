@@ -12,7 +12,7 @@ from xframe.library.pythonLibrary import hash_numpy_in_tuple
 int_type = np.int32
 
 ################################################
-
+unsupported_platforms = ['rusticl'] # due to difficult double support
 def _get_platforms(allow_master_process=False):
     '''
     By default prevents access to get_platforms for master process. This is because calls to cl.get_platforms() on the master call would cause all subsequent worker/children calls to cl.get_platforms to fail.
@@ -23,6 +23,7 @@ def _get_platforms(allow_master_process=False):
         platforms = cl.get_platforms()
     elif is_master_process:
         raise AssertionError("Creation of OpenCL context not allowed in master process.")
+    platforms = [p for p in platforms if not p.name in unsupported_platforms]
     return platforms
 
 class ContextHandler:

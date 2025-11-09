@@ -34,8 +34,8 @@ default_project_worker_name = 'ProjectWorker'
 default_experiment_worker_name = 'ExperimentWorker'
 default_experiment_module_name = 'experiment'
 
-default_settings_regexpr = '[-+]?\d*\.*\d+'
-worker_regexpr = '^[A-Za-z0-9].*\.py'
+default_settings_regexpr = r'[-+]?\d*\.*\d+'
+worker_regexpr = r'^[A-Za-z0-9].*\.py'
 settings_version_key = 'settings_version'
 
 load_projects = 'all' # or list of project names

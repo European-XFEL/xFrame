@@ -802,7 +802,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         elif proj_class.dimensions == 2:
             #log.info('n proj matrices = {} dtype = {}'.format(len(matrices),matrices.dtype))
             data_dict['data_projection_matrices'] = proj_class.data_projection_matrices
-            data_dict['data_projection_matrix_error_estimates'] = proj_class.data_projection_matrix_error_estimates
+            #data_dict['data_projection_matrix_error_estimates'] = proj_class.data_projection_matrix_error_estimates
         data_dict['data_projection_matrices_q_id_limits']=proj_class.data_projection_matrices_q_id_limits
         data_dict['max_order'] = proj_class.max_order
         #data_dict['ccn']=proj_class.ccn
