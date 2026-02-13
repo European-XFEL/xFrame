@@ -124,6 +124,7 @@ class CCgenerator(InvariantExtractor):
         cc_data['average_intensity']=self.average_intensity.data
         cc_data['deg_2_invariant']= {"I1I1":self.b_coeff['I1I1']}
         cc_data['number_of_particles']=self.number_of_particles
+        cc_data['dimensions']=opt.dimensions
         
         self.cc_data = cc_data
 

@@ -178,6 +178,7 @@ class DefaultDB(FileAccess,DatabaseInterface):
         self.access_methods={
             'file://':{
                 'h5':'HDF5_access',
+                'cxi':'HDF5_access',
                 'vtk':'VTK_saver',
                 'vts':'VTK_saver',
                 'vtr':'VTK_saver',

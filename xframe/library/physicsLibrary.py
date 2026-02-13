@@ -90,7 +90,9 @@ def ewald_sphere_wavelength_pi(max_q,theta):
 def energy_to_wavelength(energy):
     wavelength = (units.c*units.h)/energy
     return wavelength
-
+def wavelength_to_energy(wavelength):
+    energy = (units.c*units.h)/wavelength
+    return energy
 
 
 def spherical_formfactor(q, radius = 1000):

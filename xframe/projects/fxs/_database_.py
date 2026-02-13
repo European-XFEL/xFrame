@@ -22,6 +22,8 @@ from xframe.library.pythonLibrary import option_switch
 from xframe.library.pythonLibrary import xprint
 from xframe.library.physicsLibrary import ewald_sphere_theta
 from xframe.library.physicsLibrary import ewald_sphere_theta_pi
+from xframe.library.physicsLibrary import wavelength_to_energy
+from xframe.library import units
 from xframe.database.database import DefaultDB
 from .projectLibrary.classes import FXS_Data
 from .projectLibrary.classes import FTGridPair
@@ -729,6 +731,8 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         #log.info(data['cross_correlation']['I2I2'])
         return data
 
+    def load_ccd_cxi(self,data):
+        pass
     def load_invariants(self,name,**kwargs):
         #print(self.get_path("invariants",path_modifiers=kwargs['path_modifiers']))
         data = self.load_direct(name,**kwargs)
@@ -900,10 +904,33 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             traceback.print_exc()
 
 
+    def ccd_direct_to_cxi(self,ccd,sample_name):
+        ccd_cxi = {'cxi_url':'https://cxidb.org/',
+                   'cxi_version':1.6,
+                   'entry_1':{
+                       'data_1':{
+                        'angular_coordinates': units.rad_to_degree(ccd['angular_points']),
+                           'radial_coordinates': units.wave_vector_unit_to_inverse_length_unit(ccd['radial_points'])/units.standardLength,
+                           'data_space':'diffraction',
+                           'data_type': 'angular cross-correlation',
+                           'dimensions_of_rotational_freedom':ccd['dimensions'],
+                           'cross_correlation':ccd['cross_correlation'],
+                           'average_intensity':ccd['average_intensity']
+                       },
+                       'source_1':{
+                           'photon_energy':units.energy_wavelength_conversion(ccd['xray_wavelength']*units.standardLength,energy_unit='J')
+                       }
+                   },
+                   'sample_1':{
+                       'name': sample_name
+                   }
+                }
+        return ccd_cxi
     def save_ccd(self,name,data,**options):
         log.info('custom saving of cross correaltion')
-        opt=settings.project
-        time_str=self.get_time_string()
+        opt = settings.project
+        ccd = self.ccd_direct_to_cxi(data,opt.structure_name)
+        time_str = self.get_time_string()
         ccd_folder = self.folders['ccd_archive']
         path_modifiers =  {'structure_name':opt.structure_name,'date':time_str}
         run = self.get_latest_run(ccd_folder,path_modifiers = path_modifiers)+1
@@ -912,7 +939,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         try:
             data_path = self.get_path(name,path_modifiers=path_modifiers)
             log.info(f'data_path = {data_path},name = {name}')
-            self.save_direct(name,data,path_modifiers=path_modifiers)
+            self.save_direct(name,ccd,path_modifiers=path_modifiers)
             log.info('saved h5')
         except Exception as e:
             log.warning(f'Failed to save cross-correlation h5 data! with error {e}')

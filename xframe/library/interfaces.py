@@ -24,12 +24,12 @@ class SoftInterface(abc.ABC):
     Interface for the external library shtns which supplies spherical harmonic transforms
     '''
     _external_dependency_name_ = 'pysofft'
-    @abc.abstractmethod
-    def forward_cmplx(self):
-        pass
-    @abc.abstractmethod
-    def inverse_cmplx(self):
-        pass
+    #@abc.abstractmethod
+    #def forward_cmplx(self):
+    #    pass
+    #@abc.abstractmethod
+    #def inverse_cmplx(self):
+    #    pass
 
 class SoftDependency(SoftInterface,metaclass=DependencyMeta):
     pass

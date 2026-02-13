@@ -14,7 +14,7 @@ from scipy.special import erf as error_function
 from scipy.special import erfi as error_function_imag
 from scipy.special import roots_legendre
 from scipy.special import comb as binomial
-from scipy.special import sph_harm
+from scipy.special import sph_harm_y as sph_harm
 from scipy.linalg import polar as polar_decomp
 from scipy.stats import rv_discrete
 
@@ -2148,6 +2148,92 @@ def generate_calc_center(real_grid):
         return center        
     return calc_center
 
+
+class AlignmentFortran:
+    def __init__(self,
+                 fourier_transform:SphericalFourierTransform,
+                 consider_point_inverse=False,
+                 normalize=True,
+                 normalization_method=np.max,
+                 center=True,
+                 rotate = True,
+                 dataset_length = 2):
+        
+        struct = fourier_transform.struct
+        self.bandwidth = struct.angular_bandwidth
+        self.dimension = struct.dimension
+        self._apply_normalization=normalize
+        self._apply_centering = center
+        self._apply_rotation = rotate
+        
+        self.dataset_length = max(dataset_length,1)
+        temp_density = np.zeros(fourier_transform.real_grid.shape[:-1]).astype(complex)
+        temp_ft_density = np.zeros(fourier_transform.reciprocal_grid.shape[:-1]).astype(complex)
+        self._reference = [temp_density,temp_ft_density] + [temp_density.copy()]*(dataset_length-2)
+        self._reference_coeff = [None]*dataset_length
+        
+        self._alignment_defining_dataset_id = [0]
+        self.fourier_transform = fourier_transform
+        self.hankel_transform = fourier_transform.ht
+        self.harmonic_transform = self.fourier_transform.harm
+        self.radial_sampling_points = self.fourier_transform.real_grid[:,0,0,0]
+        self.max_r = struct.max_r
+        self._radial_limit_ids = [0,len(self.radial_sampling_points)-1]
+        self._radial_limits = [0.0,self.max_r]
+        self._consider_point_inverse = consider_point_inverse
+
+        if self.dimension==3:
+            self.so = Soft(self.bandwidth)
+
+        self.real_grid_cart = spherical_to_cartesian(self.fourier_transform.real_grid)
+        if self.dimension==2:
+            self.integrator = PolarIntegrator(self.fourier_transform.real_grid)
+        elif self.dimension==3:
+            self.integrator = SphericalIntegrator(self.fourier_transform.real_grid)
+
+    @staticmethod
+    def real_pos(a:np.ndarray):
+        return np.clip(a.real,a_min=0,a_max = None)
+
+    def find_center(self,density):
+        density_integral = self.integrator.integrate(density.real)            
+        if density_integral==0:
+            density_integral=1
+        center = self.integrator.integrate(cart_grid[:]*density[...,None].real)/density_integral
+        center = cartesian_to_spherical(center)
+        return center        
+
+    def center(self,density):
+        ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
+        shift = self.fourier_transform.shift
+        center = self.find_center(density)
+        centered_density = ift(shift(ft(density),center,opposite_direction=True))
+        return centered_density
+
+    def center_variance_dataset(self,dataset):
+        ft,ift = self.fourier_transform.forward_cmplx,self.fourier_transform.inverse_cmplx
+        shift = self.fourier_transform.shift
+        center = self.find_center(dataset[centering_dataset_id[0]].mean)
+        centered_mean = ift(shift(ft(dataset[0].mean),center,opposite_direction=True))
+        centered_m2 = self.real_pos(ift(shift(ft(dataset[0].m2.astype(complex)),center,opposite_direction=True)))
+        centered_density_var = CumulativeVariance(centered_mean,count = dataset[0].count,m2 = centered_m2) 
+        centered_ft_mean = shift(dataset[1].mean,center,opposite_direction=True)
+        centered_ft_m2 = dataset[1].m2 # variance is <|x*x.conj|>-<x>*<x>.conj()  which is invariant under shifts that change x by a phase 
+        centered_ft_density_var = CumulativeVariance(centered_ft_mean,count = dataset[1].count,m2 = centered_ft_m2)
+        centered_variance_dataset = (centered_density_var,centered_ft_density_var)+tuple( CumulativeVariance(mean = ift(shift(ft(d.mean),center,opposite_direction=True)),count = d.count,m2 =  self.real_pos(ift(shift(ft(d.m2.astype(complex)),center,opposite_direction=True))))  for d in dataset[2:])
+        return centered_variance_dataset
+
+
+    def normalize(self,density):
+        norm = self.normalization_method(np.abs(density).real)
+        return density/norm_const
+    def normalize_variance_dataset(self,dataset):
+        norm_const = self.normalization_method(np.abs(dataset[0].mean).real)
+        sq_norm_const = norm_const**2
+        part1 = tuple(CumulativeVariance(mean=d.mean/norm_const,count = d.count, m2 = d.m2/sq_norm_const) for d in dataset[:2])
+        part2_consts = tuple(self.normalization_method(np.abs(d.mean).real) for d in dataset[2:])
+        part2 = tuple(CumulativeVariance(mean=d.mean/const,count = d.count, m2 = d.m2/(const**2)) for d,const in zip(dataset[2:],part2_consts)) 
+        return  part1 + part2 
 class Alignment():
     ''' dataset which is input to align_dataset_to_reference,align_dataset_pair, normalize_dataset, preprocess_dataset has the structure
         [density,ft_density,additional_real_density1, additional_real_density2 , ....]
