@@ -203,16 +203,18 @@ class DefaultDB(FileAccess,DatabaseInterface):
     def load(self,name,**kwargs):        
         try:
             loader = self.get_method(name,prefix = 'load_')
-            path = name
+            path = name            
             file_options=self.files.get(path,{}).get('options',{})
             if isinstance(loader,bool) or kwargs.get('skip_custom_methods',False):
-                #log.info(name)
+                #print(name)
                 path = self.get_path(name,**kwargs)
-                #log.info(path)
+                #print(path)
                 if isinstance(path,bool):
                     path = name
                 loader = self.get_db(path).load
+                #print(loader)
                 path = self.remove_access_method_from_path(path)
+                #print(path)
             #log.debug(loader)
             #log.debug(path)
             data = loader(path,**{**kwargs,**file_options})

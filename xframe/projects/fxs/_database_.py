@@ -643,6 +643,8 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         input_data=self.load(name,**{'skip_custom_methods': True,**kwargs})
         if (_type == 'legacy'):
             data=self.load_ccd_legacy(input_data)
+        elif _type == 'cxi':
+            data = self.load_ccd_cxi(input_data)
         elif _type == 'direct':
             data = self.load_ccd_direct(input_data) 
         else:
@@ -650,6 +652,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             log.error(e)
             raise e
         return data
+    
 
     def load_ccd_legacy(self,data):
         out_dict={}
@@ -730,9 +733,28 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         data['dimensions'] = settings.project.dimensions
         #log.info(data['cross_correlation']['I2I2'])
         return data
-
     def load_ccd_cxi(self,data):
-        pass
+        qs = data["entry_1"]["data_1"]["radial_coordinates"]
+        qs = units.inverse_length_unit_to_wave_vector_unit(qs*units.standardLength)
+        phis = data["entry_1"]["data_1"]["angular_coordinates"]
+        phis = units.degree_to_rad(phis)
+        grid=GridFactory.construct_grid('uniform',[qs,phis])
+        aint = data["entry_1"]["data_1"]["average_intensity"]
+        aint = SampledFunction(NestedArray(grid[:,0,0],1),aint,coord_sys='cartesian')
+        energy = data["entry_1"]["data_1"]["source_1"]["energy"]
+        wavelength = units.energy_wavelength_conversion(energy,energy_unit='J')/units.standardLength
+        thetas = ewald_sphere_theta_pi(wavelength,qs)
+
+        data = {'radial_points':qs,
+                'angular_points':phis,
+                'xray_wavelength': wavelength,
+                'average_intensity':aint,
+                'data_grid':{'qs':qs,'thetas':thetas,'phis':phis},
+                'dimensions':data["entry_1"]["data_1"]["dimensions_of_rotational_freedom"],
+                'cross_correlation':data["entry_1"]["data_1"]["cross_correlation"]
+                }
+        return data
+    
     def load_invariants(self,name,**kwargs):
         #print(self.get_path("invariants",path_modifiers=kwargs['path_modifiers']))
         data = self.load_direct(name,**kwargs)
@@ -903,29 +925,34 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             log.info('Plotting Best Intensity guess failed !')
             traceback.print_exc()
 
-
+    
     def ccd_direct_to_cxi(self,ccd,sample_name):
+        if isinstance(ccd['average_intensity'],SampledFunction):
+            aint = ccd['average_intensity'].data[:]
+        else:
+            aint = ccd['average_intensity']
         ccd_cxi = {'cxi_url':'https://cxidb.org/',
                    'cxi_version':1.6,
                    'entry_1':{
+                       'sample_1':{
+                           'name': sample_name
+                       },                    
                        'data_1':{
-                        'angular_coordinates': units.rad_to_degree(ccd['angular_points']),
+                           'angular_coordinates': units.rad_to_degree(ccd['angular_points']),
                            'radial_coordinates': units.wave_vector_unit_to_inverse_length_unit(ccd['radial_points'])/units.standardLength,
                            'data_space':'diffraction',
                            'data_type': 'angular cross-correlation',
                            'dimensions_of_rotational_freedom':ccd['dimensions'],
                            'cross_correlation':ccd['cross_correlation'],
-                           'average_intensity':ccd['average_intensity']
-                       },
-                       'source_1':{
-                           'photon_energy':units.energy_wavelength_conversion(ccd['xray_wavelength']*units.standardLength,energy_unit='J')
+                           'average_intensity':aint,
+                           'source_1':{
+                               'energy':units.energy_wavelength_conversion(ccd['xray_wavelength']*units.standardLength,energy_unit='J')
+                           }
                        }
-                   },
-                   'sample_1':{
-                       'name': sample_name
                    }
                 }
         return ccd_cxi
+    
     def save_ccd(self,name,data,**options):
         log.info('custom saving of cross correaltion')
         opt = settings.project
@@ -976,3 +1003,17 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             except Exception as e:
                 log.warning(f'Failed to create cross-corelation symlink! with error {e}')
                 log.info(traceback.format_exc())
+
+
+    def convert_ccd_file_to_cxi_format(self,in_path,in_type = 'legacy', out_path = './ccd.cxi',structure_name=None):
+        in_data=self.load(in_path,**{'skip_custom_methods': True})
+        if in_type =="legacy":
+            data = self.load_ccd_legacy(in_data)
+        else:
+            data = self.load_ccd_legacy(in_data)
+        if not isinstance(structure_name,str):
+             structure_name = settings.project.structure_name
+        cxi_data = self.ccd_direct_to_cxi(data,structure_name)
+        self.save(out_path,cxi_data,**{'skip_custom_methods': True})
+            
+        
