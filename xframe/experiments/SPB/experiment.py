@@ -77,7 +77,8 @@ class ExperimentWorker(ExperimentWorkerInterface):
         comm_module = Multiprocessing.comm_module
         self.opt=opt
         self.data_mode = opt.get('data_mode','proc')
-        self.sample_distance = opt.get('sample_distance',700)# in mm
+        self.sample_distance = opt.get('sample_distance',7)# in m
+        detector_origin = opt.get('detector_origin',[0,0,0])# in m
         self.x_ray_energy = opt.get('x_ray_energy',6010)# in eV
         self.x_ray_wavelength = pLib.energy_to_wavelength(self.x_ray_energy)
         self.comm_module=comm_module
@@ -89,7 +90,7 @@ class ExperimentWorker(ExperimentWorkerInterface):
         #    calibrator = AGIPD_VDS_Calibrator()
         #self.calibrator = calibrator
         self.info=self._generate_info()
-        self.detector.origin = np.array([0,0,self.sample_distance])
+        self.detector.origin = np.array([0,0,self.sample_distance]) + np.asarray(detector_origin)
         self.custom_mask = np.full(self.detector.data_shape,True)
         use_custom_mask = opt.get('custom_mask',False)
         if use_custom_mask:

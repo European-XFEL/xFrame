@@ -247,7 +247,7 @@ class AgipdRegridderSimple:
         return '{}_{}_{}'.format(interpolation,pixel_hash,new_grid_hash)
     
     
-    def __init__(self,geometry,new_grid_shape, interpolation = 'nearest', interpolation_constants=False,mask_threshold = 1-1e-10):        
+    def __init__(self,geometry,new_grid_shape, interpolation = 'nearest', interpolation_constants=False,mask_threshold = 1-1e-10,n_processes_weight_gen=False):        
         spherical_pixel_centers = geometry['q_framed_pixel_centers']
         self.default_interpolation_constants = {
             'data':{str(m_id):False for m_id in range(len(spherical_pixel_centers))},
@@ -265,6 +265,7 @@ class AgipdRegridderSimple:
         self.max_pixel_q = np.max(spherical_pixel_centers[...,0])
         self.polar_pixel_centers = spherical_pixel_centers[...,::2]
         self.cart_pixel_centers = spherical_to_cartesian(self.polar_pixel_centers)
+        self.n_processes_weight_gen = False
         #self.polar_pixel_centers = cartesian_to_spherical(self.cart_pixel_centers)
         #cart_pixel_centers = spherical_to_cartesian(polar_pixel_centers)
         
@@ -338,7 +339,7 @@ class AgipdRegridderSimple:
         temp_module_masks = min_mask[...,0] & min_mask[...,1] & max_mask[...,0] & max_mask[...,1]
         #temp_module_masks = np.ones((16,)+cart_grid.shape[:-1],dtype=bool)
         #print(f'temp mod mask shape = {temp_module_masks.shape}')
-        module_masks = Multiprocessing.comm_module.request_mp_evaluation(delaunay_mask_finding,input_arrays=[np.arange(n_modules)],const_inputs = [temp_module_masks,cart_grid,in_masks] ,call_with_multiple_arguments = True,split_mode='modulus',n_processes= False)
+        module_masks = Multiprocessing.comm_module.request_mp_evaluation(delaunay_mask_finding,input_arrays=[np.arange(n_modules)],const_inputs = [temp_module_masks,cart_grid,in_masks] ,call_with_multiple_arguments = True,split_mode='modulus',n_processes= self.n_processes_weight_gen)
         #log.info(f'module_masks .shape = {module_masks.shape} | {module_masks.dtype}')
         return module_masks
     
