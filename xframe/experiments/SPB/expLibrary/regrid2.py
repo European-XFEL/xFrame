@@ -265,7 +265,7 @@ class AgipdRegridderSimple:
         self.max_pixel_q = np.max(spherical_pixel_centers[...,0])
         self.polar_pixel_centers = spherical_pixel_centers[...,::2]
         self.cart_pixel_centers = spherical_to_cartesian(self.polar_pixel_centers)
-        self.n_processes_weight_gen = False
+        self.n_processes_weight_gen = n_processes_weight_gen
         #self.polar_pixel_centers = cartesian_to_spherical(self.cart_pixel_centers)
         #cart_pixel_centers = spherical_to_cartesian(polar_pixel_centers)
         
