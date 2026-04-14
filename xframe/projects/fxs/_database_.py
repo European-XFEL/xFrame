@@ -556,7 +556,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         else:
             max_value = max(np.max(np.abs(bls.flatten())),1e-100)
             median_value = np.median(np.abs(bls[::2].flatten()))
-        #log.info(f'median {median_value} max = {max_value}')
+            
         if (median_value>0) and (median_value!=np.nan) and (max_value<np.inf):
             orders = int(np.log10(max_value/median_value)*0.8)
             vmin,vmax = options.get('plot_range',[median_value*10**(-orders//2),median_value*10**orders])

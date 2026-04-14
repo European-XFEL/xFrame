@@ -2037,13 +2037,17 @@ class CumulativeVarianceMasked:
         # merges the data of another CummulativeVariance instance to create the combined average and variance.
         count_a = np.array(self.count)
         self.count += count
-        delta = mean-self.mean
+        #delta = mean-self.mean
+        mean -= self.mean
         nzero_mask = self.count>0
         count = count.astype(float)
         count[nzero_mask]/=self.count[nzero_mask] 
-        temp = delta*count
-        self.mean = self.mean + temp
-        self.m2 = self.m2 + m2 + (delta*count_a*temp.conj()).real
+        #temp = delta*count
+        temp = mean*count
+        #self.mean = self.mean + temp
+        #self.m2 = self.m2 + m2 + (delta*count_a*temp.conj()).real
+        self.mean +=  temp
+        self.m2 += m2 + (mean*count_a*temp.conj()).real
         return self
     
     @property

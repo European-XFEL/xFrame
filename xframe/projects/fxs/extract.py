@@ -346,7 +346,7 @@ class InvariantExtractor:
         elif min_type == 'q1q2_ids':            
             lim_dict = dopt.bl_q_limits.min.q1q2_ids
             min_mask,q_ids = self.calc_deg_2_invariant_q1q2_ids_mask(lim_dict)
-            q_id_limits[:,:,0]=q_ids            
+            q_id_limits[:,:,0]=q_ids
         else:
             min_mask = empty_mask.copy()            
         # max_limit        

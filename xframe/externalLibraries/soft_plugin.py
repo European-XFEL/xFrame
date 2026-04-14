@@ -17,7 +17,6 @@ from pysofft.wignerTransform import wigNaiveSynthesis_fftw
 from pysofft.wignerWeights import makeweights2
 from pysofft.soft import Inverse_SO3_Naive_fft_pc,Forward_SO3_Naive_fft_pc,coefLoc_so3,sampLoc_so3,totalCoeffs_so3
 from pysofft.soft import (sampLoc_so3,
-                          calc_prod_lm,
                           calc_mean_C_array,
                           calc_int_C_array,
                           _calc_int_C_array,
