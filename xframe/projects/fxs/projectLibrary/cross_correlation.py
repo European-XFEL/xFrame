@@ -85,7 +85,7 @@ class ccfAnalysis:
 
 
     def ccf_twopoint_q1_q2_mask_corrected_fast(self, image_pol, mask_pol):
-       '''Carefull when using max_l. In this case the _fast routine is anapproximation of the non _fast version, due to cuting of mask harmonic coefficients.''' 
+        '''Carefull when using max_l. In this case the _fast routine is anapproximation of the non _fast version, due to cuting of mask harmonic coefficients.''' 
         # Compute harmonic coefficients of image and mask
         fc_I = self.rcht(image_pol)
         fc_m = self.rcht(mask_pol.astype(float))
