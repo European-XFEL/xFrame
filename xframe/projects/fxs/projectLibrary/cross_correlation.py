@@ -24,8 +24,11 @@ class ccfAnalysis:
         self.max_l = max_l
         if max_l is None:
             self.n_phi_out = n_phi
+            self.cht_out = self.cht
         else:
             self.n_phi_out = 2*(max_l+1)
+            self.cht_out = PolarHarmonicTransform(max_order=max_l)
+            
     # calculate CCF and its FCs for a set of q1 != q2 rings. output is a (n_q1 * n_q * n_phi) matrix of CCF and FCs
     #
     def ccf_twopoint_q1_q2(self, data_polar1):
@@ -53,9 +56,10 @@ class ccfAnalysis:
         ccf_mask=ccf_mask.real
         
         # ccf_mask shoud only contain multiples of 1/n_phis as values
-        # make sure there are no values close to 0 like 1e-16 due to rounding errors.
+        # make sure there are no values lower than 1/n_phis.
+        # Use 1/(2*n_phis) as threshold instead of 1/n_phi to be insensitve to rounding errors.
+        
         n_phis = ccf_mask.shape[-1]
-        # Use 1/(2*n_phis) as threshold instead of 1/n_phi to be insensitve to rounding errors. 
         nonzero_mask = (ccf_mask>=1/(2*n_phis))
         np.divide(ccf_data, ccf_mask, out=ccf_data, where=nonzero_mask)
         ccf_data[~nonzero_mask]=0
@@ -83,6 +87,57 @@ class ccfAnalysis:
         ccfcorrected,correction_mask=self.ccf_mask_correction(ccf_data, ccf_mask)
         return ccfcorrected,correction_mask
 
+
+    def ccn_twopoint_q1_q2_mask_corrected_low_mem(self, image_pol, mask_pol):
+        # Compute harmonic coefficients of image and mask
+        fmask = mask_pol.astype(float)
+        fc_I = self.rcht(image_pol*fmask)
+        fc_m = self.rcht(fmask)
+        
+        fc_I_conj = fc_I.conjugate()
+        fc_m_conj = fc_m.conjugate()
+
+        n_phi = self.n_phi
+        
+        # Allocate Memory needed for the computation
+        temp_ccf_I = np.zeros((self.n_q,n_phi),dtype=float)
+        temp_ccf_m = np.zeros((self.n_q,n_phi),dtype=float)
+        temp_ccn_I = np.zeros((self.n_q,fc_I.shape[-1]),dtype=complex)
+        temp_ccn_m = np.zeros((self.n_q,fc_m.shape[-1]),dtype=complex)
+        ccf_workspace = np.zeros((self.n_q,n_phi),dtype=float)
+        ccf_mask_workspace = np.zeros((self.n_q,n_phi),dtype=bool)
+        ccn_workspace = np.zeros((self.n_q,n_phi//2+1),dtype=complex)
+        ccn = np.zeros((self.n_q,self.n_q,self.max_l+1),dtype=complex)
+        ccn_mask = np.zeros((self.n_q,self.n_q),dtype=bool)
+
+        #map numpy methods
+        mult = np.multiply
+        divide = np.divide
+        inverse_harm_transform = self.ircht
+        harm_transform = self.rcht
+        
+        # start loop over q1 of C(q1,q2,phi)
+        for q1 in range(self.n_q):
+            # Compute parts of the cross correlation of image and mask (only unsymmetric part)
+            mult(fc_I_conj[q1,None,:],fc_I[q1:],out = temp_ccn_I[q1:])
+            mult(fc_m_conj[q1,None,:],fc_m[q1:],out = temp_ccn_m[q1:])
+            inverse_harm_transform(temp_ccn_I[q1:],n_points=self.n_phi,out = temp_ccf_I[q1:])
+            inverse_harm_transform(temp_ccn_m[q1:],n_points=self.n_phi,out = temp_ccf_m[q1:])
+
+            # compute the boolean mask at wich ccf is defined (i.e. could be computed)
+            ccf_mask_workspace[q1:]=temp_ccf_m[q1:]>1/(2*n_phi)
+            # correct the computed image cross correlation by dividing out the mask correlation
+            divide(temp_ccf_I[q1:],temp_ccf_m[q1:],where = ccf_mask_workspace[q1:],out=ccf_workspace[q1:])
+
+            ccn_mask[q1,q1:] = np.prod(ccf_mask_workspace[q1:],axis = -1).astype(bool)
+            harm_transform(ccf_workspace[q1:],out = ccn_workspace[q1:])
+            ccn[q1,q1:]=ccn_workspace[q1:,:self.max_l+1]
+            
+            # Use the Symmetrie C(q1,q2,phi)=C(q2,q1,-phi) which imposes
+            # the symmetry Cn(q1,q2) = Cn(q2,q1)^* on its harmonic coefficents
+            ccn[q1+1:,q1,:] = ccn[q1,q1+1:,:].conj()
+            ccn_mask[q1+1:,q1] = ccn_mask[q1,q1+1:]
+        return ccn,ccn_mask
 
     def ccf_twopoint_q1_q2_mask_corrected_fast(self, image_pol, mask_pol):
         '''Carefull when using max_l. In this case the _fast routine is anapproximation of the non _fast version, due to cuting of mask harmonic coefficients.''' 
@@ -124,8 +179,8 @@ class ccfAnalysis:
             # Use the Symmetrie C(q1,q2,phi)=C(q2,q1,-phi)
             ccf[q1:,q1,0] = ccf[q1,q1:,0]
             ccf[q1:,q1,1:] = ccf[q1,q1:,-1:0:-1]
-            ccf_mask[q1:,q1,0] = ccf[q1,q1:,0]
-            ccf_mask[q1:,q1,1:] = ccf[q1,q1:,-1:0:-1]
+            ccf_mask[q1:,q1,0] = ccf_mask[q1,q1:,0]
+            ccf_mask[q1:,q1,1:] = ccf_mask[q1,q1:,-1:0:-1]
         return ccf,ccf_mask
 
 
