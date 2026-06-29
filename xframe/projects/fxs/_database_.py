@@ -821,6 +821,13 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         if proj_class.dimensions == 3:
             data_dict['data_projection_matrices'] = proj_class.data_projection_matrices
             data_dict['data_low_resolution_intensity_coefficients'] = proj_class.data_low_resolution_intensity_coefficients
+            
+            bl_from_proj_data = []
+            for key,prs in proj_class.data_projection_matrices.items(): 
+                bl_from_proj_data.append(
+                    harmonic_coeff_to_deg2_invariants(proj_class.dimensions,prs)
+                    )
+            bl_from_proj_data = np.squeeze(np.array(bl_from_proj_data))
             #for key,matrices in proj_class.data_projection_matrices.items():
             #    matrices = (np.squeeze(matrices[0]),)+tuple(matrices[1:])
             #    matrices = {str(key):value for key,value in enumerate(matrices)}
@@ -829,6 +836,12 @@ class ProjectDB(DefaultDB,DatabaseInterface):
             #log.info('n proj matrices = {} dtype = {}'.format(len(matrices),matrices.dtype))
             data_dict['data_projection_matrices'] = proj_class.data_projection_matrices
             #data_dict['data_projection_matrix_error_estimates'] = proj_class.data_projection_matrix_error_estimates
+            bl_from_proj_data = []
+            for key,prs in proj_class.data_projection_matrices.items(): 
+                bl_from_proj_data.append(
+                    harmonic_coeff_to_deg2_invariants(proj_class.dimensions,np.array(prs).T)
+                )
+            bl_from_proj_data = np.squeeze(np.array(bl_from_proj_data))
         data_dict['data_projection_matrices_q_id_limits']=proj_class.data_projection_matrices_q_id_limits
         data_dict['max_order'] = proj_class.max_order
         #data_dict['ccn']=proj_class.ccn
@@ -836,6 +849,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         data_dict['number_of_particles'] = int(proj_class.number_of_particles)
         if options.get('save_invariant',False):
             data_dict['deg_2_invariant'] = proj_class.b_coeff
+            data_dict['deg_2_invariant_from_proj_data'] = bl_from_proj_data
             data_dict['deg_2_invariant_masks'] = proj_class.b_coeff_masks
             data_dict['deg_2_invariant_q_id_limits'] = proj_class.b_coeff_q_id_limits
 
