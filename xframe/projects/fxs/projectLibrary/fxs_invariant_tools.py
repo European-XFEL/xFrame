@@ -879,6 +879,8 @@ class _Conversion:
 class _Regularization:
     eigh = sp.linalg.eigh
     rescale_modes = ('sign_loss','ruiz','none')
+
+        
     @staticmethod
     def _invariant_eigenvalues(b_matrix,sort_mode = 0):
         # Calculates the eigenvalue/eignvector pairs and sorts them.
@@ -979,9 +981,10 @@ class _Regularization:
             rank = min(len(b_matrix),2*order+1)
             
         b_matrix = (b_matrix + b_matrix.T.conj())/2
-        is_zero = np.isclose(b_matrix,0).all()
+        is_zero = (b_matrix == 0).all()
         
         if is_zero:
+            log.warning(f"B_{order} does only contain zeros, no reqularization possible !")
             full_V = np.zeros((Nq,rank),dtype = b_matrix.dtype)
             return [full_V,q_id_limit]
         
@@ -1010,9 +1013,10 @@ class _Regularization:
             rank = min(len(b_matrix),2*order+1)
             
         b_matrix = (b_matrix + b_matrix.T.conj())/2
-        is_zero = np.isclose(b_matrix,0).all()
+        is_zero = (b_matrix==0).all()
         
         if is_zero:
+            log.warning(f"B_{order} does only contain zeros, no reqularization possible !")
             full_V = np.zeros((Nq,rank),dtype = b_matrix.dtype)
             return [full_V,q_id_limit]
         eig_vals,eig_vect =  _Regularization._invariant_eigenvalues(b_matrix,sort_mode=sort_mode)
@@ -1045,9 +1049,10 @@ class _Regularization:
             rank = min(len(b_matrix),2*order+1)
             
         b_matrix = (b_matrix + b_matrix.T.conj())/2
-        is_zero = np.isclose(b_matrix,0).all()
+        is_zero = (b_matrix==0).all()
         
         if is_zero:
+            log.warning(f"B_{order} does only contain zeros, no reqularization possible !")
             full_V = np.zeros((Nq,rank),dtype = b_matrix.dtype)
             return [full_V,q_id_limit]
 
@@ -1092,8 +1097,9 @@ class _Regularization:
             rank = min(len(b_matrix),2*order+1)
             
         b_matrix = (b_matrix + b_matrix.T.conj())/2
-        is_zero = np.isclose(b_matrix,0).all()
+        is_zero = (b_matrix==0).all()
         if is_zero:
+            log.warning(f"B_{order} does only contain zeros, no reqularization possible !")
             full_V = np.zeros((Nq,rank),dtype = b_matrix.dtype)
             return [full_V,q_id_limit]
         
@@ -2112,7 +2118,7 @@ def deg2_invariant_eigenvalues(b_matrix,sort_mode=0,use_svd = False):
 
     # Comment In some 2d examples sorting purely by eigenvalue(sort_mode == 0) has failed due to a verry small associated eigenvetor (which was almost everywhere 0)
     b_matrix = (b_matrix + b_matrix.T.conj())/2
-    is_zero = np.isclose(b_matrix,0).all() 
+    is_zero = (b_matrix==0).all() 
     if not is_zero:
         # at the time of writing this code comparing the eigen_decomposition of b_matrix with itself yielded lower errors when using scipy linalg.eigh with driver 'ev'.
 
@@ -2123,6 +2129,7 @@ def deg2_invariant_eigenvalues(b_matrix,sort_mode=0,use_svd = False):
         
         #eig_vals,eig_vect=np.linalg.eigh(b_matrix)
     else:
+        log.warning(f"Trying to compute eigenvalues of matrix containing only zeros.")
         eig_vect = np.zeros(b_matrix.shape)
         eig_vals = np.zeros(b_matrix.shape[0])            
     #log.info(eig_vals)
