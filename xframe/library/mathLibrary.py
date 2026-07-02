@@ -1250,48 +1250,35 @@ def polar_spherical_dft_reciprocity_relation_radial_step_cutoff(step:float,n_poi
     return other_cutoff
     
 
-#assumes sperical coordinate grid where r,phi are uniformely sampled and cos(theta) are gauss legendre nodes.
-# grid coords are (r,theta,phi)
-class SphericalIntegrator():
+class SphericalIntegrator:
+    '''
+    Numerical integrator for data given on a Spherical grid (r,theta,phi)
+    Where 
+    - r     is uniformly sampled & given at midpoint rule nodes (starts at dr/2 )
+    - theta is given at gauss-legendre nodes
+    - phi   is is uniformly sampled starting at 0 
+    '''
     def __init__(self,grid):
         self.n_r,self.n_theta,self.n_phi = grid.shape[:-1]
         self.grid = grid
-        self.max_r = np.max(grid[:,0,0,0])
+        self.dr = grid[1,0,0,0]-grid[0,0,0,0]
+        self.max_r = grid[-1,0,0,0] + self.dr/2
         self.norm_angular = 4*np.pi
         self.norm = 4/3*np.pi*self.max_r**3
         self.gauss_weights = roots_legendre(self.n_theta)[1]
-        self.integrate,self.integrate_normed,self.integrate_angular,self.integrate_angular_normed = self.generate_integration_routines()
-        
-        
 
-    def generate_integration_routines(self):
-        pi = np.pi
-        w = self.gauss_weights
-        rs = self.grid[:,0,0,0]
-        n = self.n_theta
-        norm = self.norm
-        norm_angular = self.norm_angular
-        def integrate_angular(values):
-            w_shape = (1,) + w.shape + (1,)*(values.ndim - 3)
-            s2_int = pi/n*np.sum(w.reshape(w_shape)*np.sum(values,axis=2),axis = 1)
-            return s2_int
-        def integrate(values):
-            #s2_int = integrate_angular(values)
-            rs_shape = rs.shape + (1,)*(values.ndim - 3)
-            w_shape = (1,) + w.shape + (1,)*(values.ndim - 3)
-            s2_int = pi/n*np.sum(w.reshape(w_shape)*np.sum(values,axis=2),axis = 1)
-            r_int = np.trapz(s2_int * (rs**2).reshape(rs_shape) , x = rs,axis = 0)
-            return r_int
-        def integrate_normed(values):
-            return integrate(values)/norm
+    def __call__(self,values,normed=False):
+        s2_int = np.pi/self.n_theta*(np.sum(self.gauss_weights[None,:]*np.sum(values,axis=2),axis = 1))
+        r_int = np.sum(s2_int * (rs**2)*dr)
+        if normed:
+            r_int /=self.norm
+        return r_int
         
-        def integrate_angular_normed(values):
-            return integrate_angular(values)/norm_angular
-        return integrate,integrate_normed,integrate_angular,integrate_angular_normed
     def L2_norm(self,values):
-        return self.integrate(values*values.conj())
-                
-
+        return self(values*values.conj())
+    def get_volume_elements(self):
+        return np.pi/integrator.n_theta*((self.gauss_weights[None,:])*(rs)[:,None]**2*dr)
+    
 class PolarIntegrator():
     '''
     Assumes polar coordinate grid where r,phi are uniformely sampled.
