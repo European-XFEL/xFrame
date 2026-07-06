@@ -1,17 +1,12 @@
 import numpy as np
-import time
-from scipy.optimize import minimize_scalar
 from scipy import ndimage
 import logging
 
 
 from xframe.library.pythonLibrary import DictNamespace
-from xframe.library.pythonLibrary import create_threshold_projection,xprint
 from xframe.library.physicsLibrary import spherical_formfactor
 from xframe.library.gridLibrary import NestedArray,GridFactory
-from xframe.library.gridLibrary import ReGrider,SampledFunction
 from xframe.library.mathLibrary import PolarIntegrator,SphericalIntegrator,distance_from_line_2d,midpoint_rule
-from xframe.library.mathLibrary import gaussian_fourier_transformed_spherical
 from xframe.library.mathLibrary import spherical_to_cartesian
 
 from .fxs_invariant_tools import harmonic_coeff_to_deg2_invariants_2d
@@ -19,8 +14,6 @@ from .fxs_invariant_tools import harmonic_coeff_to_deg2_invariants_3d
 from . import fxs_invariant_tools as i_tools
 
 from xframe import settings
-from xframe import database
-from xframe import Multiprocessing
 
 log=logging.getLogger('root')
 
@@ -32,18 +25,56 @@ class RealProjectionSNR:
         if dim == 2:
             self.integrator = PolarIntegrator(self.real_grid)
         elif dim ==3:
-            self.integrator = PolarIntegrator(self.real_grid)
+            self.integrator = SphericalIntegrator(self.real_grid)
         else:
             raise ValueError(f'Only 2 and 3 Dimensional grids are  supported, given grid dim is {self.real_grid.shape[-1]}.')
 
         self.vol_elements = self.integrator.get_volume_elements()
-        self.vol = opt['support_snr'].get('initial_volume',np.max(vol_elements))
+        self.vol = opt['support_snr'].get('initial_volume',np.max(self.vol_elements))
         self.step_size = opt['support_snr'].get('volume_step',10*np.max(self.vol_elements))
-        self.vol_history == []
-
-    def __call__(density):
+        self.support = np.zeros(self.vol_elements.shape,bool)
+        self.force_connected = opt['force_connected']
         
-        pass
+    def __call__(self,density):
+        d = (np.abs(density)**2*self.vol_elements[...,None]).ravel()
+        order = d.argsort()[::-1]
+        order_3d = np.unravel_index(order,density.shape)
+        c_volume = np.cumsum(self.vol_elements[order_3d[0],order_3d[1]])
+
+        
+        n,v,s = len(order),self.vol,self.step_size
+        stop_ids = [ 
+                     np.searchsorted(c_volume, max(v-s,0), side='right'),
+                     np.searchsorted(c_volume, v, side='right'),
+                     np.searchsorted(c_volume, min(v+s,n-1), side='right')
+                   ]
+
+        med1,med2,med3 = [d[order[s//2]] for s in stop_ids]
+        max1,max2,max3 = [d[order[max(s-1,0)]] for s in stop_ids]
+
+        contrast_metric = np.array([
+                                    (med1-max1)/med1,
+                                    (med2-max2)/med2,
+                                    (med3-max3)/med3
+                                   ])
+
+        best = np.argmax(contrast_metric)
+        volume_change = [-s,0,s]
+
+        support_mask = np.ones(density.shape,bool)
+        new_v = int(min(max(v+volume_change[best],0),n))
+        support_mask.ravel()[order[:new_v]] = False
+        if self.force_connected:
+            connected_components,_ = ndimage.label(support_mask)
+            component_names,counts = np.unique(connected_components[connected_components>0],return_counts=True)
+            largest_component_id = np.argmax(counts)
+            support_mask = (connected_components == component_names[largest_component_id])
+        self.support = support_mask
+        density[~support_mask]=0
+        density.imag = 0
+        density[density<0]=0
+        self.vol = new_v
+        return density
     
 class RealProjection:
     # collection of possible real constraints
@@ -192,260 +223,7 @@ class RealProjection:
         return support_mask
 
 
-def generate_initial_support_mask(opt,realGrid,projection):
-    support_type=opt['type']
-    if support_type=='max_radius':
-        maxR=opt['max_r']
-        supportMask=np.where(realGrid[...,0]<maxR,True,False)
-    elif support_type=='auto_correlation':
-        raise NotImplementedError()
-        threshold=initial_support_specifier['threshold']        
-        maxValue=np.max(auto_correlation.data)
-        supportMask=auto_correlation.data>=(1-threshold)*maxValue
-    else:
-        e=AssertionError('Initial support type "{}" is not known.'.format(support_type))
-        log.error(e)
-        raise e
-    #    log.info('support mask[:]={}'.format(supportMask))
-    #pres.present(auto_correlation.data.array,grid=realGrid)
-    #pres.present(supportMask,grid=realGrid)
-    return ~supportMask
-
-
-class ShrinkWrapParts():
-    def __init__(self,real_grid,reciprocal_grid,initial_support,options = {}):
-        self.mode_routines = {'threshold':self.generate_get_new_mask_threshold}
-
-        mode = options.get('mode','threshold')
-        mode_options = options.get(mode,{})
-        
-        dimension = real_grid[:].shape[-1]
-        
-        threshold = options['thresholds'][0]
-        force_connected = options['force_connected']
-        #log.info(f'threshold = {threshold}')
-        if dimension == 2:
-            self.default_sigma = np.pi/(reciprocal_grid[:,0,0].max())
-        elif dimension == 3:
-            self.default_sigma = np.pi/(reciprocal_grid[:,0,0,0].max())
-        gaussian_sigma = self.default_sigma
-        #log.info(f'default sigma = {self.default_sigma}')
-  
-        self.mode = mode
-        self.mode_options = mode_options
-        self.real_grid = real_grid[:]
-        self.reciprocal_grid = reciprocal_grid[:]
-        dimension = self.real_grid.shape[-1]
-        self.initial_support = initial_support
-        
-        self._threshold = [threshold]
-        self._gaussian_sigma = [gaussian_sigma]
-        self.force_connected = force_connected
-        self.gaussian_values = gaussian_fourier_transformed_spherical(self.reciprocal_grid,self._gaussian_sigma[0])
-        
-        self.get_new_mask = self.mode_routines[self.mode]()
-        self.multiply_with_ft_gaussian = self.generate_multiply_by_ft_gaussian()
-        #log.info(f'\n Shrink wrap mode = {mode} , get new mask routine = {self.get_new_mask} \n')
-    @property
-    def threshold(self):
-        return self._threshold[0]
-    @threshold.setter
-    def threshold(self,value):
-        if value<0:
-            self._threshold[0]=0
-            log.warning('Shrikwrap threshold has to lie in [0,1] but given value is {}. Projecting threshold to {}.'.format(value,self._threshold[0]))
-        elif value>=1:
-            self._threshold[0]=1
-            log.warning('Shrikwrap threshold has to lie in [0,1] but given value is {}. Projecting threshold to {}.'.format(value,self._threshold[0]))
-        else:
-            self._threshold[0]=value
-
-
-    @property
-    def gaussian_sigma(self):
-        return self._gaussian_sigma[0]
-    @gaussian_sigma.setter
-    def gaussian_sigma(self,value):
-        value_valid_type = not ( (not np.issubdtype(np.array(value).dtype,np.number)) or isinstance(value,bool))
-        value_valid = False
-        if value_valid_type:
-            value_valid = value>0
-        if value_valid:
-            self._gaussian_sigma[0]=value
-        else:
-            self._gaussian_sigma[0]=self.default_sigma
-        self.gaussian_values[:] = gaussian_fourier_transformed_spherical(self.reciprocal_grid,self._gaussian_sigma[0])
-        
-    def generate_get_new_mask_threshold(self):
-        threshold = self._threshold
-        def get_new_mask(convolution_data):
-            #log.info(f'\n SW threshold = {threshold} and sigma = {self._gaussian_sigma}\n')
-            #convolution_data=convolution_data.real #np.abs(convolution_data).real
-            convolution_data=np.abs(convolution_data.real)
-            #convolution_data=np.abs(convolution_data).real #np.abs(convolution_data).real
-            convolution_data[convolution_data<0]=0
-            max_value= convolution_data.real.max()
-            min_value= convolution_data.real.min()
-            diff = max_value-min_value
-            new_mask = convolution_data >= min_value + threshold[0]*diff
-            if self.force_connected:
-                connected_components,_ = ndimage.label(new_mask)
-                component_names,counts = np.unique(connected_components[connected_components>0],return_counts=True)
-                largest_component_id = np.argmax(counts)
-                new_mask = (connected_components == component_names[largest_component_id])
-            return new_mask
-        return get_new_mask
-    
-    
-    def generate_multiply_by_ft_gaussian(self):
-        gaussian_values = self.gaussian_values
-        def multiply_ft_gaussian(data):
-            return data*gaussian_values
-        return multiply_ft_gaussian
-
-    
 ### FXS Projections
-def generate_fxs_projection(specifier):
-    dimension=specifier['fxs_data'].dimension
-    if dimension==2:
-        FXS_projection=construct_fxs_projection_parts_2D(specifier)
-    else:
-        raise NotImplementedError
-    return FXS_projection
-
-def calculate_fxs_projection_vector_old(fxs_data,positive_harmonic_orders):
-    bCoefficients=fxs_data.bCoeff
-    
-    def firstEigenvectorAndValue(expansionCoefficient):
-        matrix=bCoefficients.data.array[:,:,expansionCoefficient]
-#        log.info('matrix of shape {} to take eigen values from = \n{}'.format(matrix.shape,matrix))
-        eigValues,eigVectors=np.linalg.eigh(matrix)
-        max_arg=eigValues.argmax()
-        return [eigVectors[:,max_arg],eigValues[max_arg]]
-    listOfEigenvectorsAndValues=np.array(list(map(firstEigenvectorAndValue,positive_harmonic_orders)),dtype=np.object)    
-    eigenValues=listOfEigenvectorsAndValues[:,1].astype(complex)
-    eigenVectors=np.array(tuple(listOfEigenvectorsAndValues[:,0]),dtype=complex)
-    projection_vector=np.swapaxes(eigenVectors,0,1)*np.sqrt(eigenValues.astype(complex))
-    fxs_data.projection_vector=projection_vector
-    return fxs_data
-
-def calculate_fxs_projection_vector(fxs_data,reciprocal_projection_specifier):
-    positive_harmonic_orders=reciprocal_projection_specifier['positive_harmonic_orders']
-    #log.info('projection orders={}'.format(positive_harmonic_orders))
-    bCoefficients=fxs_data.bCoeff
-    
-    def firstEigenvectorAndValue(expansionCoefficient):
-        matrix=bCoefficients[:,:,expansionCoefficient]
-#        log.info('matrix of shape {} to take eigen values from = \n{}'.format(matrix.shape,matrix))
-        eigValues,eigVectors=np.linalg.eigh(matrix)
-        max_arg=eigValues.argmax()
-        
-        return [eigVectors[:,max_arg],eigValues[max_arg]]
-    listOfEigenvectorsAndValues=np.array(list(map(firstEigenvectorAndValue,positive_harmonic_orders)),dtype=np.object)    
-    eigenValues=listOfEigenvectorsAndValues[:,1].astype(complex)
-    #log.info('lambdas={}'.format(eigenValues))
-    eigenVectors=np.array(tuple(listOfEigenvectorsAndValues[:,0]),dtype=complex)
-    projection_vector=np.swapaxes(eigenVectors,0,1)*np.sqrt(eigenValues.astype(complex))    
-    fxs_data.projection_vector=projection_vector
-#    log.info('shape ={} projection_vector={}'.format(projection_vector.shape[1],np.abs(np.sum(projection_vector,axis=0))))
-    return fxs_data
-
-
-def construct_fxs_projection_parts_2D(specifier):
-    fxs_data=specifier['fxs_data']
-    specifier['projection_vector']=modify_projection_vector_2D(fxs_data.projection_vector,specifier)
-    mask=specifier.get('mask',False)
-    if isinstance(mask,bool):
-        specifier['mask']=True
-    
-    use_SO_freedom=specifier['SO_freedom']['use']
-    
-    fxs_projection=generate_coefficient_projection_2D(specifier)
-    approximate_unknowns_without_SO=generate_approximate_unknowns_2D(specifier)
-
-    if use_SO_freedom:
-        apply_SO_freedom=generate_apply_SO_freedom_2D(specifier)
-        def approximate_unknowns(intensity_harmonic_coefficients):
-            return apply_SO_freedom(approximate_unknowns_without_SO(intensity_harmonic_coefficients))
-    else:
-        approximate_unknowns=approximate_unknowns_without_SO
-            
-    projection_dict={'projection':fxs_projection,'approx_unknowns':approximate_unknowns,'proj_mask':mask}
-    return projection_dict
-        
-def modify_projection_vector_2D(projection_vector,specifier):
-    rescale_projection=specifier.get('rescale_projection_to_1',False)
-    average_intensity=specifier['fxs_data'].aInt.data.astype(complex)
-    positive_harmonic_orders=specifier['positive_harmonic_orders']
-    odd_order_mask=positive_harmonic_orders%2==1
-    vector=projection_vector.copy()
-    vector[:,odd_order_mask]=0
-    vector[:,0]=average_intensity
-    if rescale_projection:        
-        max_vector_value=np.abs(np.max(vector))
-        vector/=max_vector_value
-#    log.info('projection vector for SO={}'.format(np.abs(np.sum(projection_vector,axis=0))))
-    return vector
-
-def generate_approximate_unknowns_2D(specifier):
-    positive_harmonic_orders=specifier['positive_harmonic_orders']
-    projection_vector=specifier['projection_vector']
-    reciprocal_grid=specifier['reciprocal_grid']
- #   log.info(np.conjugate(np.sum(projection_vector,axis=0)))
-    def approximate_unknowns(intensity_harmonic_coefficients):
-        scalar_prod_Im_vm_summands=intensity_harmonic_coefficients[:,positive_harmonic_orders]*np.conjugate(projection_vector)*reciprocal_grid[:,positive_harmonic_orders,0]
-        scalar_prod_Im_vm=np.sum(scalar_prod_Im_vm_summands,axis=0)
-#        log.info(scalar_prod_Im_vm)
-        unknowns=scalar_prod_Im_vm/np.where(np.abs(scalar_prod_Im_vm)==0,1,np.abs(scalar_prod_Im_vm))
-        unknowns[0]=1
-        #log.info('unknowns={}'.format(unknowns))
-        return unknowns
-    return approximate_unknowns
-
-def generate_coefficient_projection_2D(specifier):
-    positive_harmonic_orders=specifier['positive_harmonic_orders']
-    projection_vector=specifier['projection_vector']
-    mask=specifier['mask']
-    copy = np.array
-    def fxs_projection(intensity_harmonicCoefficients,unknowns):
-        projected_intensity_coefficients_array=copy(intensity_harmonicCoefficients)
-        projected_intensity_coefficients_array[:,positive_harmonic_orders]=projection_vector*unknowns
-        #apply mask
-        intensity_harmonic_coefficients=np.where(mask,projected_intensity_coefficients_array,intensity_harmonicCoefficients).astype(complex)
-        return intensity_harmonic_coefficients
-    return fxs_projection
-
-
-def generate_orientation_matching_2D(n_positive_harmonic_orders):
-    previous_phases=[False]
-    previous_mask=[True]
-    def orientation_matching(intensity_harmonic_coefficients,unknowns):
-        non_zero_mask=unknowns!=0
-        mask=previous_mask[0]*non_zero_mask
-        phases=np.zeros(unknowns.shape)
-        phases[non_zero_mask]=(-1.j*np.log(unknowns[non_zero_mask])).real
-        if not isinstance(previous_phases[0],bool):
-            non_zero_phases=phases[mask]
-            optimal_phase=np.sum(non_zero_phases-previous_phases[0][mask])/len(non_zero_phases)
-            shift=np.exp(-1.j*np.arange(n_positive_harmonic_orders)*optimal_phase)
-#            log.info(shift)
-            intensity_harmonic_coefficients*=shift
-        previous_phases[0]=phases
-        previous_mask[0]=non_zero_mask
-        return intensity_harmonic_coefficients
-    return orientation_matching
-
-def generate_orientation_matching(dimensions,n_positive_harmonic_orders):
-    if dimensions == 2:
-        orientation_matching=generate_orientation_matching_2D(n_positive_harmonic_orders)
-    elif dimensions == 3:
-        def orientation_matching(intensity_harmonic_coefficients,unknowns):
-            raise NotImplementedError()
-    else:
-        log.error('dimensions must be 2 or 3 but {} was given'.format(dimensions))
-    return orientation_matching
-
-
 class ReciprocalProjection:
     def load_data(self,data):
         opt = settings.project
@@ -513,11 +291,6 @@ class ReciprocalProjection:
         self.used_orders = {order:id for (order,id) in zip(self.positive_orders,self.used_order_ids)}
         #xprint(f"orders = {self.used_orders}")
         self.use_SO_freedom=opt.SO_freedom.use
-        
-        # Won't work without the list around opt.number_of_particles.initial .
-        # This way number_of_particles[0] automatically contains updated versions of the particle number.  
-        self.number_of_particles = [opt.number_of_particles.initial] 
-        self.number_of_particles_dict = {'number_of_particles':self.number_of_particles,'negative_fraction':[],'gradient':[]}
 
         pm,low_res = self._regrid_data()        
         #log.info(f'len regridded proj mat = {len(pm)}')
@@ -544,10 +317,6 @@ class ReciprocalProjection:
         self.mtip_projection = self.generate_coeff_projection(mtip_projection_base)            
         self.approximate_unknowns=self.generate_approximate_unknowns()
             
-        #if opt.number_of_particles.GPU:            
-        #    self.particle_number_projection = self.generate_number_of_particles_porjection_gpu()
-        #else:
-        #    self.particle_number_projection = self.generate_number_of_particles_porjection()
         
         self.project_to_modified_intensity = self.generate_project_to_modified_intensity()
         self.project_to_fixed_intensity = self.generate_project_to_fixed_intensity()
@@ -893,7 +662,7 @@ class ReciprocalProjection:
         used_orders=self.used_orders
         zero_id = used_orders.get(0,'')
         radial_mask = self.radial_mask
-        number_of_particles = self.number_of_particles
+        number_of_particles = [1]
         if dim == 2:
             def fixed_projection(intensity_harmonic_coefficients,unknowns):
                 projected_intensity_coefficients = coeff_projection(intensity_harmonic_coefficients,unknowns)
@@ -1164,289 +933,8 @@ class ReciprocalProjection:
         self.n_particles = N
 
     def get_number_of_particles(self):
-        return self.number_of_particles
-    
-    def apply_particle_number_scaling(self,projection_matrices,zero_id,average_intensity):
-        '''
-        Let N be the nunmber of particles. this method scales the projection_matrices $V_l$ by $1/\sqrt(N)$ for $l\neq 0$ and $1/N$ for $l = 0$.
-        The averaged intensity is scaled by $1/N$, since it is proportional to $V_0$
-        '''
-        N = settings.project.projections.reciprocal.number_of_particles
-        projection_matrices = [matrix/np.sqrt(N) for matrix in projection_matrices]
-        projection_matrices[zero_id] = projection_matrices[zero_id]/np.sqrt(N)
-        average_intensity = average_intensity/N
-        return projection_matrices,average_intensity
-            
-    def generate_number_of_particles_porjection(self):
-        p_opt = settings.project.projections.reciprocal
-        zero_id = self.used_orders.get(0,'')
-        radial_mask=self.radial_mask[zero_id]
-        
-        proj_matrices = self.projection_matrices
-        if p_opt.use_averaged_intensity:
-            I00 = np.abs(self.average_intensity.data.real)
-        else:
-            I00 = np.abs(proj_matrices[0].flatten().real)
-        I00y00=I00/(2*np.sqrt(np.pi))
-        N_space = p_opt.number_of_particles.scan_space
-        #Ns = np.linspace(*N_space)
-        Ns_sqrt = np.linspace(*np.sqrt(N_space[:-1]),N_space[-1])
-        Ns = Ns_sqrt**2
-        #Ns_lin = np.linspace(*N_space)
-        #Ns_lin_sqrt = np.sqrt(Ns_lin)
-        #log.info("N_max = {} Ns_sqrt max = {}".format(Ns.max(),Ns_sqrt.max()))
-        #log.info("N_min = {} Ns_sqrt min = {}".format(Ns.min(),Ns_sqrt.min()))
-        summands = (1/Ns_sqrt-1)[:,None]*I00y00[None,radial_mask]
-        #summands = (1/Ns_sqrt-1)[:,None]*I00y00[None,radial_mask]
-        nsum=np.sum
-        n_pixels=np.prod(self.grid[radial_mask].shape[:-1])
-        estimate_n_particles = i_tools.estimate_number_of_particles
-        initial_n_particles = p_opt.number_of_particles.initial
-        if p_opt.number_of_particles.project:
-            def particle_number_projection(I):
-                #log.info('I shape = {}'.format(I.shape))
-                scaled_I = I[None,radial_mask,...] + summands[:,:,None,None]
-                neg_fractions = np.sum(scaled_I<0,axis=(1,2,3))/n_pixels
-                grad = np.gradient(neg_fractions,Ns_sqrt)            
-                inflection_id = np.argmax(grad)
-                self.number_of_particles_dict = {'number_of_particles':Ns[inflection_id],'negative_fraction':neg_fractions,'gradient':grad}
-                self.number_of_particles[0] = Ns[inflection_id]
-                #log.info('number of particles = {}'.format(self.number_of_particles))
-                I[radial_mask] = scaled_I[inflection_id]
-                I[I<0]=0
-                del(scaled_I)            
-                return I
-        else:
-            def particle_number_projection(I):
-                #log.info('I shape = {}'.format(I.shape))
-                scaled_I = I[None,radial_mask,...] + summands[:,:,None,None]
-                neg_fractions = np.sum(scaled_I<0,axis=(1,2,3))/n_pixels
-                grad = np.gradient(neg_fractions,Ns)            
-                inflection_id = np.argmax(grad)
-                self.number_of_particles_dict = {'number_of_particles':Ns[inflection_id],'negative_fraction':neg_fractions,'gradient':grad}
-                self.number_of_particles[0] = Ns[inflection_id]
-                #log.info('number of particles = {}'.format(self.number_of_particles))
-                #I[radial_mask] += (1/np.sqrt(initial_n_particles)-1)*I00y00[radial_mask]
-                #I[I<0]=0
-                del(scaled_I)            
-                return I
-            
-        return particle_number_projection
-    
-    def generate_number_of_particles_porjection_gpu(self):
-        p_opt = settings.project.projections.reciprocal
-        zero_id = self.used_orders.get(0,'')
-        radial_mask=self.radial_mask[zero_id]
-        proj_matrices = self.projection_matrices
-        if p_opt.use_averaged_intensity:
-            I00 = np.abs(self.average_intensity.data.real)
-        else:
-            I00 = np.abs(proj_matrices[0].flatten().real)
-        I00y00=I00/(2*np.sqrt(np.pi))
-        N_space = p_opt.number_of_particles.scan_space
-        Ns = np.linspace(*N_space)
-        summands = (1/np.sqrt(Ns)-1)[:,None]*I00y00[None,radial_mask]
-        nsum=np.sum
-        n_pixels=np.prod(self.grid[radial_mask].shape)
-        estimate_n_particles = i_tools.estimate_number_of_particles
+        return 1
 
-
-        cld = Multiprocessing.load_openCL_dict()
-        cl = cld['cl']
-        ctx = cld['context']
-        queue = cld['queue']
-
-        kernel = cl.Program(ctx, """
-        __kernel void
-        count_negative(__global double* I, 
-        __global double* summands, 
-        __global double* neg_counts, 
-        long nN,long nq,long ntheta, long nphi)
-        {
-        
-        long N = get_global_id(0); 
-        long q = get_global_id(1); 
-        long theta = get_global_id(2); 
-        long phi = get_global_id(3); 
-        
-        // value stores the element that is 
-        // computed by the thread
-        double neg_count = 0;
-        for (int phi = 0; phi < nphi; ++phi)
-        {
-        double sum = I[q*ntheta*nphi+theta*nphi+phi] + summands[N*nq+q]; 
-        neg_count += (1.0-sum/fabs(sum)); // 2 if sum is negative, 0 else
-        }
-        // Write the matrix to device memory each 
-        // thread writes one element
-        neg_counts[N*nq*ntheta + q*ntheta + theta] = neg_count/2;
-        }    
-
-        __kernel void 
-        floatSum(__global float* inVector, __global float* outVector, const int inVectorSize,const long nN, __local float* resultScratch){
-        int N = get_global_id(0);
-        int gid = get_global_id(1);
-        int wid = get_local_id(0);
-        int wsize = get_local_size(0);
-        int grid = get_group_id(0);
-        int grcount = get_num_groups(0);
-    
-        int i;
-        int workAmount = inVectorSize/grcount;
-        int startOffest = workAmount * grid + wid;
-        int maxOffest = workAmount * (grid + 1);
-        if(maxOffset > inVectorSize){
-            maxOffset = inVectorSize;
-        }
-        resultScratch[nN*wsize + wid] = 0.0;
-        for(i=startOffest;i<maxOffest;i+=N*wsize){
-                resultScratch[N*wsize + wid] += inVector[N*wsize + i];
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-    
-        if(gid == 0){
-        for(i=1;i<wsize;i++){
-        resultScratch[0] += resultScratch[i];
-        }
-        outVector[grid] = resultScratch[0];
-        }
-
-        __kernel
-        void reduce(__global float* buffer,
-        __local float* scratch,
-        __const int length,
-        __global float* result) {
-        int global_index = get_global_id(0);
-        float accumulator = INFINITY;
-        // Loop sequentially over chunks of input vector
-        while (global_index < length) {
-        float element = buffer[global_index];
-        accumulator = (accumulator < element) ?
-        accumulator : element;
-        global_index += get_global_size(0);
-        }
-        // Perform parallel reduction
-        int local_id = get_local_id(0)
-        scratch[local_id]=accumulator;
-        barrier(CLK_LOCAL_MEM_FENCE);
-        
-        for(int offset = get_local_size(0)/2;
-        offset > 0;
-        offset = offset / 2) {
-        if (local_id<offset){
-        double other = scratch[local_id+offset];
-        double mine = scratch[local_id];
-        scratch[local_id]= (mine<other) ? mine : other;
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-        }
-        }
-    
-        sum_space(__global double* neg_count_phi, 
-        __global double* neg_count, 
-        long nN,long nq,long ntheta, long nphi)
-        {
-         // Get the index of the current element to be processed
-        int N = get_global_id(0);
-        int i = get_global_id(1)*2;
-        int locali = get_local_id(0);
-        int2 va = vload2(i, numbers);
-        int2 vb = vload2(i+1, numbers);
-        int2 vc = va + vb;
-        numReduce[locali] = vc[0] + vc[1];
-
-
-        long N = get_global_id(0); 
-        double sum = 0;
-        for (int q = 0; q < nq; ++q)
-        {
-        for (int theta = 0; theta < ntheta; ++theta)
-        {
-        sum +=neg_count_phi[N*nq*ntheta + q*ntheta + theta]
-        }
-        }
-        // value stores the element that is 
-        // computed by the thread
-        double neg_count = 0;
-        
-        double sum = I[q*ntheta*nphi+theta*nphi+phi] + summands[N*nq+q]; 
-        neg_counts[N] += (1.0-sum/fabs(sum)); // 2 if sum is negative, 0 else
-        
-        // Write the matrix to device memory each 
-        // thread writes one element
-         = neg_count/2;
-        }    
-        """).build()
-        count_negative = kernel.count_negative
-        sum_space = kernel.sum_space
-        
-        count_negative.set_scalar_arg_dtypes([None,None,None,np.int64,np.int64,np.int64,np.int64])
-        
-        local_range = None
-        nN = len(Ns)
-        nq, ntheta, nphi = self.grid[:].shape[:-1]
-        nq = np.sum(radial_mask)
-        global_range_count = (nN,nq,ntheta)
-        global_range_sum = (nN,)
-        neg_counts = np.zeros(nN,dtype = float)
-        I_mock = np.zeros((nq,ntheta,nphi),dtype = float)
-
-        mf = cl.mem_flags
-        summands_buff = cl.Buffer(ctx, mf.READ_ONLY | mf.COPY_HOST_PTR, hostbuf=np.ascontiguousarray(summands))
-        I_buff = cl.Buffer(ctx , mf.READ_WRITE, size=I_mock.nbytes)
-        out_buff = cl.Buffer(ctx , mf.READ_WRITE, size=neg_counts.nbytes)
-
-        def particle_number_projection(I):
-            #log.info('I shape = {} I dtype = {}'.format(I[radial_mask].shape,I.dtype))
-            start = time.time()
-            cl.enqueue_copy(queue,I_buff,np.ascontiguousarray(I[radial_mask].real))
-            count_negative(queue,global_range,local_range,I_buff,summands_buff,out_buff,nN,nq,ntheta,nphi)
-            cl.enqueue_copy(queue, out_buff,neg_counts)
-            log.info('GPU took {} seconds'.format(time.time()-start))
-            grad = np.gradient(neg_counts/n_pixels,Ns)        
-            inflection_id = np.argmax(grad)
-            self.number_of_particles = Ns[inflection_id]
-            #log.info('number of particles = {}'.format(self.number_of_particles))
-            I[radial_mask] = I[radial_mask]+summands[inflection_id,:,None,None]
-            I[I<0]=0
-            return I
-        return particle_number_projection
-
-
-
-
-    
-
-# particle number approximation and projection as described in
-# K. Pande et.al. PNAS 2018 'Ab initio structure determination from experimental fluctuation X-ray scattering data'
-def gnerate_estimate_particle_number(radial_grid,projection_matrices,used_orders):
-    '''
-    Particle number approximation
-    K. Pande et.al. PNAS 2018 'Ab initio structure determination from experimental fluctuation X-ray scattering data'
-    :param radial_grid: (N_q) shaped array of radial sampling points.
-    :type numpy.ndarray: 
-    :param projection_matrices: list of length (L_max+1) containing the $(N_q,min(2*l+1,N_q))$ shaped projection matrices $V_l$
-    :type list: of numpy.ndarrays
-    :param used_orders: dictionary linking the harmonic orders(as key) to their ids (as value) 
-    :type dict:  
-    :return N: estimated Number of particles for which the B_l coefficients where calculated.
-    :rtype float: 
-    '''
-    B_l = i_tools.projection_matrices_to_deg2_invariant_3d(projection_matrices)[1:]
-    B_l_diag = np.diagonal(B_l,axis1=-2,axis2=-1)
-    G = np.sum(B_l_diag**2*(radial_grid**2)[None,:])
-    B_l_diag_q2 = np.diagonal(B_l,axis1=-2,axis2=-1)*(radial_grid**2)[None,:]
-    calc_Bl=i_tools.spherical_harmonic_coefficients_to_deg2_invariant
-    order_ids = list(used_orders.values())
-    def estimate_particle_number(I_coeff):
-        B_l_guess = calc_Bl(I_coeff)[order_ids][1:]
-        B_l_guess_diag = np.diagonal(B_l_guess,axis1=-2,axis2=-1)                
-        N = G/np.sum(B_l_guess_diag*B_l_diag_q2)
-        log.info('Estimated number of particles = {}'.format(N))
-        return 1.0
-    return estimate_particle_number
-
-    
     
 #positions and point inversion projections
 def generate_fix_point_inversion(radial_low_pass = 0.1):

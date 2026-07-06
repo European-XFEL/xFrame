@@ -72,96 +72,16 @@ projections:
   real:
     projections:
       apply:
-        _value: [support,value_threshold,assert_real]
-      value_threshold:
-        _only_if:
-          x: apply
-          condition: '"value_threshold" in x'
-        threshold:
-          _value:
-            command: "[0,False]"
-        _description: "Asserts that the real part of a given density quess is in a bounded range. All values violating the bounds will be projected to the neares bound."
-      limit_imag:
-        _only_if:
-          x: apply
-          condition: '"limit_imag" in x'
-        threshold:
-          _value: 2
-        _description: 'Upper limit on the absolute value of the imaginary part in a given electron density. All violating imaginary parts will be caped.'
+        _value: [support_snr]
       support_snr:
         initial_volume:
           _value: 1e-24 # 10nm*10nm*10nm
         volume_step:
           _value: 1e-27 # 1nm*1nm*1nm
-        _description: 'New support constraint based on greedy Intensity selection for fixed volume and SNR optimization of the volume itself. No shrink wrap needed anymore.'
-      support:
-        _only_if:
-          x: apply
-          condition: '"support" in x'        
-        initial_support:
-          type:
-            _value: max_radius
-          max_radius:
-            _only_if:
-              x: type
-              condition: 'x == "max_radius"'
-            _value:
-              _copy: /particle_radius
-          auto_correlation:
-            _only_if:
-              x: type
-              condition: 'x == "auto_correlation"'
-            threshold:
-              _value: 0.01
-        enforce_initial_support:
-          _description: 'Allows to force the support projection to be confined within the initial support independend of the current shrink wrap support. Usage of this feature is regulated by a reconstruction error metric boundary.'
-          apply:
-            _value: True
-          if_error_bigger_than:
-            _value: 6e-3
-          delay:
-            _value: 0
-    shrink_wrap:
-      _description: 'Shrink wrap options.'
-      sigmas:
-        _description: 'Default standart deviation of the Gaussian kernel is constant during phasing and equal to the radial steplength of the chosen grid. Otherwise a linear ramp is defined via [start_value,[stop_value,n_shrink_wrap_iterations],slope]'
-        _value:
-          command: '[[False,[False,False],False],[False,[False,False],False]]'
-      thresholds:
-        _description: 'Cutoff value relative to the maximal value in the blurred density. Can be varied by defining a linear ramp, default is constant'
-        _value:
-          command: '[[0.08,[0,0],0],[0.08,[0,0],0]]'
-      force_connected:
-        _value: False
-    HIO:
-      beta:
-        _value:
-          command: '[[0.5,0.4,-1/700,1600],[0.01,0.002,-1/200,200]]' # start stop ,exponet and stop argument of natural exponetial decay
-        #command: '[0.5,0.5,-1/700,1600]' # start stop ,exponet and stop argument of natural exponetial decay
-        #command: '[0,0,-1/700,1500]' # start stop ,exponet and stop argument of natural exponetial decay
-      considered_projections:
-        _value:
-          command: '["all"]'   # by default all projections in projections.apply are used to generate ghe mask \gamma   
-        
-  reciprocal:
-    number_of_particles:
-      initial:
-        _value: 1.0
-      estimate:
-        _value: False
-        _description: Whether or not to try and estimate the number of particles during Phasing. NOT WORKING, CAUSES RECONSTRUCTION TO CRASH! 
-      settings:
-        _only_if:
-          x: estimate
-          condition: 'x'
-        project:
+        force_connected:
           _value: False
-        estimate_in:
-          _value:
-            command: '["ER"]'
-        scan_space:
-          _value:
-            command: '[1,20,40]'
+        _description: 'New support constraint based on greedy Intensity selection for fixed volume and SNR optimization of the volume itself. No shrink wrap needed anymore.'        
+  reciprocal:
     regrid:
       _description: 'Input projection matrices (Eigenvalues of deg2 invariants) are regridded onto the internal radial grid. The interpolation type can be specified below.'
       interpolation:
@@ -273,35 +193,24 @@ main_loop:
       _value: ['main','refinement']
     main:
       methods:
-        HIO:
+        duglas_rachford:
           iterations:
             _if:
               x: /dimensions
               condition: 'x==3'
               values: [60,90]
+          beta:
+            _value: 0.5
           ft_stab:
             _value: True
-        ER:
-          iterations:
-            _if:
-              x: /dimensions
-              condition: 'x==3'
-              values: [40,10]
-          ft_stab:
-            _value: True
-        SW:
-          _value: 1
       order:
         _value:
-          command: "['HIO','SW','ER']"
+          command: "['duglas_rachford']"
       iterations:
         _value: 5
-      best_density_not_in_first_n_iterations:
-        _value:
-          command: 'np.inf'
     refinement:
       methods:
-        ER:
+        error_reduction:
           iterations:
             _if:
               x: /dimensions
@@ -313,12 +222,9 @@ main_loop:
           _value: 1
       order:
         _value:
-          command: "['SW','ER']"
+          command: "['error_reduction']"
       iterations:
         _value: 2
-      best_density_not_in_first_n_iterations:
-        _value:
-          command: 'np.inf'
 GPU:
   use:
     _value: True
