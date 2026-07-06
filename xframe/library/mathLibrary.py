@@ -1262,50 +1262,59 @@ class SphericalIntegrator:
         self.n_r,self.n_theta,self.n_phi = grid.shape[:-1]
         self.grid = grid
         self.dr = grid[1,0,0,0]-grid[0,0,0,0]
+        self.rs = grid[:,0,0,0]
         self.max_r = grid[-1,0,0,0] + self.dr/2
         self.norm_angular = 4*np.pi
         self.norm = 4/3*np.pi*self.max_r**3
         self.gauss_weights = roots_legendre(self.n_theta)[1]
 
-    def __call__(self,values,normed=False):
-        s2_int = np.pi/self.n_theta*(np.sum(self.gauss_weights[None,:]*np.sum(values,axis=2),axis = 1))
-        r_int = np.sum(s2_int * (rs**2)*dr)
+    def __call__(self,values, normed=False):
+        rs_shape = rs.shape + (1,)*(values.ndim - 3)
+        w_shape = (1,) + w.shape + (1,)*(values.ndim - 3)        
+        s2_int = np.pi/self.n_theta*(np.sum(self.gauss_weights.reshape(w_shape)*np.sum(values,axis=-1),axis = 1))
+        r_int = np.sum(s2_int * (self.rs**2)*self.dr)
         if normed:
             r_int /=self.norm
         return r_int
+
+    def angular_only(self,values,normed=False):
+        w_shape = (1,) + w.shape + (1,)*(values.ndim - 3)        
+        s2_int = np.pi/self.n_theta*(np.sum(self.gauss_weights.reshape(w_shape)*np.sum(values,axis=-1),axis = 1))
+        if normed:
+            s2_int /=self.norm_angular
+        return s2_int
         
     def L2_norm(self,values):
         return self(values*values.conj())
     def get_volume_elements(self):
-        return np.pi/integrator.n_theta*((self.gauss_weights[None,:])*(rs)[:,None]**2*dr)
-    
+        return np.pi/self.n_theta*((self.gauss_weights[None,:])*(self.rs)[:,None]**2*self.dr)
+
 class PolarIntegrator():
     '''
     Assumes polar coordinate grid where r,phi are uniformely sampled.
+    But r is given at midpoint nodes
     Grid coords are (r,phi)
     '''
     def __init__(self,grid):
         self.n_r,self.n_phi = grid.shape[:-1]
         self.grid = grid
-        self.max_r = np.max(grid[:,0,0])
+        self.dr = grid[1,0,0]-grid[0,0,0]
+        self.rs = grid[:,0,0]
+        self.max_r = grid[-1,0,0] + self.dr/2
+        self.dphi = grid[0,1,1]-grid[0,0,1]
         self.norm = np.pi*self.max_r**2
-        self.integrate,self.integrate_normed = self.generate_integration_routines()
 
-    def generate_integration_routines(self):
-        rs = self.grid[:,0,0]
-        norm = self.norm
-        phis = self.grid[0,:,1]
-        def integrate(values):
-            rs_shape = rs.shape + (1,)*(values.ndim - 2)
-            s_int = np.trapz(values , x = phis,axis = 1)
-            r_int = np.trapz(s_int * rs.reshape(rs_shape) , x = rs,axis = 0)
-            return r_int
-        def integrate_normed(values):
-            return integrate(values)/norm
-        return integrate,integrate_normed
+    def __call__(self, values, norm=False):
+        rs_shape = self.rs.shape + (1,)*(values.ndim - 2)
+        s_int = np.sum(values*self.dphi,axis = 1)
+        r_int = np.sum(s_int * self.rs.reshape(rs_shape)*self.dr, axis = 0)
+        return r_int
+
     def L2_norm(self,values):
         return self.integrate(values*values.conj())
 
+    def get_volume_elements(self):
+        return self.rs*self.dr*self.dphi
 
 class RadialIntegrator():
     def __init__(self,radial_points,dimension):        

@@ -24,6 +24,27 @@ from xframe import Multiprocessing
 
 log=logging.getLogger('root')
 
+class RealProjectionSNR:
+    def __init__(self,opt,metadata):
+        self.real_grid = metadata['real_grid']
+        self.opt = opt
+        dim = self.real_grid.shape[-1]
+        if dim == 2:
+            self.integrator = PolarIntegrator(self.real_grid)
+        elif dim ==3:
+            self.integrator = PolarIntegrator(self.real_grid)
+        else:
+            raise ValueError(f'Only 2 and 3 Dimensional grids are  supported, given grid dim is {self.real_grid.shape[-1]}.')
+
+        self.vol_elements = self.integrator.get_volume_elements()
+        self.vol = opt['support_snr'].get('initial_volume',np.max(vol_elements))
+        self.step_size = opt['support_snr'].get('volume_step',10*np.max(self.vol_elements))
+        self.vol_history == []
+
+    def __call__(density):
+        
+        pass
+    
 class RealProjection:
     # collection of possible real constraints
     # generation routine of a real_constraint function has to be named generate_<name>_projection
@@ -192,8 +213,8 @@ def generate_initial_support_mask(opt,realGrid,projection):
 
 
 class ShrinkWrapParts():
-    def __init__(self,real_grid,reciprocal_grid,initial_support,options = {}):# threshold = 0.04,gaussian_sigma = 2,mode = 'threshold',mode_options = {}):
-        self.mode_routines = {'threshold':self.generate_get_new_mask_threshold,'fixed_volume':self.generate_get_new_mask_fixed_volume}
+    def __init__(self,real_grid,reciprocal_grid,initial_support,options = {}):
+        self.mode_routines = {'threshold':self.generate_get_new_mask_threshold}
 
         mode = options.get('mode','threshold')
         mode_options = options.get(mode,{})
@@ -215,12 +236,7 @@ class ShrinkWrapParts():
         self.real_grid = real_grid[:]
         self.reciprocal_grid = reciprocal_grid[:]
         dimension = self.real_grid.shape[-1]
-        if dimension ==2:
-            self.integrator = PolarIntegrator(self.real_grid)
-        elif dimension == 3:
-            self.integrator = SphericalIntegrator(self.real_grid)
         self.initial_support = initial_support
-        self.initial_volume = self.integrator.integrate_normed(initial_support.astype(float))
         
         self._threshold = [threshold]
         self._gaussian_sigma = [gaussian_sigma]
@@ -280,39 +296,6 @@ class ShrinkWrapParts():
             return new_mask
         return get_new_mask
     
-    def generate_get_new_mask_fixed_volume(self):
-        try:
-            target_volume = self.initial_volume*self.mode_options['volume'] # number in [0,1] indication volume fraction relative to self.initial_volume
-        except KeyError as e:
-            log.error('selected ShrinkWrap mode "fixed_volume" but no volume was specified in mode options {}'.format(self.mode_options))
-            raise e
-        integrate = self.integrator.integrate_normed
-        old_volume = [self.initial_volume]
-        d_vol_thresh = 0.2
-        def get_new_mask(convolution_data):
-            convolution_data=convolution_data.real
-            max_value= convolution_data.real.max()
-            min_value= convolution_data.real.min()
-            diff = max_value-min_value
-            def new_volume(threshold):
-                new_mask = (convolution_data >= min_value + threshold*diff) & self.initial_support
-                _vol = integrate(new_mask.astype(float))
-                metric = abs(_vol-target_volume)
-                rate_of_change = abs(old_volume[0] - _vol)/old_volume[0]
-                #log.info('rate_of_change = {} threshold = {}'.format(rate_of_change,threshold))
-                if rate_of_change>d_vol_thresh:
-                    metric = np.inf
-                return metric
-            opti_result = minimize_scalar(new_volume,bounds=(0.0,1.0),method='golden')
-            threshold = opti_result.x
-            log.info('Optimization result = {}'.format(opti_result))
-            new_mask = (convolution_data >= min_value + threshold*diff) & self.initial_support
-            new_volume = integrate(new_mask.astype(float))
-            log.info(f'old volume = {old_volume[0]} new volume = {new_volume}, target_volume={target_volume}')
-            old_volume[0] = new_volume
-            return new_mask
-        return get_new_mask
-
     
     def generate_multiply_by_ft_gaussian(self):
         gaussian_values = self.gaussian_values

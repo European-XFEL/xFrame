@@ -1226,13 +1226,13 @@ class MTIP:
                 #log.info('it is called really')
                 density = guessed_density_function(real_grid)
                 #scale density to projection data
-                total_squared_density = integrator.integrate((density*density.conj()).real)
+                total_squared_density = integrator((density*density.conj()).real)
                 #log.info("total squared density = {}".format(total_squared_density))
                 #log.info("total intensity = {}".format(total_intensity))                
                 density*=np.sqrt(total_intensity/total_squared_density)
                 if data_type == 'complex':
                     density = density.astype(complex)
-                #log.info('initial total density = {}'.format(integrator.integrate(density**2)))
+                #log.info('initial total density = {}'.format(integrator(density**2)))
                 return density
         elif density_type=='bump':
             if radius<0:
@@ -1245,7 +1245,7 @@ class MTIP:
                 density = A*bump_func(real_grid[...,0])
                 #density = bump_func(real_grid[...,0])
                 #log.info(density[:,0,0])
-                total_squared_density = integrator.integrate((density*density.conj()).real)
+                total_squared_density = integrator((density*density.conj()).real)
                 density*=np.sqrt(total_intensity/total_squared_density)
                 #ft_density = ft(density.astype(complex))
                 #m = ft_density !=0
@@ -1282,7 +1282,7 @@ class MTIP:
                 density = low_res_density_guess*A
                 density[density<0]=0
                 density*=bump_func(real_grid[...,0])
-                total_squared_density = integrator.integrate((density*density.conj()).real)
+                total_squared_density = integrator((density*density.conj()).real)
                 density*=np.sqrt(total_intensity/total_squared_density)
                 return density
         else:

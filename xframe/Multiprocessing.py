@@ -28,8 +28,7 @@ import traceback
 import numpy as np
 from xframe import settings
 
-#multiprocessing.set_start_method('spawn')
-
+multiprocessing.set_start_method('fork')
 #xprint(f"main process pid = {multiprocessing.current_process().pid}")
 
 sa = SharedArrayDependency #will be dependency injected with SharedArray module

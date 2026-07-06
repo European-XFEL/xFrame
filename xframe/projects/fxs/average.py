@@ -155,23 +155,21 @@ class ProjectWorker(ProjectWorkerInterface):
             
     def compute_resolution_metrics(self,results):
         ft = self.averager.fourier
-        angular_axes = tuple(i for i in range(-1,-ft.dimensions,-1))
         main_res = results[0][0]
         rmean = np.abs(ft.forward_cmplx(main_res[0].mean)).real**2
         qmean = np.abs(main_res[1].mean).real**2
         var = main_res[1].variance
         
         integrator = SphericalIntegrator(ft.real_grid)
-        integrate = integrator.integrate_normed
-        integrate_angular = integrator.integrate_angular_normed
-        mean_std_integrated_progression = np.array([ integrate(res[0].mean.real/np.sqrt(np.abs(res[0].variance).real)) for res in results[2] ])
+        mean_std_integrated_progression = np.array([integrator(res[0].mean.real/np.sqrt(np.abs(res[0].variance).real),normed = True) for res in results[2]])
         progression_counts = np.array([res[0].count for res in results[2]])
 
         print("yay new PRTFS")
-        PRTF1 = integrate_angular(np.sqrt(qmean/(var+qmean)))
-        PRTF2 = integrate_angular(np.sqrt(rmean/(var+rmean)))
+        PRTF1 = integrator.angular_only(np.sqrt(qmean/(var+qmean)),normed = True)
+        PRTF2 = integrator.angular_only(np.sqrt(rmean/(var+rmean)),normed = True)
         metrics = {"PRTF":PRTF2,"PRTF_from_scattering_amplitude":PRTF1,'mean_std_integrated_progression':mean_std_integrated_progression,'progression_counts':progression_counts}
         return metrics
+    
     def post_processing(self,results):
         var_objects = results[0][0]
         resolution_metrics_dict = self.compute_resolution_metrics(results)
