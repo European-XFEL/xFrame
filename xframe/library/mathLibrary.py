@@ -1269,8 +1269,7 @@ class SphericalIntegrator:
         self.gauss_weights = roots_legendre(self.n_theta)[1]
 
     def __call__(self,values, normed=False):
-        rs_shape = rs.shape + (1,)*(values.ndim - 3)
-        w_shape = (1,) + w.shape + (1,)*(values.ndim - 3)        
+        w_shape = (1,) + self.gauss_weights.shape + (1,)*(values.ndim - 3)        
         s2_int = np.pi/self.n_theta*(np.sum(self.gauss_weights.reshape(w_shape)*np.sum(values,axis=-1),axis = 1))
         r_int = np.sum(s2_int * (self.rs**2)*self.dr)
         if normed:

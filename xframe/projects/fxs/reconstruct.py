@@ -4,8 +4,8 @@ import sys
 import os
 import numpy as np
 import traceback
-import inspect
 import abc
+from dataclasses import dataclass
 from numpy.typing import NDArray
 
 from xframe import settings
@@ -15,13 +15,16 @@ from xframe.library.pythonLibrary import (DictNamespace,
                                           xprint)
 from .projectLibrary.misk import _get_reciprocity_coefficient
 from xframe.interfaces import ProjectWorkerInterface
-from xframe.library.math_transforms import HankelTransformWeights,SphericalFourierTransform,SphericalFourierTransformStruct
-from xframe.libray.mathLibrary import (PolarIntegrator,
+from xframe.library.math_transforms import (HankelTransformWeights,
+                                            HankelWeightStruct,
+                                            SphericalFourierTransform,
+                                            SphericalFourierTransformStruct)
+from xframe.library.mathLibrary import (PolarIntegrator,
                                        SphericalIntegrator,
                                        SampleShapeFunctions,
                                        get_test_function)
 from .projectLibrary.fxs_Projections import RealProjectionSNR,ReciprocalProjection
-from .projectLibrary.fxs_IO_methods import generate_error_routines
+from .projectLibrary.fxs_IO_methods import generate_error_routines,generate_main_error_routine
 log=logging.getLogger('root')
 
 opt = None
@@ -168,7 +171,7 @@ class MTIP:
 
     @classmethod
     def preinit(cls,init_data = None):
-        ''' 
+        '''
         This Method prepares needed quantities which require multiprocessing that are equal for all MTIP instances before __init__ is called in a multi process environment. This is currently done only to preload the fourier transform weights.
         '''
         if init_data is None:
@@ -237,15 +240,52 @@ class MTIP:
         
         self.fourier_trf,self.harmonic_trf,self.grid_pair = self.assemble_transform_op_and_grid()
         self.max_order = self.harmonic_trf.max_order
-        self.inv_proj = ReciprocalProjection(self.grid_pair['reciprocal'],self.mtip_data,max_order)
-        self.real_proj =  RealProjectionSNR(opt.projections.real.projections,real_grid)
+        self.inv_proj = ReciprocalProjection(self.grid_pair['reciprocal'],self.mtip_data,self.max_order)
+        self.real_proj =  RealProjectionSNR(opt.projections.real.projections,self.fourier_trf.real_grid)
         self.error_routines = self.assemble_error_routines()
+        self.main_error_routine = generate_main_error_routine(self.opt.main_loop.error.methods.main.metrics,
+                                                         self.opt.main_loop.error.methods.main.type)
         self.op_dict = {"fourier_transform":self.fourier_trf,
                         "harmonic_transform":self.harmonic_trf,
                         "invariant_projection":self.inv_proj,
                         "real_projection": self.real_proj}
+        
+        self.phasing_sketch = self.get_phasing_sketch()
 
-        self.step_instances = self.get_step_instances() 
+    def assemble_transform_op_and_grid(self):
+        max_q = self.max_q
+        max_q_is_set =  isinstance(max_q,float) or (isinstance(max_q,int) and (not isinstance(max_q,bool)))
+        if not max_q_is_set:
+            self.max_q = max_q = self.data_q_limits[1]
+        Nr,Nq = HankelTransformWeights._read_n_points(opt.grid.n_radial_points)
+        
+        harmonic_transform_opt = { i:opt.grid.get(i,0) for i in ['n_phi','n_theta']}
+        max_nonzero_r = opt.grid.max_nonzero_r
+        if max_nonzero_r is None:
+            r_support = None
+        else:
+            r_support =  opt.particle_radius*max_nonzero_r
+
+
+        weights = self.fourier_transform_weights
+        struct = self.preinit_fourier_struct
+        struct.max_q = max_q
+        struct.max_nonzero_r = r_support
+        struct.use_gpu = opt.GPU.use
+        if 'n_phi' in harmonic_transform_opt:
+            struct.n_polar_angles = harmonic_transform_opt['n_phi']
+        if 'n_theta' in harmonic_transform_opt:
+            struct.n_azimutal_angles = harmonic_transform_opt['n_theta']
+
+        sft = SphericalFourierTransform(struct,weights = weights)
+
+        if self.dimensions == 2:
+            bandwidth = self.fourier_transform_weights['bandwidth']
+            ht =  get_harmonic_transform(bandwidth, dimensions = dimensions, options=harmonic_transform_opt) 
+        elif self.dimensions == 3:
+            ht = sft.harm
+        grid_pair = {'real':sft.real_grid,'reciprocal':sft.reciprocal_grid}
+        return sft,ht,grid_pair
     
     def assemble_error_routines(self):
         grid_pair = self.grid_pair
@@ -255,7 +295,6 @@ class MTIP:
         used_orders = rp.used_orders
         xray_wavelength = self.mtip_data['xray_wavelength']
         invariant_mask = rp.radial_mask[:,:,None] * rp.radial_mask[:,None,:]
-        initial_mask = self.projection_objects['real'].initial_support
         error_routines = generate_error_routines(error_opt,
                                                  grid_pair,
                                                  deg2_invariants = deg2_invariants,
@@ -265,28 +304,41 @@ class MTIP:
                                                  invariant_mask = invariant_mask,
                                                  xray_wavelength = xray_wavelength)
         return error_routines
+    
+    def init_error_dict(self):
+        error_names = self.opt.main_loop.error.methods
+        err_dict = {}
+        err_dict['real'] = {name:[] for name in error_names['real']['calculate']}        
+        err_dict['reciprocal'] = {name:[] for name in error_names['reciprocal']['calculate']}        
+        err_dict['main'] = []
+        return err_dict
 
-    def get_step_instances(self):
-        step_instances = {}
-        for loop_name,lopt in self.opt.sub_loops.items():
-            step_instances[loop_name]={}
-            for method_name, mopt in lopt.items():
+    def get_phasing_sketch(self):
+        phasing_sketch = {}
+        opt = self.opt.main_loop.sub_loops
+        loop_names = opt.order
+        for loop_name in loop_names:
+            loop_opt = opt[loop_name]
+            phasing_sketch[loop_name]=({},loop_opt.iterations)
+            method_names = loop_opt.order
+            for method_name in method_names:
+                mopt = loop_opt.methods[method_name]
                 camel_name = snake_to_camel_simple(method_name)
                 method_cls = globals().get(camel_name,None) 
                 if method_cls is not None:
                     method = method_cls(self.op_dict,mopt)
-                    step_instances[loop_name][method_name]=method
+                    phasing_sketch[loop_name][0][method_name]=(method,mopt.iterations)
                 else:
                     raise ValueError(f"Class '{camel_name}' for method '{method_name}' does not exist.")
-        return step_instances    
+        return phasing_sketch
     def create_initial_density(self):
         opt=settings.project.density_guess
-        real_grid = self.grid_pair["real_grid"]
-        if density_guess_specifier['amplitude_function']=='random':
+        real_grid = self.grid_pair["real"]
+        if opt['amplitude_function']=='random':
             def amplitude_function(points):
                 np.random.seed(int.from_bytes(os.urandom(4), byteorder='little'))
                 return 1+1/opt.random.SNR*np.random.rand(*points.shape[:-1])
-        radius = density_guess_specifier['radius']
+        radius = opt['radius']
         if isinstance(radius,bool):
             radius = settings.project.particle_radius
 
@@ -321,8 +373,57 @@ class MTIP:
         else:
             raise ValueError(f"Initial density type '{opt["type"]}' is unknown.")    
         return density
+    def create_initial_state(self):
+        density = self.create_initial_density()
+        ft_density = self.fourier_trf.forward_cmplx(density)
+        error_dict = self.init_error_dict()
+        state = PhasingState(density_history=[None,density],
+                             ft_density_history=[None,ft_density],
+                             error_dict=error_dict,
+                             initial_density=density.copy(),
+                             volume_history = [self.real_proj.vol])
+        return state
+    def update_errors(self,state):
+        real = self.error_routines["real"][0](state.density,state.intermediate_density)
+        reciprocal = self.error_routines["reciprocal"][0](state.ft_density,
+                                                       state.ft_density_history[-2],
+                                                       state.intensity_harmonic_coefficients)
+        errs = state.error_dict
+        for key,val in real.items():
+            errs["real"][key].append(val)
+        for key,val in reciprocal.items():
+            errs["reciprocal"][key].append(val)
+        main_error = self.main_error_routine(errs)
+        errs['main'].append(main_error)
+        state.error_dict = errs
+        
+    def do_phasing(self):
+        state = self.create_initial_state()
+        lopt = self.opt.main_loop
+        update_errors = self.update_errors
+        
+        for loop_name,(loop,n) in self.phasing_sketch.items():
+            for i in range(n):
+                for method_name,(step,m) in loop.items():
+                    for j in range(m):
+                        # Run optimization step
+                        state = step(state)
+                    
+                        # update_some parametrs
+                        state.iteration += 1
+                        state.volume_history.append(self.real_proj.vol)
+                        update_errors(state)
 
-    
+                # Print output 
+                xprint('P{}:  Loop:{} Part:{} Method:{} Main Error: {} \n volume = {}, max_density={}'.format(Multiprocessing.get_process_name(),
+                                                                                                      state.iteration+1,
+                                                                                                      loop_name,
+                                                                                                      method_name,
+                                                                                                      state.error_dict['main'][-1],
+                                                                                                      state.volume_history[-1],
+                                                                                                      np.max(state.density)))
+        return state
+   
 def snake_to_camel_simple(name: str) -> str:
     parts = name.split("_")
     return "".join(part.capitalize() for part in parts)
@@ -339,15 +440,49 @@ def create_step_instances(kwargs):
             instances[camel_to_snake_simple(cls.__name__)]=cls(kwargs)
 
     return instances
-        
+
+def load_fourier_transform_weights(struct:HankelWeightStruct=HankelWeightStruct(),allow_weight_saving = False):
+    db = database.project
+    log.info(f'ft name postfix = {struct.weight_name}')
+    try:
+        weights_dict = db.load('ft_weights',path_modifiers={'name':struct.weight_name})
+    except FileNotFoundError as e:
+        weights_dict = HankelTransformWeights.get_weights_dict(struct)
+        if allow_weight_saving:
+            db.save('ft_weights',weights_dict,path_modifiers={'name':struct.weight_name})                    
+    return weights_dict
         
 @dataclass
 class PhasingState:
-    density:NDArray = np.array([])
-    ft_density:NDAppay = np.array([])
+    initial_density:NDArray = None
+    density_history:list = None
+    ft_density_history:list = None
+    intermediate_density:NDArray= None # After inv constraint before real constraint
+    intensity_harmonic_coefficients:NDArray = None # harmonic coefficients of |ft_density|^2
     iteration:int = 0
-    error_dict: dict = {}
+    error_dict: dict = None
+    volume_history:list = None
+    custom_outputs:dict = None
 
+    @property
+    def density(self):
+        return self.density_history[-1]
+    @density.setter
+    def density(self,value):
+        self.density_history.pop(0)
+        self.density_history.append(value)
+        self._density = self.density_history[-1]
+        
+    @property
+    def ft_density(self):
+        return self.ft_density_history[-1]
+    @ft_density.setter
+    def ft_density(self,value):
+        self.ft_density_history.pop(0)
+        self.ft_density_history.append(value)
+        self._ft_density = self.ft_density_history[-1]
+
+    
 class StepBase(abc.ABC):
     @abc.abstractmethod
     def __call__(self,state:PhasingState)->PhasingState:
@@ -362,7 +497,7 @@ class DuglasRachford(StepBase):
         self.ht = operators["harmonic_transform"]
         self.real_proj  = operators["real_projection"]
         self.inv_proj  = operators["invariant_projection"]
-        self.tmp_intensity = self.ft.empty_density()
+        self.tmp_intensity = np.zeros(self.ft.reciprocal_grid.shape[:-1],complex)
         self.ft_stab = opt.ft_stab
         
     def p1(self,density):
@@ -370,34 +505,38 @@ class DuglasRachford(StepBase):
         ft,ht,inv_proj = self.ft,self.ht,self.inv_proj
     
         ft_d = ft.forward_cmplx(density)
-        np.mult(data,data.conj(),out = self.tmp_intensity)
+        np.multiply(ft_d,ft_d.conj(),out = self.tmp_intensity)
         coeff = ht.forward_cmplx(self.tmp_intensity)        
         unknown_U = inv_proj.approximate_unknowns(coeff)
         new_coeff = inv_proj.mtip_projection(coeff,unknown_U)
         new_I = ht.inverse_cmplx(new_coeff)
         
         old_I_from_coeff = ht.inverse_cmplx(coeff)
-        new_ft_d = inv_proj.project_to_fixed_intensity(ft_d,
-                                                       self.tmp_intensity,
-                                                       old_I_from_coeff,
-                                                       new_I)
+        new_ft_d = inv_proj.project_to_modified_intensity(ft_d,
+                                                          self.tmp_intensity,
+                                                          old_I_from_coeff,
+                                                          new_I)
         new_density = ft.inverse_cmplx(new_ft_d)
         if self.ft_stab:
             ft_error = density-ft.inverse_cmplx(ft_d)
             new_density += ft_error
-        return new_density,new_ft_d
+        return new_density,new_ft_d,new_coeff
         
     def __call__(self,state:PhasingState)->PhasingState:
         d = state.density
         
-        d1,ft_d1 = self.p1(d)
-        
+        d1,ft_d1,new_coeff = self.p1(d)
+        state.intermediate_density = d1
+        state.intensity_harmonic_coefficients = new_coeff
         d2 = self.real_proj((self.beta+1)*d1-d)
-        state.density[...] = d+d2-beta*d1
+        new_density =  d+d2-self.beta*d1
+        new_density.imag = 0
+        new_density[new_density<0]=0
+        state.density[...] = new_density
         state.ft_density[...] = ft_d1
+        
         return state
-
-
+    
 class ErrorReduction(StepBase):
     def __init__(self,operators,opt):
         self.operators = operators
@@ -405,35 +544,34 @@ class ErrorReduction(StepBase):
         self.ht = operators["harmonic_transform"]
         self.real_proj  = operators["real_projection"]
         self.inv_proj  = operators["invariant_projection"]
-        self.tmp_intensity = self.ft.empty_density()
+        self.tmp_intensity = np.zeros(self.ft.reciprocal_grid.shape[:-1],complex)
         self.ft_stab = opt.ft_stab
     def p1(self,density):
         "apply invariant constarint"
         ft,ht,inv_proj = self.ft,self.ht,self.inv_proj
-    
         ft_d = ft.forward_cmplx(density)
-        np.mult(data,data.conj(),out = self.tmp_intensity)
+        np.multiply(ft_d,ft_d.conj(),out = self.tmp_intensity)
         coeff = ht.forward_cmplx(self.tmp_intensity)        
         unknown_U = inv_proj.approximate_unknowns(coeff)
         new_coeff = inv_proj.mtip_projection(coeff,unknown_U)
         new_I = ht.inverse_cmplx(new_coeff)
-        
         old_I_from_coeff = ht.inverse_cmplx(coeff)
-        new_ft_d = inv_proj.project_to_fixed_intensity(ft_d,
-                                                       self.tmp_intensity,
-                                                       old_I_from_coeff,
-                                                       new_I)
+        new_ft_d = inv_proj.project_to_modified_intensity(ft_d,
+                                                          self.tmp_intensity,
+                                                          old_I_from_coeff,
+                                                          new_I)
         new_density= ft.inverse_cmplx(new_ft_d)
-        
         if self.ft_stab:
             ft_error = density-ft.inverse_cmplx(ft_d)
             new_density += ft_error
-        return new_density,new_ft_d
+        return new_density,new_ft_d,new_coeff
         
     def __call__(self,state:PhasingState)->PhasingState:
         d = state.density
         
-        d1,ft_d1 = self.p1(d)
+        d1,ft_d1,new_coeff = self.p1(d)
+        state.intermediate_density = d1
+        state.intensity_harmonic_coefficients = new_coeff
         
         state.density = self.real_proj(d1)
         state.ft_density[...] = ft_d1

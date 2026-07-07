@@ -112,10 +112,10 @@ def get_integrator(dim,grid):
 def generate_fxs_error_routine(grid_pair,opt):
     reciprocal_grid = grid_pair['reciprocal']
     dim=reciprocal_grid.shape[-1]
-    integrate = get_integrator(dim,reciprocal_grid).integrate_normed
+    integrate = get_integrator(dim,reciprocal_grid)
     def error_routine(intensity,projected_intensity):
-        diff_norm = integrate(np.square(np.abs(intensity-projected_intensity)))
-        proj_norm = integrate(np.square(np.abs(projected_intensity)))
+        diff_norm = integrate(np.square(np.abs(intensity-projected_intensity)),normed = True)
+        proj_norm = integrate(np.square(np.abs(projected_intensity)),normed = True)
         error = diff_norm/proj_norm
         return error
     return error_routine
@@ -130,7 +130,7 @@ def generate_l2_rel_diff_error_routine(grid_pair,_type='real',mask = True):
         pair_id = 1
         power = 2
     dim=grid.shape[-1]
-    integrate = get_integrator(dim,grid).integrate
+    integrate = get_integrator(dim,grid)
 
     nabs = np.abs
     nsquare = np.square
@@ -164,7 +164,7 @@ def generate_l2_rel_diff_error_routine_cache_aware(grid_pair,L2_cache,_type='rea
         pair_id = 1
         power = 2
     dim=grid.shape[-1]
-    integrate = get_integrator(dim,grid).integrate
+    integrate = get_integrator(dim,grid)
 
     nabs = np.abs
     nsquare = np.square
@@ -242,7 +242,7 @@ def generate_l2_rel_diff_error_routine_gpu(grid_pair,_type='real'):
         pair_id = 1
         power = 2
     dim=grid.shape[-1]
-    integrate = get_integrator(dim,grid).integrate
+    integrate = get_integrator(dim,grid)
 
     nabs = np.abs
     nsquare = np.square
@@ -717,7 +717,7 @@ error_generators={'real':
                   {'l2_projection_diff':generate_real_l2_rel_diff_error_routine,
                    'support_size':generate_support_size
                    },
-                  'reciprocal':{                  
+                  'reciprocal':{
                       'l2_projection_diff':generate_reciprocal_l2_rel_diff_error_routine,
                       'deg2_invariant_l2_diff':generate_deg2_invariant_l2_diff,
                       'ccd_diff':generate_ccd_diff,

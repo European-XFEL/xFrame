@@ -148,7 +148,7 @@ main_loop:
             x: calculate
             condition: '"l2_projection_diff" in x'
           inside_initial_support:
-            _value: True
+            _value: False
       reciprocal:
         calculate:
           _value: []
@@ -157,7 +157,7 @@ main_loop:
             x: calculate
             condition: '"l2_projection_diff" in x'
           inside_initial_support:
-            _value: True
+            _value: False
         deg2_invariant_l2_diff:
           _only_if:
             x: calculate

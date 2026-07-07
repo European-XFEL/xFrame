@@ -614,7 +614,6 @@ class HankelTransform:
                     'local_range' : None
                 },)
             }
-        
         forward_gpu_process =  Multiprocessing.openCL_plugin.ClProcess(kernel_dict_forward)
         inverse_gpu_process =  Multiprocessing.openCL_plugin.ClProcess(kernel_dict_inverse)
 

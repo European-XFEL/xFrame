@@ -5,7 +5,7 @@ import logging
 
 from xframe.library.pythonLibrary import DictNamespace
 from xframe.library.physicsLibrary import spherical_formfactor
-from xframe.library.gridLibrary import NestedArray,GridFactory
+from xframe.library.gridLibrary import NestedArray,GridFactory,ReGrider
 from xframe.library.mathLibrary import PolarIntegrator,SphericalIntegrator,distance_from_line_2d,midpoint_rule
 from xframe.library.mathLibrary import spherical_to_cartesian
 
@@ -18,8 +18,8 @@ from xframe import settings
 log=logging.getLogger('root')
 
 class RealProjectionSNR:
-    def __init__(self,opt,metadata):
-        self.real_grid = metadata['real_grid']
+    def __init__(self,opt,real_grid):
+        self.real_grid = real_grid
         self.opt = opt
         dim = self.real_grid.shape[-1]
         if dim == 2:
@@ -28,22 +28,24 @@ class RealProjectionSNR:
             self.integrator = SphericalIntegrator(self.real_grid)
         else:
             raise ValueError(f'Only 2 and 3 Dimensional grids are  supported, given grid dim is {self.real_grid.shape[-1]}.')
-
+        
+        self.master_mask = real_grid[:,:,:,0] < 275
         self.vol_elements = self.integrator.get_volume_elements()
         self.vol = opt['support_snr'].get('initial_volume',np.max(self.vol_elements))
         self.step_size = opt['support_snr'].get('volume_step',10*np.max(self.vol_elements))
         self.support = np.zeros(self.vol_elements.shape,bool)
-        self.force_connected = opt['force_connected']
+        self.force_connected = opt['support_snr']['force_connected']
         
     def __call__(self,density):
         d = (np.abs(density)**2*self.vol_elements[...,None]).ravel()
         order = d.argsort()[::-1]
+        order = order[self.master_mask.ravel()[order]]
         order_3d = np.unravel_index(order,density.shape)
         c_volume = np.cumsum(self.vol_elements[order_3d[0],order_3d[1]])
 
         
         n,v,s = len(order),self.vol,self.step_size
-        stop_ids = [ 
+        stop_ids = [
                      np.searchsorted(c_volume, max(v-s,0), side='right'),
                      np.searchsorted(c_volume, v, side='right'),
                      np.searchsorted(c_volume, min(v+s,n-1), side='right')
@@ -61,14 +63,15 @@ class RealProjectionSNR:
         best = np.argmax(contrast_metric)
         volume_change = [-s,0,s]
 
-        support_mask = np.ones(density.shape,bool)
+        support_mask = np.zeros(density.shape,bool)
         new_v = int(min(max(v+volume_change[best],0),n))
-        support_mask.ravel()[order[:new_v]] = False
+        support_mask.ravel()[order[:new_v]] = True
         if self.force_connected:
             connected_components,_ = ndimage.label(support_mask)
             component_names,counts = np.unique(connected_components[connected_components>0],return_counts=True)
             largest_component_id = np.argmax(counts)
             support_mask = (connected_components == component_names[largest_component_id])
+        support_mask = self.master_mask
         self.support = support_mask
         density[~support_mask]=0
         density.imag = 0
