@@ -25,8 +25,8 @@ projections:
       apply:
       - support_snr
       support_snr:
-        initial_volume: 100000
-        volume_step: 10000
+        initial_volume: 1e6
+        volume_step: 25000
         force_connected: False        
   reciprocal:
     use_averaged_intensity: true
@@ -56,9 +56,10 @@ main_loop:
     main:
       methods:
         duglas_rachford:
-          iterations: 10
+          iterations: 20
           ft_stab: true
-      iterations: 0
+          beta: 1
+      iterations: 3
       order:
         - duglas_rachford
     refinement:
@@ -66,6 +67,6 @@ main_loop:
         error_reduction:
           iterations: 10
           ft_stab: false
-      iterations: 2
+      iterations: 0
       order:
         - error_reduction

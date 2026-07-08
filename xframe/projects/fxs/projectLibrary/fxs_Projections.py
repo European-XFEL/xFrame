@@ -29,7 +29,7 @@ class RealProjectionSNR:
         else:
             raise ValueError(f'Only 2 and 3 Dimensional grids are  supported, given grid dim is {self.real_grid.shape[-1]}.')
         
-        self.master_mask = real_grid[:,:,:,0] < 275
+        self.master_mask = real_grid[:,:,:,0] < 220
         self.vol_elements = self.integrator.get_volume_elements()
         self.vol = opt['support_snr'].get('initial_volume',np.max(self.vol_elements))
         self.step_size = opt['support_snr'].get('volume_step',10*np.max(self.vol_elements))
@@ -37,9 +37,9 @@ class RealProjectionSNR:
         self.force_connected = opt['support_snr']['force_connected']
         
     def __call__(self,density):
-        d = (np.abs(density)**2*self.vol_elements[...,None]).ravel()
+        d = (np.abs(density)**2).ravel() #*self.vol_elements[...,None]).ravel()
         order = d.argsort()[::-1]
-        order = order[self.master_mask.ravel()[order]]
+        #order = order[self.master_mask.ravel()[order]]
         order_3d = np.unravel_index(order,density.shape)
         c_volume = np.cumsum(self.vol_elements[order_3d[0],order_3d[1]])
 
@@ -51,8 +51,9 @@ class RealProjectionSNR:
                      np.searchsorted(c_volume, min(v+s,n-1), side='right')
                    ]
 
-        med1,med2,med3 = [d[order[s//2]] for s in stop_ids]
-        max1,max2,max3 = [d[order[max(s-1,0)]] for s in stop_ids]
+        dd = np.abs(density.ravel())
+        med1,med2,med3 = [dd[order[s//2]] for s in stop_ids]
+        max1,max2,max3 = [dd[order[min(s+1,n-1)]] for s in stop_ids]
 
         contrast_metric = np.array([
                                     (med1-max1)/med1,

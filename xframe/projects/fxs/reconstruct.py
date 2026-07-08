@@ -512,10 +512,11 @@ class DuglasRachford(StepBase):
         new_I = ht.inverse_cmplx(new_coeff)
         
         old_I_from_coeff = ht.inverse_cmplx(coeff)
-        new_ft_d = inv_proj.project_to_modified_intensity(ft_d,
-                                                          self.tmp_intensity,
-                                                          old_I_from_coeff,
-                                                          new_I)
+        #new_ft_d = inv_proj.project_to_modified_intensity(ft_d,
+        #                                                  self.tmp_intensity,
+        #                                                  old_I_from_coeff,
+        #                                                  new_I)
+        new_ft_d = np.where(self.tmp_intensity!=0,ft_d/np.sqrt(self.tmp_intensity)*np.sqrt(new_I),np.sqrt(new_I))
         new_density = ft.inverse_cmplx(new_ft_d)
         if self.ft_stab:
             ft_error = density-ft.inverse_cmplx(ft_d)
@@ -529,9 +530,11 @@ class DuglasRachford(StepBase):
         state.intermediate_density = d1
         state.intensity_harmonic_coefficients = new_coeff
         d2 = self.real_proj((self.beta+1)*d1-d)
+        d2.imag = 0
+        d2[d2<0]=0
+        
         new_density =  d+d2-self.beta*d1
-        new_density.imag = 0
-        new_density[new_density<0]=0
+
         state.density[...] = new_density
         state.ft_density[...] = ft_d1
         
