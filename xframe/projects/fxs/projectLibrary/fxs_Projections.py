@@ -1,13 +1,14 @@
 import numpy as np
+from numpy.typing import NDArray
 from scipy import ndimage
 import logging
-
+from typing import Protocol
 
 from xframe.library.pythonLibrary import DictNamespace
 from xframe.library.physicsLibrary import spherical_formfactor
 from xframe.library.gridLibrary import NestedArray,GridFactory,ReGrider
 from xframe.library.mathLibrary import PolarIntegrator,SphericalIntegrator,distance_from_line_2d,midpoint_rule
-from xframe.library.mathLibrary import spherical_to_cartesian
+from xframe.library.mathLibrary import spherical_to_cartesian,cartesian_to_spherical
 
 from .fxs_invariant_tools import harmonic_coeff_to_deg2_invariants_2d
 from .fxs_invariant_tools import harmonic_coeff_to_deg2_invariants_3d
@@ -17,216 +18,176 @@ from xframe import settings
 
 log=logging.getLogger('root')
 
-class RealProjectionSNR:
-    def __init__(self,opt,real_grid):
-        self.real_grid = real_grid
-        self.opt = opt
-        dim = self.real_grid.shape[-1]
-        if dim == 2:
-            self.integrator = PolarIntegrator(self.real_grid)
-        elif dim ==3:
-            self.integrator = SphericalIntegrator(self.real_grid)
+REAL_PROJECTION_REGISTRY:dict[str:str] = {}
+
+class Projection(Protocol):
+    def __call__(self,x:NDArray,context:dict|None = None ):
+        pass
+
+def register_real_projection(name:str):
+    def decorator(cls):
+        if name in REAL_PROJECTION_REGISTRY:
+            raise ValueError(f"Projection '{name}' is already registered.")
+        REAL_PROJECTION_REGISTRY[name]=cls
+        return cls
+    return decorator
+
+class CompositeRealProjection:
+    def __init__(self,projections:list[Projection]):
+        self.projections = projections
+    def __call__(self,density:NDArray)->NDArray:
+        for proj in self.projections:
+            density=proj(density)
+        return density
+
+@register_real_projection("real")
+def realness_projection(density:NDArray,context=None):
+    density.imag=0.0
+    return density
+
+@register_real_projection("positive")
+def positivity_projection(density:NDArray,context=None):
+    density[density<0]=0
+    return density
+
+@register_real_projection("center")
+class center_density:
+    def __init__(self,
+                 fourier_transform,
+                 activation_distance=0,
+                 offset:NDArray|None=None):
+        
+        self.shift = fourier_transform.shift
+
+        # offset can help with avoiding twinning maybe
+        # since point inversion would also change the support
+        # in case the particle is symmetric.
+        # But that may be bullshit ... in practice
+        self.ft = fourier_transform
+        real_grid = self.ft.real_grid
+        
+        if self.ft.dimensions==2:
+            self.integrator = PolarIntegrator(real_grid)
+        elif self.ft.dimensions==3:
+            self.integrator = SphericalIntegrator(real_grid)
         else:
-            raise ValueError(f'Only 2 and 3 Dimensional grids are  supported, given grid dim is {self.real_grid.shape[-1]}.')
+            raise ValueError("Only 2d and 3d fourier transforms are supported.")
         
-        self.master_mask = real_grid[:,:,:,0] < 220
-        self.vol_elements = self.integrator.get_volume_elements()
-        self.vol = opt['support_snr'].get('initial_volume',np.max(self.vol_elements))
-        self.step_size = opt['support_snr'].get('volume_step',10*np.max(self.vol_elements))
-        self.support = np.zeros(self.vol_elements.shape,bool)
-        self.force_connected = opt['support_snr']['force_connected']
-        
-    def __call__(self,density):
-        d = (np.abs(density)**2).ravel() #*self.vol_elements[...,None]).ravel()
-        order = d.argsort()[::-1]
-        #order = order[self.master_mask.ravel()[order]]
-        order_3d = np.unravel_index(order,density.shape)
-        c_volume = np.cumsum(self.vol_elements[order_3d[0],order_3d[1]])
+        self.cart_real_grid = spherical_to_cartesian(real_grid)
+        self.cart_reciprocal_grid = spherical_to_cartesian(self.ft.reciprocal_grid)
 
-        
-        n,v,s = len(order),self.vol,self.step_size
-        stop_ids = [
-                     np.searchsorted(c_volume, max(v-s,0), side='right'),
-                     np.searchsorted(c_volume, v, side='right'),
-                     np.searchsorted(c_volume, min(v+s,n-1), side='right')
-                   ]
-
-        dd = np.abs(density.ravel())
-        med1,med2,med3 = [dd[order[s//2]] for s in stop_ids]
-        max1,max2,max3 = [dd[order[min(s+1,n-1)]] for s in stop_ids]
-
-        contrast_metric = np.array([
-                                    (med1-max1)/med1,
-                                    (med2-max2)/med2,
-                                    (med3-max3)/med3
-                                   ])
-
-        best = np.argmax(contrast_metric)
-        volume_change = [-s,0,s]
-
-        support_mask = np.zeros(density.shape,bool)
-        new_v = int(min(max(v+volume_change[best],0),n))
-        support_mask.ravel()[order[:new_v]] = True
-        if self.force_connected:
-            connected_components,_ = ndimage.label(support_mask)
-            component_names,counts = np.unique(connected_components[connected_components>0],return_counts=True)
-            largest_component_id = np.argmax(counts)
-            support_mask = (connected_components == component_names[largest_component_id])
-        support_mask = self.master_mask
-        self.support = support_mask
-        density[~support_mask]=0
-        density.imag = 0
-        density[density<0]=0
-        self.vol = new_v
+        self.activation_distance = activation_distance
+        if offset is None:
+            self.offset = np.zeros(self.ft.dimensions,float)
+        else:
+            self.offset = np.asarray(offset)
+            
+    def compute_center(self,density:NDArray)->NDArray:
+        abs_density = np.abs(density)
+        tot_density = self.integrator(abs_density)
+        center = np.array(tuple(
+            self.integrator(abs_density*self.cart_real_grid[...,i]) for i in range(self.ft.dimensions)
+        ))/tot_density
+        return center
+    
+    def __call__(self,density:NDArray,context = None)->NDArray:
+        center = self.compute_center(density)
+        if np.linalg.norm(center) >= self.activation_distance:
+            phases = np.exp(1.j*np.dot(self.cart_reciprocal_grid,(center + self.offset)))
+            density = self.ft.inverse_cmplx(self.ft.forward_cmplx(density)*phases)
         return density
     
-class RealProjection:
-    # collection of possible real constraints
-    # generation routine of a real_constraint function has to be named generate_<name>_projection
-    # where <name> is the same string that is used in the settings file
-    # each real support function takes as input an electron density (complex array)
-    # and outputs a list [new_density,mask] where new_density is the changed density and mask is true at points in which the input denisity was modified.
-    def __init__(self,opt,metadata):
-        #self.initial_mask = False
-        self.enforce_initial_support = True
-        self.opt = opt
-        self.real_grid = metadata['real_grid']
-        self.auto_correlation = metadata.get('auto_correlation',False)
-        self.metadata = metadata
-        self._initial_mask = ~self.generate_initial_support_mask()
-        self._initial_support = (~self._initial_mask).astype(float)
-        self._mask = [self._initial_mask.copy()]
-        self._support = [self._initial_support.copy()]
-        self._random_mask = (np.random.rand(*self._initial_mask.shape)>0.9)
-        self.projection = self.assemble_projection()
-            
-    
-    @property
-    def initial_support(self):
-        return ~self._initial_mask.copy()
-    @initial_support.setter
-    def initial_support(self,support):
-        self._initial_mask = (support<1)
-        self._initial_support = support
-        self._support[0] = self._initial_support
-        self._mask[0] = self._initial_mask
-
-
-    @property
-    def support(self):
-        return self._support[0]
-    @support.setter
-    def support(self,support):
-        if self.enforce_initial_support:
-            self._support[0] = self._initial_support * support
-            self._mask[0] = self._initial_mask | (support<1)
+@register_real_projection("support_by_volume")
+class VolumetricSupportProjection:
+    def __init__(self,
+                 real_grid:NDArray,
+                 initial_volume:int = 0,
+                 max_radius:float = np.inf,
+                 volume_limits=(0,np.inf),
+                 force_connected = False):
+        self.real_grid = real_grid
+        self.cart_grid = spherical_to_cartesian(real_grid)
+        self.dim = self.real_grid.shape[-1]
+        if self.dim == 2:
+            self.integrator = PolarIntegrator(self.real_grid)
+            self.rs=real_grid[:,0,0]
+        elif self.dim ==3:
+            self.integrator = SphericalIntegrator(self.real_grid)
+            self.rs=real_grid[:,0,0,0]
         else:
-            self._support[0] = support
-            self._mask[0] = (support<1)        
+            raise ValueError(f'Only 2 and 3 Dimensional grids are  supported, given grid dim is {self.real_grid.shape[-1]}.')
+        self.vol_elements = np.zeros(self.real_grid.shape[:-1],dtype=float)
+        self.vol_elements[...] = self.integrator.get_volume_elements()[...,None]
+        self.total_volume = self.integrator.get_total_volume()
+        self.vol = 0
+        self.contrast = 0
+        self.support = np.zeros(self.vol_elements.shape,bool)
+        self.force_connected = force_connected
+        self.max_radius = max_radius
+        self.max_allowed_volume = min(self.total_volume,volume_limits[1])
+        self.min_allowed_volume = max(volume_limits[0],np.min(self.vol_elements))
+        
+    def compute_distance_from_baricenter(self,density):
+        abs_density = np.abs(density)
+        tot_density = self.integrator(abs_density)
+        center = np.array(tuple(
+            self.integrator(abs_density*self.cart_grid[...,i]) for i in range(self.dim)
+        ))/tot_density
+        
+        distances = np.linalg.norm(self.cart_grid-center,axis = -1)
+        return distances
+    def compute_contrast_metric(self,data,order):
+        max_data = np.max(data)
+        meds = np.zeros(len(order),float)
+        maxs = np.zeros(len(order),float)
+
+        # fill maxima
+        maxs[0] = data[order[-1]]
+        for i,o in enumerate(order[::-1][1:]):
+            val = data[o]
+            maxs[i+1] = max(maxs[i],val)
+
+        # fill medians
+        meds[0::2] = data[order[:len(meds[0::2])]]
+        meds[1::2] = (data[order[:len(meds[1::2])]]+data[order[1:len(meds[1::2])+1]])/2
+
+        # compute and return contrast metric
+        return (meds-maxs[::-1])/max_data
     
-    @property
-    def mask(self):
-        return self._mask[0]
+    def __call__(self,density,context=None):
+        abs_density = np.abs(density)
+        flat_d = abs_density.ravel()
+        order = np.argsort(flat_d)[::-1]
+
+        distances = self.compute_distance_from_baricenter(abs_density)
+        distance_mask = (distances <=self.max_radius)
+
+        # restrict to voxels within max_radius
+        order = order[distance_mask.ravel()[order]]
+
+        # find Volume that gives maximum contrast
+        contrast_metric = self.compute_contrast_metric(flat_d,order)
+        best_vol_id = np.argmax(contrast_metric)
+
+        ordered_vol = self.vol_elements.ravel()[order]
+        c_volume = np.cumsum(ordered_vol)
+        new_vol = c_volume[best_vol_id]
+        self.volume = new_vol
+        
+        # define greedy support by picking voxels until volume is reached
+        self.support[:]=False
+        self.support.ravel()[order[:max(best_vol_id,1)]]=True
+
+        if self.force_connected:
+            connected_components,_ = ndimage.label(self.support)
+            component_names,counts = np.unique(connected_components[connected_components>0],return_counts=True)
+            largest_component_id = np.argmax(counts)
+            self.support = (connected_components == component_names[largest_component_id])
+
+        # Do density projection
+        density[~self.support] = 0
+        return density
     
-    @mask.setter
-    def mask(self,mask):
-        if self.enforce_initial_support:
-            self._mask[0] = self._initial_mask | mask
-        else:
-            self._mask[0] = mask
-            
-            
-    def generate_support_projection(self):
-        mask = self._mask
-        support = self._support
-        def support_projection(density):
-            #log.info('fu')
-            #log.info('\n initial mask type = {} \n'.format(type(self.initial_mask)))
-            #log.info(mask[0][:10,0])
-            if True:
-                density*=support[0]
-                m=(support[0]<1)
-            else:
-                m= mask[0]
-                density[m]=0
-            return [density,m]
-        return support_projection
-
-    def generate_value_threshold_projection(self):
-        threshold = self.opt['value_threshold'].get('threshold',0.0)
-        threshold_projection = create_threshold_projection(threshold)
-        return threshold_projection
-
-    def generate_limit_imag_projection(self):        
-        thresh = self.opt['limit_imag'].get('threshold',0.0)        
-        def projection(density):
-            imag_part = density.imag
-            is_invalid_mask = np.abs(imag_part) >= thresh
-            imag_part[is_invalid_mask] = 0
-            return [density,is_invalid_mask]
-        return projection
-    def generate_average_center_projection(self):
-        thresh = int(self.opt['average_center'].get('max_radial_id',1))
-        dimension = self.real_grid.array.shape[-1]
-        log.info('dim = {}'.format(dimension))
-        axes = tuple(range(1,dimension))
-        if dimension==2:
-            def projection(density):
-                density[:thresh]=np.mean(density[:thresh],axis=axes)[:,None]
-                return [density,False]
-        elif dimension==3:
-            def projection(density):
-                density[:thresh]=np.mean(density[:thresh],axis=axes)[:,None,None]
-                return [density,False]
-        return projection
-    def assemble_projection(self):
-        projections = []
-        mask_dict = {}
-        for key in self.opt.apply:
-            try:
-                projections.append([key,getattr(self,'generate_'+key+'_projection')()])
-                mask_dict[key]=False
-            except AttributeError as e:
-                log.error('projection {} not known. Ignoring it.'.format(key))
-        mask_dict['all']=False
-        def real_projection(data):
-            mask = False
-            for name,projection in projections:
-                #log.info(name)
-                data,p_mask=projection(data)
-                # individual masks are supposed to be True where projection changes the data
-                mask_dict[name]=p_mask
-                mask |= p_mask
-                mask_dict['all']=mask
-            return [data,mask_dict]
-        return real_projection
-
-
-    def generate_initial_support_mask(self):
-        opt = self.opt.support.initial_support
-        realGrid = self.real_grid
-        support_type=opt['type']
-        if support_type=='max_radius':
-            maxR=opt['max_radius']
-            #log.info(f'given_maximal radius is {maxR}')
-            support_mask=np.where(realGrid[...,0]<maxR,True,False)
-        elif support_type=='auto_correlation':
-            assert isinstance(self.auto_correlation,np.ndarray), 'auto correlation not specified.'
-            threshold=opt.auto_correlation.threshold
-            max_value=np.max(self.auto_correlation)
-            support_mask=self.auto_correlation >= threshold*max_value
-            support_mask[realGrid[...,0]>settings.project.particle_radius]=0
-        else:
-            e=AssertionError('Initial support type "{}" is not known.'.format(support_type))
-            log.error(e)
-            raise e
-        #    log.info('support mask[:]={}'.format(supportMask))
-        #pres=heatPolar2D()
-        #pres.present(auto_correlation.data.array,grid=realGrid)
-        #pres.present(supportMask,grid=realGrid)
-        return support_mask
-
-
 ### FXS Projections
 class ReciprocalProjection:
     def load_data(self,data):

@@ -7,6 +7,7 @@ import traceback
 import abc
 from dataclasses import dataclass
 from numpy.typing import NDArray
+from scipy import signal
 
 from xframe import settings
 from xframe import database
@@ -241,17 +242,31 @@ class MTIP:
         self.fourier_trf,self.harmonic_trf,self.grid_pair = self.assemble_transform_op_and_grid()
         self.max_order = self.harmonic_trf.max_order
         self.inv_proj = ReciprocalProjection(self.grid_pair['reciprocal'],self.mtip_data,self.max_order)
-        self.real_proj =  RealProjectionSNR(opt.projections.real.projections,self.fourier_trf.real_grid)
+        self.real_proj = self.instanciate_real_proj(self.opt.projections.real.support_snr)
         self.error_routines = self.assemble_error_routines()
         self.main_error_routine = generate_main_error_routine(self.opt.main_loop.error.methods.main.metrics,
                                                          self.opt.main_loop.error.methods.main.type)
+        dr = self.fourier_trf.real_grid[1,0,0,0]-self.fourier_trf.real_grid[0,0,0,0]
+        q_max  = self.fourier_trf.reciprocal_grid[-1,0,0,0]/(2*np.pi)
+        print(f'qlim = {q_max}, fs = {1/dr}')
+        self.sos = signal.butter(10, 0.05 , 'lowpass', fs=1/dr, output='sos')
         self.op_dict = {"fourier_transform":self.fourier_trf,
                         "harmonic_transform":self.harmonic_trf,
                         "invariant_projection":self.inv_proj,
-                        "real_projection": self.real_proj}
+                        "real_projection": self.real_proj,
+                        "sos":self.sos}
         
         self.phasing_sketch = self.get_phasing_sketch()
-
+    def instanciate_real_proj(self,real_proj_opt):
+        opt = real_proj_opt
+        real_grid = self.fourier_trf.real_grid
+        return  RealProjectionSNR(real_grid,
+                                  opt.initial_volume,
+                                  opt.volume_step,
+                                  opt.max_radius,
+                                  volume_limits = opt.volume_limits,
+                                  force_connected = opt.force_connected)
+        
     def assemble_transform_op_and_grid(self):
         max_q = self.max_q
         max_q_is_set =  isinstance(max_q,float) or (isinstance(max_q,int) and (not isinstance(max_q,bool)))
@@ -320,16 +335,26 @@ class MTIP:
         for loop_name in loop_names:
             loop_opt = opt[loop_name]
             phasing_sketch[loop_name]=({},loop_opt.iterations)
+            if "projections" in loop_opt:
+                real_proj = self.instanciate_real_proj(loop_opt.projections.real.support_snr)
+                op_dict = {"fourier_transform":self.fourier_trf,
+                            "harmonic_transform":self.harmonic_trf,
+                            "invariant_projection":self.inv_proj,
+                            "real_projection": real_proj,
+                            "sos":self.sos}
+            else:
+                op_dict = self.op_dict
             method_names = loop_opt.order
             for method_name in method_names:
                 mopt = loop_opt.methods[method_name]
                 camel_name = snake_to_camel_simple(method_name)
                 method_cls = globals().get(camel_name,None) 
                 if method_cls is not None:
-                    method = method_cls(self.op_dict,mopt)
+                    method = method_cls(op_dict,mopt)
                     phasing_sketch[loop_name][0][method_name]=(method,mopt.iterations)
                 else:
                     raise ValueError(f"Class '{camel_name}' for method '{method_name}' does not exist.")
+        print(phasing_sketch)
         return phasing_sketch
     def create_initial_density(self):
         opt=settings.project.density_guess
@@ -377,11 +402,12 @@ class MTIP:
         density = self.create_initial_density()
         ft_density = self.fourier_trf.forward_cmplx(density)
         error_dict = self.init_error_dict()
-        state = PhasingState(density_history=[None,density],
-                             ft_density_history=[None,ft_density],
+        state = PhasingState(density_history=(None,density),
+                             ft_density_history=(None,ft_density),
                              error_dict=error_dict,
                              initial_density=density.copy(),
-                             volume_history = [self.real_proj.vol])
+                             volume_history = [self.real_proj.vol],
+                             contrast_history = [self.real_proj.contrast])
         return state
     def update_errors(self,state):
         real = self.error_routines["real"][0](state.density,state.intermediate_density)
@@ -403,15 +429,19 @@ class MTIP:
         update_errors = self.update_errors
         
         for loop_name,(loop,n) in self.phasing_sketch.items():
+            print(f"Starting Loop:{loop_name} with {n} iterations")
             for i in range(n):
                 for method_name,(step,m) in loop.items():
+                    print(method_name)
                     for j in range(m):
                         # Run optimization step
                         state = step(state)
                     
                         # update_some parametrs
                         state.iteration += 1
-                        state.volume_history.append(self.real_proj.vol)
+                        state.volume_history.append(step.real_proj.vol)
+                        state.support = step.real_proj.support
+                        state.contrast_history.append(step.real_proj.contrast)
                         update_errors(state)
 
                 # Print output 
@@ -462,6 +492,8 @@ class PhasingState:
     iteration:int = 0
     error_dict: dict = None
     volume_history:list = None
+    contrast_history: list = None
+    support:NDArray = None
     custom_outputs:dict = None
 
     @property
@@ -469,25 +501,31 @@ class PhasingState:
         return self.density_history[-1]
     @density.setter
     def density(self,value):
-        self.density_history.pop(0)
-        self.density_history.append(value)
-        self._density = self.density_history[-1]
+        self.density_history = self.density_history[1:]+(value,)
         
     @property
     def ft_density(self):
         return self.ft_density_history[-1]
     @ft_density.setter
     def ft_density(self,value):
-        self.ft_density_history.pop(0)
-        self.ft_density_history.append(value)
-        self._ft_density = self.ft_density_history[-1]
-
+        self.ft_density_history = self.density_history[1:]+(value,)
     
 class StepBase(abc.ABC):
     @abc.abstractmethod
     def __call__(self,state:PhasingState)->PhasingState:
         pass
 
+
+def r_filter(sos,data):
+    data_shape = data.shape
+    #tmp = np.moveaxis(data,0,-1)
+    tmp = data.reshape(data_shape[0],-1).T
+    for i in range(len(tmp)):
+        ray = np.concatenate((tmp[i,1:][::-1],tmp[i]))
+        filt = signal.sosfilt(sos,ray)
+        tmp[i] = filt[-data_shape[0]:]
+    out = tmp.T.reshape(data_shape)
+    return out
     
 class DuglasRachford(StepBase):
     def __init__(self,operators,opt):
@@ -499,7 +537,7 @@ class DuglasRachford(StepBase):
         self.inv_proj  = operators["invariant_projection"]
         self.tmp_intensity = np.zeros(self.ft.reciprocal_grid.shape[:-1],complex)
         self.ft_stab = opt.ft_stab
-        
+        self.sos = operators['sos']
     def p1(self,density):
         "apply invariant constarint"
         ft,ht,inv_proj = self.ft,self.ht,self.inv_proj
@@ -512,12 +550,13 @@ class DuglasRachford(StepBase):
         new_I = ht.inverse_cmplx(new_coeff)
         
         old_I_from_coeff = ht.inverse_cmplx(coeff)
-        #new_ft_d = inv_proj.project_to_modified_intensity(ft_d,
-        #                                                  self.tmp_intensity,
-        #                                                  old_I_from_coeff,
-        #                                                  new_I)
-        new_ft_d = np.where(self.tmp_intensity!=0,ft_d/np.sqrt(self.tmp_intensity)*np.sqrt(new_I),np.sqrt(new_I))
+        new_ft_d = inv_proj.project_to_modified_intensity(ft_d,
+                                                          self.tmp_intensity,
+                                                          old_I_from_coeff,
+                                                          new_I)
+        #new_ft_d = np.where(self.tmp_intensity!=0,ft_d/np.sqrt(self.tmp_intensity)*np.sqrt(new_I),np.sqrt(new_I))
         new_density = ft.inverse_cmplx(new_ft_d)
+        new_dnesity = r_filter(self.sos,new_density)
         if self.ft_stab:
             ft_error = density-ft.inverse_cmplx(ft_d)
             new_density += ft_error
@@ -530,13 +569,11 @@ class DuglasRachford(StepBase):
         state.intermediate_density = d1
         state.intensity_harmonic_coefficients = new_coeff
         d2 = self.real_proj((self.beta+1)*d1-d)
-        d2.imag = 0
-        d2[d2<0]=0
         
         new_density =  d+d2-self.beta*d1
 
-        state.density[...] = new_density
-        state.ft_density[...] = ft_d1
+        state.density = new_density
+        state.ft_density = ft_d1
         
         return state
     
@@ -547,11 +584,13 @@ class ErrorReduction(StepBase):
         self.ht = operators["harmonic_transform"]
         self.real_proj  = operators["real_projection"]
         self.inv_proj  = operators["invariant_projection"]
+        self.sos = operators['sos']
         self.tmp_intensity = np.zeros(self.ft.reciprocal_grid.shape[:-1],complex)
         self.ft_stab = opt.ft_stab
     def p1(self,density):
         "apply invariant constarint"
         ft,ht,inv_proj = self.ft,self.ht,self.inv_proj
+
         ft_d = ft.forward_cmplx(density)
         np.multiply(ft_d,ft_d.conj(),out = self.tmp_intensity)
         coeff = ht.forward_cmplx(self.tmp_intensity)        
@@ -564,6 +603,7 @@ class ErrorReduction(StepBase):
                                                           old_I_from_coeff,
                                                           new_I)
         new_density= ft.inverse_cmplx(new_ft_d)
+        new_dnesity = r_filter(self.sos,new_density)
         if self.ft_stab:
             ft_error = density-ft.inverse_cmplx(ft_d)
             new_density += ft_error
@@ -576,7 +616,10 @@ class ErrorReduction(StepBase):
         state.intermediate_density = d1
         state.intensity_harmonic_coefficients = new_coeff
         
-        state.density = self.real_proj(d1)
-        state.ft_density[...] = ft_d1
+        new_density = self.real_proj(d1)
+        #new_density.imag = 0
+        #new_density[new_density.real<0]=0
+        state.density=new_density
+        state.ft_density = ft_d1
         return state
 

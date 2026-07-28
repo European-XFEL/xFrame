@@ -1287,6 +1287,8 @@ class SphericalIntegrator:
         return self(values*values.conj())
     def get_volume_elements(self):
         return np.pi/self.n_theta*((self.gauss_weights[None,:])*(self.rs)[:,None]**2*self.dr)
+    def get_total_volume(self):
+        return np.sum(self.get_volume_elements()*self.n_phi)
 
 class PolarIntegrator():
     '''
@@ -1314,6 +1316,8 @@ class PolarIntegrator():
 
     def get_volume_elements(self):
         return self.rs*self.dr*self.dphi
+    def get_total_volume(self):
+        return np.sum(self.get_volume_elements()*self.n_phi)
 
 class RadialIntegrator():
     def __init__(self,radial_points,dimension):        

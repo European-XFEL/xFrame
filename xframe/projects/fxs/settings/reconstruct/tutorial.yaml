@@ -4,12 +4,12 @@ particle_radius: 200
 
 grid:
   n_radial_points:
-    command: (2048,256)
-  max_order: 63
-  n_phi: 128
-  n_theta: 64
+    command: (1024,128)
+  max_order: 31
+  n_phi: 64
+  n_theta: 32
   max_nonzero_r:
-    command: '2.5'
+    command: '2'
     
 density_guess:
   type: bump
@@ -18,23 +18,27 @@ density_guess:
   amplitude_function: random
   random:
     SNR: 1
+  radius: 230
 
 projections:
   real:
-    projections:
-      apply:
+    apply:
       - support_snr
-      support_snr:
-        initial_volume: 1e6
-        volume_step: 25000
-        force_connected: False        
+    support_snr:
+      initial_volume: 9e6
+      volume_step: 1e4
+      max_radius: 300
+      volume_limits:
+        - 5e6
+        - 10e6
+      force_connected: False        
   reciprocal:
     use_averaged_intensity: true
     use_real_spherical_harmonics: False
     q_mask:
       type: from_projection_matrices
     used_order_ids:
-      command: np.arange(64)
+      command: np.arange(31)
     regrid:
       interpolation: cubic
     odd_orders_to_0: true
@@ -51,22 +55,60 @@ GPU:
 main_loop:
   sub_loops:
     order:
+    - prepare
     - main
     - refinement
-    main:
+    prepare:
+      projections:
+        real:
+          apply:
+            - support_snr
+          support_snr:
+            initial_volume: 10e6
+            volume_step: 1e5
+            max_radius: 250
+            volume_limits:
+              - 6e6
+              - 21e6
+            force_connected: False
       methods:
         duglas_rachford:
           iterations: 20
-          ft_stab: true
-          beta: 1
-      iterations: 3
+          ft_stab: True
+          beta: 0.5
+        error_reduction:
+          iterations: 10
+          ft_stab: false
+      iterations: 5
+      order:
+        - duglas_rachford
+        - error_reduction
+    main:
+      projections:
+        real:
+          apply:
+            - support_snr
+          support_snr:
+            initial_volume: 20e6
+            volume_step: 1e5
+            max_radius: 230
+            volume_limits:
+              - 5e6
+              - 20e6
+            force_connected: False            
+      methods:
+        duglas_rachford:
+          iterations: 20
+          ft_stab: False
+          beta: 0.5
+      iterations: 0
       order:
         - duglas_rachford
     refinement:
       methods:
         error_reduction:
-          iterations: 10
-          ft_stab: false
+          iterations: 20
+          ft_stab: False
       iterations: 0
       order:
         - error_reduction
