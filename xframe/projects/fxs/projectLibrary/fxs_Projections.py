@@ -2,13 +2,20 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy import ndimage
 import logging
-from typing import Protocol
+from typing import Protocol,Any
+from collections import defaultdict
+from dataclasses import dataclass,field
+import inspect
 
-from xframe.library.pythonLibrary import DictNamespace
+from xframe.library.pythonLibrary import DictNamespace,xprint
 from xframe.library.physicsLibrary import spherical_formfactor
 from xframe.library.gridLibrary import NestedArray,GridFactory,ReGrider
-from xframe.library.mathLibrary import PolarIntegrator,SphericalIntegrator,distance_from_line_2d,midpoint_rule
-from xframe.library.mathLibrary import spherical_to_cartesian,cartesian_to_spherical
+from xframe.library.mathLibrary import (PolarIntegrator,
+                                        SphericalIntegrator,
+                                        distance_from_line_2d,midpoint_rule,
+                                        gaussian_fourier_transformed_spherical,
+                                        spherical_to_cartesian,
+                                        cartesian_to_spherical) 
 
 from .fxs_invariant_tools import harmonic_coeff_to_deg2_invariants_2d
 from .fxs_invariant_tools import harmonic_coeff_to_deg2_invariants_3d
@@ -18,44 +25,90 @@ from xframe import settings
 
 log=logging.getLogger('root')
 
-REAL_PROJECTION_REGISTRY:dict[str:str] = {}
+REAL_PROJECTION_REGISTRY:dict[str:Any] = {}
 
 class Projection(Protocol):
     def __call__(self,x:NDArray,context:dict|None = None ):
         pass
-
+    
 def register_real_projection(name:str):
     def decorator(cls):
         if name in REAL_PROJECTION_REGISTRY:
             raise ValueError(f"Projection '{name}' is already registered.")
         REAL_PROJECTION_REGISTRY[name]=cls
+        if isinstance(cls,type):
+            cls.name = name
         return cls
     return decorator
 
-class CompositeRealProjection:
-    def __init__(self,projections:list[Projection]):
-        self.projections = projections
-    def __call__(self,density:NDArray)->NDArray:
-        for proj in self.projections:
-            density=proj(density)
-        return density
 
-@register_real_projection("real")
+
+@dataclass
+class ProjectionContext:
+    data: dict[str, dict[str, Any]] = field(
+        default_factory=lambda: defaultdict(dict)
+    )
+
+    def append(self,projection_name:str, metric_name: str, value: Any,) -> None:
+        proj_data =  self.data[projection_name]
+
+        if metric_name not in proj_data:
+            proj_data[metric_name] = [value]
+        else:
+            if isinstance(proj_data[metric_name],list):
+                proj_data[metric_name].append(value)
+            else:
+                raise ValueError(f"data.{projection_name}.{metric_name} exists but is not instance of list. Append is not possible.")
+            
+    def override(self,projection_name:str, metric_name: str, value: Any,) -> None:
+        self.data[projection_name][metric_name] = value
+
+    def data_list_to_numpy(self):
+        out = {}
+        for pname,proj_data in self.data.items():
+            out[pname] = {}
+            for mname,metric_data in proj_data.items():
+                if isinstance(metric_data,list):
+                    out[pname][mname] = np.array(metric_data)
+                else:
+                    out[pname][mname] = metric_data
+        return out
+
+class ProjectionBase(abc.ABC):
+    name = 'not assigned'
+    @abc.abstractmethod
+    def __call__(self,density:NDArray,context = None)->NDArray:
+        pass
+    
+class CompositeRealProjection:
+    def __init__(self,projections:dict):
+        self.projections = projections
+        
+    def __call__(self,density:NDArray,context:ProjectionContext|None = None)->NDArray:
+        for name,proj in self.projections.items():
+            density=proj(density,context=context)
+        return density
+    
+    def project(self,density:NDArray,context:ProjectionContext|None = None):
+        return self(density,context=context)
+
+@register_real_projection("realness")
 def realness_projection(density:NDArray,context=None):
     density.imag=0.0
     return density
 
-@register_real_projection("positive")
+@register_real_projection("positivity")
 def positivity_projection(density:NDArray,context=None):
     density[density<0]=0
     return density
 
-@register_real_projection("center")
-class center_density:
+@register_real_projection("centering")
+class CenterDensity(ProjectionBase):
     def __init__(self,
                  fourier_transform,
                  activation_distance=0,
-                 offset:NDArray|None=None):
+                 offset:NDArray|None=None,
+                 collect_metrics = []):
         
         self.shift = fourier_transform.shift
 
@@ -76,35 +129,72 @@ class center_density:
         self.cart_real_grid = spherical_to_cartesian(real_grid)
         self.cart_reciprocal_grid = spherical_to_cartesian(self.ft.reciprocal_grid)
 
-        self.activation_distance = activation_distance
+        self.activation_distance = activation_distance        
         if offset is None:
             self.offset = np.zeros(self.ft.dimensions,float)
         else:
             self.offset = np.asarray(offset)
+        self.center_moved = False
+        self.collect_metrics = collect_metrics
+        self.center = None
             
     def compute_center(self,density:NDArray)->NDArray:
         abs_density = np.abs(density)
         tot_density = self.integrator(abs_density)
+        #print(tot_density)
         center = np.array(tuple(
             self.integrator(abs_density*self.cart_real_grid[...,i]) for i in range(self.ft.dimensions)
         ))/tot_density
         return center
+
+    def compute_and_store_metrics(self,ctx:ProjectionContext):
+        # center_moved flag can be important for other projections
+        # Looking at you shrink-wrap support o.0
+        # so it is stored always
+        ctx.override(self.name,'center_moved',self.center_moved)
+        
+        for metric_name in self.collect_metrics:
+            append = metric_name.endswith("history")
+            if append:
+                metric_type = metric_name[:-8]
+            else:
+                metric_type = metric_name                
+            
+            if metric_type == "center":
+                val = self.center
+            else:
+                xprint(f"WARNING: Metric name: '{metric_type}' unknown for '{ctx.projection_name}' projection.")
+                val = None
+                
+            if val is not None:
+                if append:
+                    ctx.append(self.name,metric_name,val)
+                else:
+                    ctx.override(self.name,metric_name,val)
+            
     
     def __call__(self,density:NDArray,context = None)->NDArray:
         center = self.compute_center(density)
+        self.center = center
+        
         if np.linalg.norm(center) >= self.activation_distance:
             phases = np.exp(1.j*np.dot(self.cart_reciprocal_grid,(center + self.offset)))
             density = self.ft.inverse_cmplx(self.ft.forward_cmplx(density)*phases)
+            self.center_moved = True
+        else:
+            self.center_moved = False
+        if context is not None:
+            self.compute_and_store_metrics(context)
         return density
-    
+
 @register_real_projection("support_by_volume")
-class VolumetricSupportProjection:
+class VolumetricSupportProjection(ProjectionBase):
     def __init__(self,
                  real_grid:NDArray,
-                 initial_volume:int = 0,
                  max_radius:float = np.inf,
                  volume_limits=(0,np.inf),
-                 force_connected = False):
+                 force_connected = False,
+                 collect_metrics = ["support"]):
         self.real_grid = real_grid
         self.cart_grid = spherical_to_cartesian(real_grid)
         self.dim = self.real_grid.shape[-1]
@@ -119,13 +209,16 @@ class VolumetricSupportProjection:
         self.vol_elements = np.zeros(self.real_grid.shape[:-1],dtype=float)
         self.vol_elements[...] = self.integrator.get_volume_elements()[...,None]
         self.total_volume = self.integrator.get_total_volume()
-        self.vol = 0
+        self.volume = 0
         self.contrast = 0
+        self.contrast_function = 0 
         self.support = np.zeros(self.vol_elements.shape,bool)
+        self.distance_mask = np.zeros(self.vol_elements.shape,bool)
         self.force_connected = force_connected
-        self.max_radius = max_radius
-        self.max_allowed_volume = min(self.total_volume,volume_limits[1])
-        self.min_allowed_volume = max(volume_limits[0],np.min(self.vol_elements))
+        self.max_radius = float(max_radius)
+        self.max_allowed_volume = min(self.total_volume,float(volume_limits[1]))
+        self.min_allowed_volume = max(float(volume_limits[0]),np.min(self.vol_elements))
+        self.collect_metrics = collect_metrics
         
     def compute_distance_from_baricenter(self,density):
         abs_density = np.abs(density)
@@ -136,57 +229,196 @@ class VolumetricSupportProjection:
         
         distances = np.linalg.norm(self.cart_grid-center,axis = -1)
         return distances
+    
     def compute_contrast_metric(self,data,order):
         max_data = np.max(data)
         meds = np.zeros(len(order),float)
         maxs = np.zeros(len(order),float)
-
+        
         # fill maxima
         maxs[0] = data[order[-1]]
         for i,o in enumerate(order[::-1][1:]):
             val = data[o]
             maxs[i+1] = max(maxs[i],val)
-
+            
         # fill medians
         meds[0::2] = data[order[:len(meds[0::2])]]
         meds[1::2] = (data[order[:len(meds[1::2])]]+data[order[1:len(meds[1::2])+1]])/2
-
+        
         # compute and return contrast metric
         return (meds-maxs[::-1])/max_data
     
+    def compute_and_store_metrics(self,ctx:ProjectionContext):
+        for metric_name in self.collect_metrics:
+            append = metric_name.endswith("history")
+            if append:
+                metric_type = metric_name[:-8]
+            else:
+                metric_type = metric_name
+                
+            if metric_type == "support":
+                val = self.support
+            elif metric_type == "distance_mask":
+                val = self.distance_mask
+            elif metric_type == "volume":
+                val = self.volume
+            elif metric_type == "contrast":
+                val = self.contrast
+            elif metric_type == "contrast_function":
+                val = self.contrast_function
+            else:
+                xprint(f"WARNING: Metric name: {metric_type} unknown.")
+                val = None
+                
+            if val is not None:
+                if append:
+                    ctx.append(self.name,metric_name,val)
+                else:
+                    ctx.override(self.name,metric_name,val)
+                    
     def __call__(self,density,context=None):
         abs_density = np.abs(density)
         flat_d = abs_density.ravel()
         order = np.argsort(flat_d)[::-1]
-
+        
         distances = self.compute_distance_from_baricenter(abs_density)
-        distance_mask = (distances <=self.max_radius)
-
+        self.distance_mask[:] = (distances <=self.max_radius)
+        distance_mask = self.distance_mask
         # restrict to voxels within max_radius
         order = order[distance_mask.ravel()[order]]
-
+        
         # find Volume that gives maximum contrast
-        contrast_metric = self.compute_contrast_metric(flat_d,order)
-        best_vol_id = np.argmax(contrast_metric)
-
+        self.contrast_function = self.compute_contrast_metric(flat_d,order)
+        best_vol_id = np.argmax(self.contrast_function)
+        
         ordered_vol = self.vol_elements.ravel()[order]
         c_volume = np.cumsum(ordered_vol)
-        new_vol = c_volume[best_vol_id]
+        new_vol = max(min(c_volume[best_vol_id],self.max_allowed_volume),self.min_allowed_volume)
+        volume_id = np.searchsorted(c_volume,new_vol,side='left')
         self.volume = new_vol
+        self.contrast = self.contrast_function[volume_id]
         
         # define greedy support by picking voxels until volume is reached
         self.support[:]=False
-        self.support.ravel()[order[:max(best_vol_id,1)]]=True
-
+        self.support.ravel()[order[:max(volume_id,1)]]=True
+        
         if self.force_connected:
             connected_components,_ = ndimage.label(self.support)
             component_names,counts = np.unique(connected_components[connected_components>0],return_counts=True)
             largest_component_id = np.argmax(counts)
             self.support = (connected_components == component_names[largest_component_id])
-
+            
         # Do density projection
         density[~self.support] = 0
+        if isinstance(context,ProjectionContext):
+            self.compute_and_store_metrics(context)
         return density
+
+@register_real_projection("shrink_wrap_support")
+class Support(ProjectionBase):
+    def __init__(self,fourier_transform,initial_support,sw_sigma=None,sw_threshold=0.3):
+        self.ft = fourier_transform
+        self.support = initial_support
+        self._sw_sigma = sw_sigma
+        self._sw_threshold = sw_threshold
+        self.gaussian_values = gaussian_fourier_transformed_spherical(self.ft.reciprocal_grid,self._sw_sigma)
+
+    @property
+    def sw_sigma(self):
+        return self._sw_sigma
+    @sw_sigma.setter
+    def gaussian_sigma(self,value):
+        if value>=0:
+            self._sw_sigma = value
+        else:
+            self._sw_sigma=0
+            log.warning(f'Gaussian sigma has to be grater than 0 but given value is {value}. Projecting threshold to {self._sw_sigma}.')
+        self.gaussian_values[:] = gaussian_fourier_transformed_spherical(self.grid,self._gaussian_sigma[0])
+        
+    @property
+    def sw_threshold(self):
+        return self._sw_threshold
+    @sw_threshold.setter
+    def sw_threshold(self,value):
+        if value<=0:
+            self._sw_threshold=0
+            log.warning(f'Shrink-wrap threshold has to lie in [0,1] but given value is {value}. Setting threshold to {self._sw_threshold}.')
+        elif value>=1:
+            self._sw_threshold=1
+            log.warning(f'Shrink-wrap threshold has to lie in [0,1] but given value is {value}. Projecting threshold to {self._sw_threshold}.')
+        else:
+            self._sw_threshold=value
+         
+    def shrink_wrap(self,density):
+        # Apply gaussian bluring
+        abs_density = np.abs(density)
+        ft_d = self.ft.forward_cmplx(abs_density)
+        ft_d *= self.gaussian_values
+        convolved_d = self.ft.inverse_cmplx(ft_d)
+        
+        # Define new suport
+        max_value= convolved_d.max()
+        min_value= convolved_d.min()
+        diff = max_value-min_value
+        self.support = (convolved_d >= min_value + self._sw_threshold*diff)
+    
+    def __call__(self,density:NDArray,context = None)->NDArray:
+
+        if context is not None:
+            update_support = context.data[self.name].get('update_support',False)
+            update_support |= context.data['centering'].get('center_moved',False)
+            if update_support:
+                self.shrink_wrap()                
+                context.override(self.name,'update_support',False)
+        density*=self.support
+
+        return density
+        
+def real_projection_factory(
+    name: str,
+    data: dict[str, Any] | None = None,
+    options: dict[str, Any] | None = None,
+):
+    obj = REAL_PROJECTION_REGISTRY[name]
+
+    # plain function projection -> return as is
+    if not inspect.isclass(obj):
+        return obj
+
+    data = data or {}
+    options = options or {}
+
+    sig = inspect.signature(obj.__init__)
+    params = list(sig.parameters.values())[1:]   # skip self
+
+    pos_args = []
+    kw_args = {}
+
+    for p in params:
+        if p.kind == inspect.Parameter.VAR_POSITIONAL:
+            raise TypeError(f"{obj.__name__}.__init__ uses *args, not supported")
+
+        elif p.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            if p.name in data:
+                pos_args.append(data[p.name])
+            elif p.name in options:
+                kw_args[p.name] = options[p.name]
+            elif p.default is inspect.Parameter.empty:
+                raise TypeError(f"Missing positional argument '{p.name}'")
+
+        elif p.kind == inspect.Parameter.KEYWORD_ONLY:
+            if p.name in options:
+                kw_args[p.name] = options[p.name]
+
+        elif p.kind == inspect.Parameter.VAR_KEYWORD:
+            kw_args.update({k: v for k, v in options.items() if k not in kw_args})
+        
+    return obj(*pos_args, **kw_args)
+
+
     
 ### FXS Projections
 class ReciprocalProjection:
@@ -209,13 +441,6 @@ class ReciprocalProjection:
         self.data_low_resolution_intensity_coefficients = data.get('data_low_resolution_intensity_coefficients',self.data_projection_matrices)
         #log.info(f' pr matrix type {type(self.data_projection_matrices)}')
         self.data_projection_matrices_q_id_limits = data.get('data_projection_matrices_q_id_limits',False)
-        #log.info(f'data proj matrices len = {len(self.data_projection_matrices)}')
-        #if not isinstance(self.data_projection_matrices,np.ndarray):
-        #    tmp = np.empty(len(self.data_projection_matrices),object)
-        #    for i,pm in enumerate(self.data_projection_matrices):
-        #        tmp[i]=pm
-        #    self.data_projection_matrices = tmp
-
                 
     def __init__(self,grid,data,max_order):
         #xprint(f"max_order = {max_order}")
@@ -291,7 +516,6 @@ class ReciprocalProjection:
         if self.use_SO_freedom:
             radial_high_pass=opt.SO_freedom.get('radial_high_pass',0.2)
             self.remaining_SO_projection = self.generate_remaining_SO_projection(radial_high_pass=radial_high_pass)
-        #xprint(f'pm shape = {len(self.projection_matrices)} mask len = {len(self.radial_mask)}')
     
 
     @property
@@ -300,7 +524,6 @@ class ReciprocalProjection:
     @fixed_intensity.setter
     def fixed_intensity(self,value):
         self._fixed_intensity[0]=value.real
-        
     def read_projection_orders(self,projection_orders,max_harmonic_order):
         try:
             assert projection_orders.max()<=self.data_max_order, 'Max available harmonic order from dataset is {} but the maximal projection order is {}. Restricting ordes to the ones present in the dataset.'.format(self.data_max_order,projection_orders.max())
@@ -313,7 +536,6 @@ class ReciprocalProjection:
             log.warning(e)
             projection_orders = projection_orders[projection_orders<=max_harmonic_order]
         return projection_orders
-        
     def assert_projection_matrices_have_right_shape(self):
         try:
             n_radial_points_grid = len(self.radial_points)
@@ -322,7 +544,6 @@ class ReciprocalProjection:
         except AssertionError as e:
             log.error(e)
             raise e
-            
     def extract_used_options(self):
         fourier_opt = settings.project.fourier_transform
         rp_opt = settings.project.projections.reciprocal
@@ -383,7 +604,6 @@ class ReciprocalProjection:
                 
         mask = mask & data_mask
         return mask
-
     def calc_deg2_invariants(self):
         if self.dimensions == 2:
             invariants = harmonic_coeff_to_deg2_invariants_2d(self.projection_matrices.T)
@@ -391,7 +611,6 @@ class ReciprocalProjection:
             invariants = harmonic_coeff_to_deg2_invariants_3d(self.projection_matrices)
         #log.info('rp deg 2 invariant shape = {}'.format(invariants.shape))
         return invariants
-
     def _regrid_data(self):
         dim = self.dimensions
         order_ids=list(self.used_orders.values())
@@ -473,7 +692,6 @@ class ReciprocalProjection:
                 pm[:]*=2
         #xprint(f'proj nans after modification = {[np.isnan(p).any() for p in proj_matrices]}')
         return proj_matrices
-
 
     def generate_approximate_unknowns(self):
         dim = self.dimensions
@@ -560,7 +778,6 @@ class ReciprocalProjection:
                 function = approximate_unknowns
             
         return function
-    
     def generate_coeff_projection_base(self):
         dim = self.dimensions
         projection_matrices=self.projection_matrices
@@ -621,7 +838,6 @@ class ReciprocalProjection:
                         projected_intensity_coefficients.lm[l][radial_mask[o_id]] = tmp_coeff[radial_mask[o_id]]
                     return projected_intensity_coefficients
         return mtip_projection
-    
     def generate_coeff_projection(self,coeff_projection):
         dim = self.dimensions
         used_orders=self.used_orders
@@ -661,7 +877,6 @@ class ReciprocalProjection:
                 #        #xprint(metrics.any())
                 return projected_intensity_coefficients
         return fixed_projection
-
     def generate_project_to_modified_intensity(self):
         if settings.general.cache_aware:
             L2_cache = settings.general.L2_cache
@@ -757,7 +972,6 @@ class ReciprocalProjection:
         SO_order_indices=order_mask.nonzero()[0][sorted_indices]
         SO_orders=orders[SO_order_indices]
         return SO_order_indices,SO_orders,sorted_indices
-
     def get_SO_application_order(self):
         dim=self.dimensions
         if dim ==2 :
@@ -766,7 +980,6 @@ class ReciprocalProjection:
         elif dim == 3:
             raise NotImplementedError
         return SO_order_indices[0]
-            
     def generate_apply_SO_freedom_2D(self,opt):
         dim=self.dimensions
         if dim ==2 :
@@ -806,7 +1019,6 @@ class ReciprocalProjection:
         elif dim == 3:
             raise NotImplementedError
         return apply_SO_freedom
-
     def generate_remaining_SO_projection(self,radial_high_pass=0.2):
         dim=self.dimensions
         if dim == 2:
@@ -815,7 +1027,6 @@ class ReciprocalProjection:
             def remaining_SO_projection(harmonic_coefficients,fxs_unknowns):            
                 raise NotImplementedError()        
         return remaining_SO_projection
-    
     def generate_remaining_SO_projection_2D(self,radial_high_pass=0.2):
         radial_high_pass_index = int((len(self.radial_points)-1)*radial_high_pass)
         projection_vectors = self.projection_matrices
@@ -896,7 +1107,6 @@ class ReciprocalProjection:
     def change_n_particles(self,N):
         '''Setter for n_particles attribute'''
         self.n_particles = N
-
     def get_number_of_particles(self):
         return 1
 

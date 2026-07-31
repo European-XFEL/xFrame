@@ -21,10 +21,11 @@ from xframe.library.math_transforms import (HankelTransformWeights,
                                             SphericalFourierTransform,
                                             SphericalFourierTransformStruct)
 from xframe.library.mathLibrary import (PolarIntegrator,
-                                       SphericalIntegrator,
-                                       SampleShapeFunctions,
-                                       get_test_function)
-from .projectLibrary.fxs_Projections import RealProjectionSNR,ReciprocalProjection
+                                        SphericalIntegrator,
+                                        SampleShapeFunctions,
+                                        get_test_function,
+                                        gaussian_fourier_transformed_spherical)
+from .projectLibrary.fxs_Projections import real_projection_factory, ReciprocalProjection, CompositeRealProjection, ProjectionContext
 from .projectLibrary.fxs_IO_methods import generate_error_routines,generate_main_error_routine
 log=logging.getLogger('root')
 
@@ -153,6 +154,7 @@ class ProjectWorker(ProjectWorkerInterface):
         self.post_processing()
         return result,locals()
 
+
 class MTIP:
    # all subsequent parameters are set by a call to MTIP.preinit
     dimensions = 'not set'
@@ -195,7 +197,8 @@ class MTIP:
                                            n_radial_points = n_radial_points,
                                            angular_bandwidth = max_order+1,
                                            hankel_type = ft_type,
-                                           n_processes_for_weight_generation = n_processes)
+                                           n_processes_for_weight_generation = n_processes,
+                                           reciprocity_coefficient = reciprocity_coefficient)
         weight_dict = load_fourier_transform_weights(hankel_struct,allow_weight_saving=opt.fourier_transform.allow_weight_saving)
 
         cls.fourier_transform_weights = weight_dict.pop('weights')
@@ -242,30 +245,36 @@ class MTIP:
         self.fourier_trf,self.harmonic_trf,self.grid_pair = self.assemble_transform_op_and_grid()
         self.max_order = self.harmonic_trf.max_order
         self.inv_proj = ReciprocalProjection(self.grid_pair['reciprocal'],self.mtip_data,self.max_order)
-        self.real_proj = self.instanciate_real_proj(self.opt.projections.real.support_snr)
+        self.real_proj = self.instanciate_real_proj(self.opt.projections.real)
         self.error_routines = self.assemble_error_routines()
         self.main_error_routine = generate_main_error_routine(self.opt.main_loop.error.methods.main.metrics,
                                                          self.opt.main_loop.error.methods.main.type)
         dr = self.fourier_trf.real_grid[1,0,0,0]-self.fourier_trf.real_grid[0,0,0,0]
         q_max  = self.fourier_trf.reciprocal_grid[-1,0,0,0]/(2*np.pi)
         print(f'qlim = {q_max}, fs = {1/dr}')
-        self.sos = signal.butter(10, 0.05 , 'lowpass', fs=1/dr, output='sos')
         self.op_dict = {"fourier_transform":self.fourier_trf,
                         "harmonic_transform":self.harmonic_trf,
                         "invariant_projection":self.inv_proj,
-                        "real_projection": self.real_proj,
-                        "sos":self.sos}
+                        "real_projection": self.real_proj}
         
         self.phasing_sketch = self.get_phasing_sketch()
+        
     def instanciate_real_proj(self,real_proj_opt):
         opt = real_proj_opt
         real_grid = self.fourier_trf.real_grid
-        return  RealProjectionSNR(real_grid,
-                                  opt.initial_volume,
-                                  opt.volume_step,
-                                  opt.max_radius,
-                                  volume_limits = opt.volume_limits,
-                                  force_connected = opt.force_connected)
+        data = {}
+        data["real_grid"] = real_grid
+        data["fourier_transform"]= self.fourier_trf
+        
+        proj_dict = {}
+        for proj_name in real_proj_opt.apply:
+            proj_settings = getattr(real_proj_opt,proj_name)
+            proj_type = proj_settings.type
+            proj_opt = proj_settings.dict().get("options",{})
+            proj = real_projection_factory(proj_type,data,proj_opt)
+            proj_dict[proj_name]=proj
+        real_projection = CompositeRealProjection(proj_dict)
+        return  real_projection
         
     def assemble_transform_op_and_grid(self):
         max_q = self.max_q
@@ -336,12 +345,11 @@ class MTIP:
             loop_opt = opt[loop_name]
             phasing_sketch[loop_name]=({},loop_opt.iterations)
             if "projections" in loop_opt:
-                real_proj = self.instanciate_real_proj(loop_opt.projections.real.support_snr)
+                real_proj = self.instanciate_real_proj(loop_opt.projections.real)
                 op_dict = {"fourier_transform":self.fourier_trf,
                             "harmonic_transform":self.harmonic_trf,
                             "invariant_projection":self.inv_proj,
-                            "real_projection": real_proj,
-                            "sos":self.sos}
+                            "real_projection": real_proj}
             else:
                 op_dict = self.op_dict
             method_names = loop_opt.order
@@ -356,6 +364,7 @@ class MTIP:
                     raise ValueError(f"Class '{camel_name}' for method '{method_name}' does not exist.")
         print(phasing_sketch)
         return phasing_sketch
+    
     def create_initial_density(self):
         opt=settings.project.density_guess
         real_grid = self.grid_pair["real"]
@@ -398,6 +407,7 @@ class MTIP:
         else:
             raise ValueError(f"Initial density type '{opt["type"]}' is unknown.")    
         return density
+    
     def create_initial_state(self):
         density = self.create_initial_density()
         ft_density = self.fourier_trf.forward_cmplx(density)
@@ -406,9 +416,9 @@ class MTIP:
                              ft_density_history=(None,ft_density),
                              error_dict=error_dict,
                              initial_density=density.copy(),
-                             volume_history = [self.real_proj.vol],
-                             contrast_history = [self.real_proj.contrast])
+                             proj_context = ProjectionContext())
         return state
+    
     def update_errors(self,state):
         real = self.error_routines["real"][0](state.density,state.intermediate_density)
         reciprocal = self.error_routines["reciprocal"][0](state.ft_density,
@@ -439,18 +449,14 @@ class MTIP:
                     
                         # update_some parametrs
                         state.iteration += 1
-                        state.volume_history.append(step.real_proj.vol)
-                        state.support = step.real_proj.support
-                        state.contrast_history.append(step.real_proj.contrast)
                         update_errors(state)
 
                 # Print output 
-                xprint('P{}:  Loop:{} Part:{} Method:{} Main Error: {} \n volume = {}, max_density={}'.format(Multiprocessing.get_process_name(),
+                xprint('P{}:  Loop:{} Part:{} Method:{} Main Error: {} \n max_density={}'.format(Multiprocessing.get_process_name(),
                                                                                                       state.iteration+1,
                                                                                                       loop_name,
                                                                                                       method_name,
                                                                                                       state.error_dict['main'][-1],
-                                                                                                      state.volume_history[-1],
                                                                                                       np.max(state.density)))
         return state
    
@@ -491,11 +497,9 @@ class PhasingState:
     intensity_harmonic_coefficients:NDArray = None # harmonic coefficients of |ft_density|^2
     iteration:int = 0
     error_dict: dict = None
-    volume_history:list = None
-    contrast_history: list = None
-    support:NDArray = None
     custom_outputs:dict = None
-
+    proj_context:ProjectionContext = None
+    
     @property
     def density(self):
         return self.density_history[-1]
@@ -514,18 +518,6 @@ class StepBase(abc.ABC):
     @abc.abstractmethod
     def __call__(self,state:PhasingState)->PhasingState:
         pass
-
-
-def r_filter(sos,data):
-    data_shape = data.shape
-    #tmp = np.moveaxis(data,0,-1)
-    tmp = data.reshape(data_shape[0],-1).T
-    for i in range(len(tmp)):
-        ray = np.concatenate((tmp[i,1:][::-1],tmp[i]))
-        filt = signal.sosfilt(sos,ray)
-        tmp[i] = filt[-data_shape[0]:]
-    out = tmp.T.reshape(data_shape)
-    return out
     
 class DuglasRachford(StepBase):
     def __init__(self,operators,opt):
@@ -537,7 +529,7 @@ class DuglasRachford(StepBase):
         self.inv_proj  = operators["invariant_projection"]
         self.tmp_intensity = np.zeros(self.ft.reciprocal_grid.shape[:-1],complex)
         self.ft_stab = opt.ft_stab
-        self.sos = operators['sos']
+        
     def p1(self,density):
         "apply invariant constarint"
         ft,ht,inv_proj = self.ft,self.ht,self.inv_proj
@@ -556,7 +548,6 @@ class DuglasRachford(StepBase):
                                                           new_I)
         #new_ft_d = np.where(self.tmp_intensity!=0,ft_d/np.sqrt(self.tmp_intensity)*np.sqrt(new_I),np.sqrt(new_I))
         new_density = ft.inverse_cmplx(new_ft_d)
-        new_dnesity = r_filter(self.sos,new_density)
         if self.ft_stab:
             ft_error = density-ft.inverse_cmplx(ft_d)
             new_density += ft_error
@@ -568,11 +559,9 @@ class DuglasRachford(StepBase):
         d1,ft_d1,new_coeff = self.p1(d)
         state.intermediate_density = d1
         state.intensity_harmonic_coefficients = new_coeff
-        d2 = self.real_proj((self.beta+1)*d1-d)
+        d2 = self.real_proj((self.beta+1)*d1-d,context = state.proj_context)
         
-        new_density =  d+d2-self.beta*d1
-
-        state.density = new_density
+        state.density = d+d2-self.beta*d1
         state.ft_density = ft_d1
         
         return state
@@ -584,7 +573,6 @@ class ErrorReduction(StepBase):
         self.ht = operators["harmonic_transform"]
         self.real_proj  = operators["real_projection"]
         self.inv_proj  = operators["invariant_projection"]
-        self.sos = operators['sos']
         self.tmp_intensity = np.zeros(self.ft.reciprocal_grid.shape[:-1],complex)
         self.ft_stab = opt.ft_stab
     def p1(self,density):
@@ -603,7 +591,6 @@ class ErrorReduction(StepBase):
                                                           old_I_from_coeff,
                                                           new_I)
         new_density= ft.inverse_cmplx(new_ft_d)
-        new_dnesity = r_filter(self.sos,new_density)
         if self.ft_stab:
             ft_error = density-ft.inverse_cmplx(ft_d)
             new_density += ft_error
@@ -616,10 +603,122 @@ class ErrorReduction(StepBase):
         state.intermediate_density = d1
         state.intensity_harmonic_coefficients = new_coeff
         
-        new_density = self.real_proj(d1)
+        new_density = self.real_proj(d1,context = state.proj_context)
         #new_density.imag = 0
         #new_density[new_density.real<0]=0
         state.density=new_density
         state.ft_density = ft_d1
         return state
+    
+class HybridInputOutputFienup(StepBase):
+    def __init__(self,operators,opt):
+        self.operators = operators
+        self.ft=operators["fourier_transform"]
+        self.ht = operators["harmonic_transform"]
+        self.real_proj  = operators["real_projection"]
+        self.inv_proj  = operators["invariant_projection"]
+        self.tmp_intensity = np.zeros(self.ft.reciprocal_grid.shape[:-1],complex)
+        self.ft_stab = opt.ft_stab
+        self.beta = opt.beta
+    def p1(self,density):
+        "apply invariant constarint"
+        ft,ht,inv_proj = self.ft,self.ht,self.inv_proj
 
+        ft_d = ft.forward_cmplx(density)
+        np.multiply(ft_d,ft_d.conj(),out = self.tmp_intensity)
+        coeff = ht.forward_cmplx(self.tmp_intensity)        
+        unknown_U = inv_proj.approximate_unknowns(coeff)
+        new_coeff = inv_proj.mtip_projection(coeff,unknown_U)
+        new_I = ht.inverse_cmplx(new_coeff)
+        old_I_from_coeff = ht.inverse_cmplx(coeff)
+        new_ft_d = inv_proj.project_to_modified_intensity(ft_d,
+                                                          self.tmp_intensity,
+                                                          old_I_from_coeff,
+                                                          new_I)
+        new_density= ft.inverse_cmplx(new_ft_d)
+        if self.ft_stab:
+            ft_error = density-ft.inverse_cmplx(ft_d)
+            new_density += ft_error
+        return new_density,new_ft_d,new_coeff
+        
+    def __call__(self,state:PhasingState)->PhasingState:
+        d = state.density
+        
+        d1,ft_d1,new_coeff = self.p1(d)
+        state.intermediate_density = d1
+        state.intensity_harmonic_coefficients = new_coeff
+
+        d2 = self.real_proj(d1)
+        invalid_pixels = ~np.isclose(d1,d2)
+        
+        d1[invalid_pixels]=d[invalid_pixels]-beta*(d2[invalid_pixels]-d1[invalid_pixels])
+
+        state.density =  d1
+        state.ft_density = ft_d1
+        return state
+
+class ShrinkWrap(StepBase):
+    def __init__(self,operators,opt):
+        self.operators = operators
+        self.ft = operators["fourier_transform"]
+        self.real_proj  = operators["real_projection"]
+        self._sigma = opt.sigma
+        self.threshold = opt.threshold
+        self.force_connected = opt.force_connected
+        self.centering_distance = opt.centering_distance
+        self.gaussian_values = gaussian_fourier_transformed_spherical(self.ft.reciprocal_grid,self.sigma)
+
+        self.cart_reciprocal_grid = spherical_to_cartesian(self.ft.reciprocal_grid)
+        
+        if self.ft.dimensions==2:
+            self.integrator = PolarIntegrator(real_grid)
+        elif self.ft.dimensions==3:
+            self.integrator = SphericalIntegrator(real_grid)
+        else:
+            raise ValueError("Only 2d and 3d fourier transforms are supported.")
+
+        if 'support' not in self.real_proj.projections:
+            raise ValueError("Trying to call ShrinkWrap without support being part of the real projections.")
+    @property
+    def sigma(self):
+        return sigma
+    @sigma.setter
+    def sigma(self,value):
+        self._sigma = value
+        self.gaussian_values = gaussian_fourier_transformed_spherical(self.ft.reciprocal_grid,value)
+        
+    def compute_center(self,density:NDArray)->NDArray:
+        abs_density = np.abs(density)
+        tot_density = self.integrator(abs_density)
+        #print(tot_density)
+        center = np.array(tuple(
+            self.integrator(abs_density*self.cart_real_grid[...,i]) for i in range(self.ft.dimensions)
+        ))/tot_density
+        return center
+    
+    def __call__(self,state:PhasingState)->PhasingState:
+        # center reconstruction if it wandered to far
+        center = self.compute_center(d)
+        if np.linalg.norm(center)> self.centering_distance:
+            phases = np.exp(1.j*np.dot(self.cart_reciprocal_grid,center))
+            state.density = self.ft.inverse_cmplx(self.ft.forward_cmplx(d)*phases)
+
+        # compute new support
+        ft_d = self.ft.forward_cmplx(np.abs(state.density))
+        ft_d*=self.gaussian_values
+        convolved_d = self.ft.inverse_cmplx(ft_d)
+
+        max_value= convolved_d.max()
+        min_value= convolved_d.min()
+        diff = max_value-min_value
+        new_support = convolved_d >= min_value + threshold[0]*diff
+
+        if self.force_connected:
+            connected_components,_ = ndimage.label(new_support)
+            component_names,counts = np.unique(connected_components[connected_components>0],return_counts=True)
+            largest_component_id = np.argmax(counts)
+            new_support = (connected_components == component_names[largest_component_id])
+            
+        # Update projection context so support projection can use the new support.
+        state.proj_context.data['support']['support']=new_support
+        return state

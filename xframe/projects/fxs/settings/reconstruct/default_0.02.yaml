@@ -70,17 +70,46 @@ density_guess:
       _value: 2
 projections:
   real:
-    projections:
-      apply:
-        _value: [support_snr]
-      support_snr:
+    apply:
+      _value:
+        command: "['support','center','real','positivity']"
+    support:
+      type:
+        _value: support_by_volume
+      options:
         initial_volume:
           _value: 1e-24 # 10nm*10nm*10nm
-        volume_step:
-          _value: 1e-27 # 1nm*1nm*1nm
+        max_radius:
+          _value:
+            _copy: /particle_radius
+        volume_limits:
+          _value:
+            command: "(0,np.inf)"
         force_connected:
           _value: False
-        _description: 'New support constraint based on greedy Intensity selection for fixed volume and SNR optimization of the volume itself. No shrink wrap needed anymore.'        
+        collect_metrics:
+          _value:
+            command: "['support','contrast_history','volume_history']"
+        _description: ' Possible metrics: support,distance_mask,optimal_contrast,contrast,volume You can also attach _history to all of them to store their value for all iterations.'
+      _description: 'New support constraint based on greedy Intensity selection for fixed volume and SNR optimization of the volume itself. No shrink wrap needed anymore.'
+    center:
+      type:
+        _value: centering
+      options:
+        activation_distance:
+          _value: 0
+        offset:
+          _value:
+            command: "np.array([0.0,0.0,0.0])"
+        collect_metrics:
+          _value:
+            command: "['center_history']"
+    real:
+      type:
+        _value: realness
+    positivity:
+      type:
+        _value: positivity
   reciprocal:
     regrid:
       _description: 'Input projection matrices (Eigenvalues of deg2 invariants) are regridded onto the internal radial grid. The interpolation type can be specified below.'

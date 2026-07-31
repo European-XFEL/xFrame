@@ -1,6 +1,6 @@
 structure_name: 'tutorial'
 dimensions: 3
-particle_radius: 200
+particle_radius: 230
 
 grid:
   n_radial_points:
@@ -9,7 +9,7 @@ grid:
   n_phi: 64
   n_theta: 32
   max_nonzero_r:
-    command: '2'
+    command: '2.5'
     
 density_guess:
   type: bump
@@ -21,17 +21,6 @@ density_guess:
   radius: 230
 
 projections:
-  real:
-    apply:
-      - support_snr
-    support_snr:
-      initial_volume: 9e6
-      volume_step: 1e4
-      max_radius: 300
-      volume_limits:
-        - 5e6
-        - 10e6
-      force_connected: False        
   reciprocal:
     use_averaged_intensity: true
     use_real_spherical_harmonics: False
@@ -57,29 +46,47 @@ main_loop:
     order:
     - prepare
     - main
-    - refinement
     prepare:
       projections:
         real:
           apply:
-            - support_snr
-          support_snr:
-            initial_volume: 10e6
-            volume_step: 1e5
-            max_radius: 250
-            volume_limits:
-              - 6e6
-              - 21e6
-            force_connected: False
+            - support
+            - center
+            - real
+            - positivity
+          support:
+            type: support_by_volume
+            options:
+              max_radius: 240
+              volume_limits:
+                command: "(1e6,np.inf)"
+              collect_metrics:
+                - support
+                - contrast_history
+                - volume_history
+                - distance_mask
+          center:
+            type: centering
+            options:
+              activation_distance: 30
+              offset: 
+                command: "np.array([0.0,0.0,0.0])"
+              collect_metrics:
+                - center_history
+          real:
+            type: realness
+          positivity:
+            type: positivity
+            
       methods:
         duglas_rachford:
-          iterations: 20
+          iterations: 60
           ft_stab: True
           beta: 0.5
         error_reduction:
-          iterations: 10
+          iterations: 20
           ft_stab: false
-      iterations: 5
+      iterations: 3
       order:
         - duglas_rachford
         - error_reduction
@@ -87,28 +94,42 @@ main_loop:
       projections:
         real:
           apply:
-            - support_snr
-          support_snr:
-            initial_volume: 20e6
-            volume_step: 1e5
-            max_radius: 230
-            volume_limits:
-              - 5e6
-              - 20e6
-            force_connected: False            
+            - support
+            - center
+            - real
+            - positivity
+          support:
+            type: support_by_volume
+            options:
+              max_radius: 240
+              volume_limits:
+                command: "(1e6,np.inf)"
+              collect_metrics:
+                - support
+                - contrast_history
+                - volume_history
+                - distance_mask
+          center:
+            type: centering
+            options:
+              activation_distance: 30
+              offset: 
+                command: "np.array([0.0,0.0,0.0])"
+              collect_metrics:
+                - center_history
+          real:
+            type: realness
+          positivity:
+            type: positivity
       methods:
         duglas_rachford:
-          iterations: 20
-          ft_stab: False
+          iterations: 30
+          ft_stab: True
           beta: 0.5
-      iterations: 0
-      order:
-        - duglas_rachford
-    refinement:
-      methods:
         error_reduction:
           iterations: 20
-          ft_stab: False
-      iterations: 0
+          ft_stab: True
+      iterations: 6
       order:
+        - duglas_rachford
         - error_reduction
