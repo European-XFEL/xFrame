@@ -60,11 +60,11 @@ main_loop:
               max_radius: 240
               volume_limits:
                 command: "(1e6,np.inf)"
-              collect_metrics:
-                - support
-                - contrast_history
-                - volume_history
-                - distance_mask
+              metrics_to_save:
+                support: last
+                contrast: history
+                volume: history
+                distance_mask: last
           center:
             type: centering
             options:
@@ -72,7 +72,7 @@ main_loop:
               offset: 
                 command: "np.array([0.0,0.0,0.0])"
               collect_metrics:
-                - center_history
+                center: history
           real:
             type: realness
           positivity:
@@ -104,11 +104,11 @@ main_loop:
               max_radius: 240
               volume_limits:
                 command: "(1e6,np.inf)"
-              collect_metrics:
-                - support
-                - contrast_history
-                - volume_history
-                - distance_mask
+              metrics_to_save:
+                support: last
+                contrast: history
+                volume: history
+                distance: mask
           center:
             type: centering
             options:
@@ -116,7 +116,7 @@ main_loop:
               offset: 
                 command: "np.array([0.0,0.0,0.0])"
               collect_metrics:
-                - center_history
+                center: history
           real:
             type: realness
           positivity:

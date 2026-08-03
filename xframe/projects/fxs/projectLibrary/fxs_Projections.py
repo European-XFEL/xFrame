@@ -2,10 +2,10 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy import ndimage
 import logging
-from typing import Protocol,Any
-from collections import defaultdict
-from dataclasses import dataclass,field
+from typing import Protocol,Any,Literal
+from dataclasses import dataclass
 import inspect
+import abc
 
 from xframe.library.pythonLibrary import DictNamespace,xprint
 from xframe.library.physicsLibrary import spherical_formfactor
@@ -26,6 +26,7 @@ from xframe import settings
 log=logging.getLogger('root')
 
 REAL_PROJECTION_REGISTRY:dict[str:Any] = {}
+MetricMode = Literal["last", "history"]
 
 class Projection(Protocol):
     def __call__(self,x:NDArray,context:dict|None = None ):
@@ -42,64 +43,118 @@ def register_real_projection(name:str):
     return decorator
 
 
-
 @dataclass
 class ProjectionContext:
-    data: dict[str, dict[str, Any]] = field(
-        default_factory=lambda: defaultdict(dict)
-    )
+    iteration:int = 0
+    update_support:bool = False
 
-    def append(self,projection_name:str, metric_name: str, value: Any,) -> None:
-        proj_data =  self.data[projection_name]
-
-        if metric_name not in proj_data:
-            proj_data[metric_name] = [value]
-        else:
-            if isinstance(proj_data[metric_name],list):
-                proj_data[metric_name].append(value)
-            else:
-                raise ValueError(f"data.{projection_name}.{metric_name} exists but is not instance of list. Append is not possible.")
-            
-    def override(self,projection_name:str, metric_name: str, value: Any,) -> None:
-        self.data[projection_name][metric_name] = value
-
-    def data_list_to_numpy(self):
-        out = {}
-        for pname,proj_data in self.data.items():
-            out[pname] = {}
-            for mname,metric_data in proj_data.items():
-                if isinstance(metric_data,list):
-                    out[pname][mname] = np.array(metric_data)
-                else:
-                    out[pname][mname] = metric_data
-        return out
+class MetricProperty(property):
+    """A property that is also registered as a metric."""
+    pass
+def metric(func):
+    return MetricProperty(func)
 
 class ProjectionBase(abc.ABC):
     name = 'not assigned'
+    def __init__(self,metrics_to_save:dict[str,MetricMode]|None = None):
+        self._saved_data: dict[str, Any] = {}
+        self._metrics_to_save: dict[str, MetricMode] = dict(metrics_to_save or {})
+
+        unknown = set(self._metrics_to_save) - self._available_metrics
+        if unknown:
+            raise ValueError(
+                f"Unknown metrics for projection '{self.name}': {sorted(unknown)}. "
+                f"Available metrics are: {sorted(self._available_metrics)}"
+            )
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+        metrics = set()
+        for base in cls.__mro__[1:]:
+            metrics.update(getattr(base, "_available_metrics", set()))
+
+        for name, obj in cls.__dict__.items():
+            if isinstance(obj, MetricProperty):
+                metrics.add(name)
+
+        cls._available_metrics = metrics
+
     @abc.abstractmethod
     def __call__(self,density:NDArray,context = None)->NDArray:
-        pass
+        pass    
+    def save_configured_metrics(self):
+        for metric,mode in self._metrics_to_save.items():
+            val = getattr(self,metric)
+            self._save_metric(metric,val,mode=mode)            
+    def _save_metric(self, name: str, value: Any, mode:MetricMode = 'last') -> None:
+        """
+        Save a metric locally inside the projection.
+        
+        history=False:
+            store only the latest value
+        
+        history=True:
+            append to a list
+        """
+        
+        if isinstance(value, np.ndarray):
+            value = value.copy()
+        
+        if mode == "last":
+            self._saved_data[name] = value
+        elif mode == "history":
+            self._saved_data.setdefault(name, []).append(
+                value
+            )
+        else:
+            raise ValueError(
+                f"Unknown metric mode {mode!r}. "
+                "Expected 'last' or 'history'."
+            )        
+    def export_data(self, history_to_numpy: bool = True) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        
+        for name, value in self._saved_data.items():
+            if history_to_numpy and isinstance(value, list):            
+                out[name] = np.asarray(value)
+            else:
+                out[name] = value
+        return out    
+    def reset_data(self) -> None:
+        self._saved_data.clear()
     
 class CompositeRealProjection:
     def __init__(self,projections:dict):
         self.projections = projections
         
     def __call__(self,density:NDArray,context:ProjectionContext|None = None)->NDArray:
-        for name,proj in self.projections.items():
+        for proj in self.projections.values():
             density=proj(density,context=context)
         return density
     
-    def project(self,density:NDArray,context:ProjectionContext|None = None):
-        return self(density,context=context)
+    def export_data(self, history_to_numpy: bool = True) -> dict[str, dict[str, Any]]:
+        out: dict[str, dict[str, Any]] = {}
+        
+        for name, proj in self.projections.items():
+            if isinstance(proj, ProjectionBase):
+                data = proj.export_data(history_to_numpy=history_to_numpy)
+                if data:
+                    out[name] = data                    
+        return out
+    
+    def reset_data(self) -> None:
+        for proj in self.projections.values():
+            if isinstance(proj, ProjectionBase):
+                proj.reset_data()
 
 @register_real_projection("realness")
 def realness_projection(density:NDArray,context=None):
-    density.imag=0.0
+    density[...] = density.real
     return density
 
 @register_real_projection("positivity")
 def positivity_projection(density:NDArray,context=None):
-    density[density<0]=0
+    density[density.real<0]=0
     return density
 
 @register_real_projection("centering")
@@ -108,7 +163,7 @@ class CenterDensity(ProjectionBase):
                  fourier_transform,
                  activation_distance=0,
                  offset:NDArray|None=None,
-                 collect_metrics = []):
+                 metrics_to_save:dict[str,MetricMode] = None):
         
         self.shift = fourier_transform.shift
 
@@ -134,57 +189,38 @@ class CenterDensity(ProjectionBase):
             self.offset = np.zeros(self.ft.dimensions,float)
         else:
             self.offset = np.asarray(offset)
-        self.center_moved = False
-        self.collect_metrics = collect_metrics
-        self.center = None
-            
+        self._center = None
+        super().__init__(metrics_to_save)
+        
+    @metric
+    def center(self):
+        return self._center
+    
     def compute_center(self,density:NDArray)->NDArray:
         abs_density = np.abs(density)
         tot_density = self.integrator(abs_density)
         #print(tot_density)
-        center = np.array(tuple(
-            self.integrator(abs_density*self.cart_real_grid[...,i]) for i in range(self.ft.dimensions)
-        ))/tot_density
+        if tot_density == 0:
+            center =- np.array([0]*self.ft.dimensions)
+        else:
+            center = np.array(tuple(
+                self.integrator(abs_density*self.cart_real_grid[...,i]) for i in range(self.ft.dimensions)
+            ))/tot_density
         return center
 
-    def compute_and_store_metrics(self,ctx:ProjectionContext):
-        # center_moved flag can be important for other projections
-        # Looking at you shrink-wrap support o.0
-        # so it is stored always
-        ctx.override(self.name,'center_moved',self.center_moved)
-        
-        for metric_name in self.collect_metrics:
-            append = metric_name.endswith("history")
-            if append:
-                metric_type = metric_name[:-8]
-            else:
-                metric_type = metric_name                
-            
-            if metric_type == "center":
-                val = self.center
-            else:
-                xprint(f"WARNING: Metric name: '{metric_type}' unknown for '{ctx.projection_name}' projection.")
-                val = None
-                
-            if val is not None:
-                if append:
-                    ctx.append(self.name,metric_name,val)
-                else:
-                    ctx.override(self.name,metric_name,val)
-            
-    
-    def __call__(self,density:NDArray,context = None)->NDArray:
+    def __call__(self,density:NDArray,context:ProjectionContext = None)->NDArray:
         center = self.compute_center(density)
-        self.center = center
-        
-        if np.linalg.norm(center) >= self.activation_distance:
+        self._center = center
+        if np.linalg.norm(center) > self.activation_distance:
             phases = np.exp(1.j*np.dot(self.cart_reciprocal_grid,(center + self.offset)))
             density = self.ft.inverse_cmplx(self.ft.forward_cmplx(density)*phases)
-            self.center_moved = True
+            center_moved = True
         else:
-            self.center_moved = False
-        if context is not None:
-            self.compute_and_store_metrics(context)
+            center_moved = False
+        if (context is not None) and center_moved:
+            # tell other projections that the support needs to be updated
+            context.update_support = True            
+        self.save_configured_metrics()
         return density
 
 @register_real_projection("support_by_volume")
@@ -194,44 +230,61 @@ class VolumetricSupportProjection(ProjectionBase):
                  max_radius:float = np.inf,
                  volume_limits=(0,np.inf),
                  force_connected = False,
-                 collect_metrics = ["support"]):
+                 metrics_to_save = None):
         self.real_grid = real_grid
         self.cart_grid = spherical_to_cartesian(real_grid)
         self.dim = self.real_grid.shape[-1]
         if self.dim == 2:
             self.integrator = PolarIntegrator(self.real_grid)
-            self.rs=real_grid[:,0,0]
         elif self.dim ==3:
             self.integrator = SphericalIntegrator(self.real_grid)
-            self.rs=real_grid[:,0,0,0]
         else:
             raise ValueError(f'Only 2 and 3 Dimensional grids are  supported, given grid dim is {self.real_grid.shape[-1]}.')
         self.vol_elements = np.zeros(self.real_grid.shape[:-1],dtype=float)
         self.vol_elements[...] = self.integrator.get_volume_elements()[...,None]
         self.total_volume = self.integrator.get_total_volume()
-        self.volume = 0
-        self.contrast = 0
-        self.contrast_function = 0 
-        self.support = np.zeros(self.vol_elements.shape,bool)
-        self.distance_mask = np.zeros(self.vol_elements.shape,bool)
+        self._volume = 0
+        self._contrast = 0
+        self._contrast_function = 0 
+        self._support = np.zeros(self.vol_elements.shape,bool)
+        self._distance_mask = np.zeros(self.vol_elements.shape,bool)
         self.force_connected = force_connected
         self.max_radius = float(max_radius)
+        if volume_limits[0]>volume_limits[1]:
+            raise ValueError(f'volume_limits[0] must be <= volume_limits[1], but volume_limits= {volume_limits} was given.')
         self.max_allowed_volume = min(self.total_volume,float(volume_limits[1]))
         self.min_allowed_volume = max(float(volume_limits[0]),np.min(self.vol_elements))
-        self.collect_metrics = collect_metrics
-        
-    def compute_distance_from_baricenter(self,density):
+        super().__init__(metrics_to_save)
+    @metric
+    def support(self):
+        return self._support
+    @metric
+    def distance_mask(self):
+        return self._distance_mask
+    @metric
+    def contrast(self):
+        return self._contrast
+    @metric
+    def contrast_function(self):
+        return self._contrast_function
+    
+    def compute_distance_from_barycenter(self,density):
         abs_density = np.abs(density)
         tot_density = self.integrator(abs_density)
-        center = np.array(tuple(
-            self.integrator(abs_density*self.cart_grid[...,i]) for i in range(self.dim)
-        ))/tot_density
-        
+        if tot_density == 0:
+            center =- np.array([0]*self.dim)
+        else:
+            center = np.array(tuple(
+                self.integrator(abs_density*self.cart_grid[...,i]) for i in range(self.dim)
+            ))/tot_density        
         distances = np.linalg.norm(self.cart_grid-center,axis = -1)
         return distances
     
     def compute_contrast_metric(self,data,order):
         max_data = np.max(data)
+        if max_data == 0:
+            raise ValueError("Maximum absolute density is 0. Stop computation.")
+        
         meds = np.zeros(len(order),float)
         maxs = np.zeros(len(order),float)
         
@@ -247,93 +300,86 @@ class VolumetricSupportProjection(ProjectionBase):
         
         # compute and return contrast metric
         return (meds-maxs[::-1])/max_data
-    
-    def compute_and_store_metrics(self,ctx:ProjectionContext):
-        for metric_name in self.collect_metrics:
-            append = metric_name.endswith("history")
-            if append:
-                metric_type = metric_name[:-8]
-            else:
-                metric_type = metric_name
-                
-            if metric_type == "support":
-                val = self.support
-            elif metric_type == "distance_mask":
-                val = self.distance_mask
-            elif metric_type == "volume":
-                val = self.volume
-            elif metric_type == "contrast":
-                val = self.contrast
-            elif metric_type == "contrast_function":
-                val = self.contrast_function
-            else:
-                xprint(f"WARNING: Metric name: {metric_type} unknown.")
-                val = None
-                
-            if val is not None:
-                if append:
-                    ctx.append(self.name,metric_name,val)
-                else:
-                    ctx.override(self.name,metric_name,val)
                     
     def __call__(self,density,context=None):
         abs_density = np.abs(density)
         flat_d = abs_density.ravel()
         order = np.argsort(flat_d)[::-1]
         
-        distances = self.compute_distance_from_baricenter(abs_density)
-        self.distance_mask[:] = (distances <=self.max_radius)
-        distance_mask = self.distance_mask
+        distances = self.compute_distance_from_barycenter(abs_density)
+        self._distance_mask[:] = (distances <=self.max_radius)
+        distance_mask = self._distance_mask
         # restrict to voxels within max_radius
         order = order[distance_mask.ravel()[order]]
+
+        if order.size==0:
+            raise ValueError("No valid pixels. Support collapsed.")
         
         # find Volume that gives maximum contrast
-        self.contrast_function = self.compute_contrast_metric(flat_d,order)
-        best_vol_id = np.argmax(self.contrast_function)
+        self._contrast_function = self.compute_contrast_metric(flat_d,order)
+        best_vol_id = np.argmax(self._contrast_function)
         
         ordered_vol = self.vol_elements.ravel()[order]
         c_volume = np.cumsum(ordered_vol)
         new_vol = max(min(c_volume[best_vol_id],self.max_allowed_volume),self.min_allowed_volume)
-        volume_id = np.searchsorted(c_volume,new_vol,side='left')
-        self.volume = new_vol
-        self.contrast = self.contrast_function[volume_id]
+        volume_id = min(np.searchsorted(c_volume,new_vol,side='left'),len(c_volume)-1)
+        self._volume = new_vol
+        self._contrast = self.contrast_function[volume_id]
         
         # define greedy support by picking voxels until volume is reached
-        self.support[:]=False
-        self.support.ravel()[order[:max(volume_id,1)]]=True
+        self._support[:]=False
+        self._support.ravel()[order[:max(volume_id+1,1)]]=True
         
         if self.force_connected:
             connected_components,_ = ndimage.label(self.support)
             component_names,counts = np.unique(connected_components[connected_components>0],return_counts=True)
             largest_component_id = np.argmax(counts)
-            self.support = (connected_components == component_names[largest_component_id])
+            self._support[:] = (connected_components == component_names[largest_component_id])
             
         # Do density projection
-        density[~self.support] = 0
-        if isinstance(context,ProjectionContext):
-            self.compute_and_store_metrics(context)
+        density[~self._support] = 0
+        self.save_configured_metrics()
         return density
 
 @register_real_projection("shrink_wrap_support")
 class Support(ProjectionBase):
-    def __init__(self,fourier_transform,initial_support,sw_sigma=None,sw_threshold=0.3):
+    def __init__(self,fourier_transform,
+                 initial_support,
+                 sw_sigma=None,
+                 sw_threshold=0.3,
+                 max_radius = np.inf,
+                 metrics_to_save:dict[str,MetricMode]|None=None):
         self.ft = fourier_transform
-        self.support = initial_support
-        self._sw_sigma = sw_sigma
-        self._sw_threshold = sw_threshold
-        self.gaussian_values = gaussian_fourier_transformed_spherical(self.ft.reciprocal_grid,self._sw_sigma)
+        self._support = initial_support
+        self._initial_support = initial_support.copy()
+        self._distance_mask = initial_support.copy()
 
+        if self.dim == 2:
+            self.integrator = PolarIntegrator(self.ft.real_grid)
+        elif self.dim ==3:
+            self.integrator = SphericalIntegrator(self.ft..real_grid)
+        else:
+            raise ValueError(f'Only 2 and 3 Dimensional grids are  supported, given grid dim is {self.real_grid.shape[-1]}.')
+        
+        if sw_sigma is None:
+            sw_sigma = 2*np.pi/self.ft.qs.max() # resolution limit
+        self._sw_sigma = max(sw_sigma,0.)
+        self._sw_threshold = min(max(sw_threshold,0.),1.)
+        self.gaussian_values = gaussian_fourier_transformed_spherical(self.ft.reciprocal_grid,self._sw_sigma)
+        self.cart_grid = spherical_to_cartesian(self.ft.real_grid)
+        super().__init__(metrics_to_save)
+        
     @property
     def sw_sigma(self):
         return self._sw_sigma
     @sw_sigma.setter
-    def gaussian_sigma(self,value):
+    def sw_sigma(self,value):
         if value>=0:
             self._sw_sigma = value
         else:
             self._sw_sigma=0
             log.warning(f'Gaussian sigma has to be grater than 0 but given value is {value}. Projecting threshold to {self._sw_sigma}.')
-        self.gaussian_values[:] = gaussian_fourier_transformed_spherical(self.grid,self._gaussian_sigma[0])
+        self.gaussian_values[:] = gaussian_fourier_transformed_spherical(self.ft.reciprocal_grid,self._sw_sigma)
         
     @property
     def sw_threshold(self):
@@ -348,32 +394,51 @@ class Support(ProjectionBase):
             log.warning(f'Shrink-wrap threshold has to lie in [0,1] but given value is {value}. Projecting threshold to {self._sw_threshold}.')
         else:
             self._sw_threshold=value
-         
+
+    @metric
+    def support(self):
+        return self._support
+    @metric
+    def distance_mask(self):
+        return self._distance_mask
+    @metric
+    def initial_support(self):
+        return self._initial_support
+
+    def compute_distance_from_barycenter(self,density):
+        abs_density = np.abs(density)
+        tot_density = self.integrator(abs_density)
+        if tot_density == 0:
+            center =- np.array([0]*self.dim)
+        else:
+            center = np.array(tuple(
+                self.integrator(abs_density*self.cart_grid[...,i]) for i in range(self.dim)
+            ))/tot_density        
+        distances = np.linalg.norm(self.cart_grid-center,axis = -1)
+        return distances
+    
     def shrink_wrap(self,density):
         # Apply gaussian bluring
         abs_density = np.abs(density)
         ft_d = self.ft.forward_cmplx(abs_density)
         ft_d *= self.gaussian_values
-        convolved_d = self.ft.inverse_cmplx(ft_d)
+        convolved_d = self.ft.inverse_cmplx(ft_d).real
+        self._distance_mask = self.compute_distance_from_barycenter(convolved_d)<=self.max_radius
         
-        # Define new suport
+        # Define new support
         max_value= convolved_d.max()
         min_value= convolved_d.min()
         diff = max_value-min_value
-        self.support = (convolved_d >= min_value + self._sw_threshold*diff)
+        self._support = (convolved_d >= min_value + self._sw_threshold*diff) & self._distance_mask
     
     def __call__(self,density:NDArray,context = None)->NDArray:
-
         if context is not None:
-            update_support = context.data[self.name].get('update_support',False)
-            update_support |= context.data['centering'].get('center_moved',False)
-            if update_support:
-                self.shrink_wrap()                
-                context.override(self.name,'update_support',False)
-        density*=self.support
-
+            if context.update_support:
+                self.shrink_wrap(density)
+        density*=self._support
+        self.save_configured_metrics()
         return density
-        
+
 def real_projection_factory(
     name: str,
     data: dict[str, Any] | None = None,
@@ -418,9 +483,27 @@ def real_projection_factory(
         
     return obj(*pos_args, **kw_args)
 
+def real_projection_factory(
+    name: str,
+    data: dict[str, Any] | None = None,
+    options: dict[str, Any] | None = None,
+):
 
+    try:
+        obj = REAL_PROJECTION_REGISTRY[name]
+    except KeyError as exc:
+        raise ValueError(f"Unknown real projection {name!r}") from exc
+    
+    # plain function projection -> return as is
+    if not inspect.isclass(obj):
+        return obj
+
+    kwargs = {**(options or {}), **(data or {})}
+    inspect.signature(obj).bind(**kwargs)  # validate arguments
+    return obj(**kwargs)
     
 ### FXS Projections
+### 
 class ReciprocalProjection:
     def load_data(self,data):
         opt = settings.project
