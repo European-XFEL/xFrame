@@ -24,7 +24,8 @@ from xframe.library.mathLibrary import (PolarIntegrator,
                                         SphericalIntegrator,
                                         SampleShapeFunctions,
                                         get_test_function,
-                                        gaussian_fourier_transformed_spherical)
+                                        gaussian_fourier_transformed_spherical,
+                                        _pi_in_q__to__reciprocity_coefficient)
 from .projectLibrary.fxs_Projections import real_projection_factory, ReciprocalProjection, CompositeRealProjection, ProjectionContext
 from .projectLibrary.fxs_IO_methods import generate_error_routines,generate_main_error_routine
 log=logging.getLogger('root')
@@ -40,6 +41,14 @@ def set_globals():
     global comm_module
     comm_module = Multiprocessing.comm_module
 
+def _get_reciprocity_coefficient(ft_opt):
+    pi_in_q = ft_opt.get('pi_in_q',None)
+    
+    if isinstance(pi_in_q,bool):
+        reciprocity_coefficient = _pi_in_q__to__reciprocity_coefficient(pi_in_q)
+    else:
+        reciprocity_coefficient = ft_opt.get('reciprocity_coefficient',np.pi)
+    return reciprocity_coefficient
 
 
 class ProjectWorker(ProjectWorkerInterface):
