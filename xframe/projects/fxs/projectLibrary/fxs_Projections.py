@@ -344,14 +344,18 @@ class VolumetricSupportProjection(ProjectionBase):
 @register_real_projection("shrink_wrap_support")
 class Support(ProjectionBase):
     def __init__(self,fourier_transform,
-                 initial_support,
+                 initial_support_radius = None,
                  sw_sigma=None,
                  sw_threshold=0.3,
                  max_radius = np.inf,
                  metrics_to_save:dict[str,MetricMode]|None=None):
         self.ft = fourier_transform
         self._support = initial_support
-        self._initial_support = initial_support.copy()
+        if initial_support_radius is None:
+            self.initial_support_radius = 0.3*self.ft.rs.max()
+        else:
+            self.initial_support_radius = initial_support_radius
+        self._initial_support = self.ft.real_grid[...,0]<self.initial_support_radius
         self._distance_mask = initial_support.copy()
 
         if self.dim == 2:
@@ -501,6 +505,7 @@ def real_projection_factory(
     kwargs = {**(options or {}), **(data or {})}
     inspect.signature(obj).bind(**kwargs)  # validate arguments
     return obj(**kwargs)
+
     
 ### FXS Projections
 ### 

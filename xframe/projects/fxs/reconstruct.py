@@ -449,6 +449,7 @@ class MTIP:
                     
                         # update_some parametrs
                         state.iteration += 1
+                        state.proj_context.iteration = state.iteration
                         update_errors(state)
 
                 # Print output 
