@@ -15,6 +15,7 @@ from xframe.library.mathLibrary import spherical_to_cartesian
 from xframe.library.math_transforms import SphericalFourierTransformStruct,SphericalFourierTransform
 #from xframe.projectRecipes import analysisLibrary as aLib
 from xframe.library.gridLibrary import GridFactory
+from xframe.library.gridLibrary import SampledFunction
 from xframe.library.gridLibrary import NestedArray
 from xframe.library.gridLibrary import double_first_dimension
 from xframe.library.pythonLibrary import getArrayOfArray
@@ -25,17 +26,13 @@ from xframe.library.physicsLibrary import ewald_sphere_theta_pi
 from xframe.library.physicsLibrary import wavelength_to_energy
 from xframe.library import units
 from xframe.database.database import DefaultDB
-from .projectLibrary.classes import FXS_Data
-from .projectLibrary.classes import FTGridPair
-from .projectLibrary.classes import SampledFunction
 from .projectLibrary.fxs_invariant_tools import ccd_associated_legendre_matrices_single_m
 from .projectLibrary.fxs_invariant_tools import deg2_invariant_to_cn_3d
 from .projectLibrary.fxs_invariant_tools import intensity_to_deg2_invariant
 from .projectLibrary.fxs_invariant_tools import deg2_invariant_to_cc_2d
 from .projectLibrary.fxs_invariant_tools import deg2_invariant_to_cc_3d
 from .projectLibrary.fxs_invariant_tools import harmonic_coeff_to_deg2_invariants
-from .projectLibrary.misk import _get_reciprocity_coefficient
-from .projectLibrary.harmonic_transforms import HarmonicTransform
+
 
 from xframe.presenters.matplotlibPresenter import heat2D_multi
 from xframe.presenters.matplotlibPresenter import plot1D
@@ -45,7 +42,19 @@ import xframe
 
 
 log=logging.getLogger('root')
-        
+
+def recursive_find_key(d,key):
+        if key in d:
+            return d[key]
+
+        return next(
+            (result for value in d.values()
+             if isinstance(value, dict)
+             for result in [recursive_find_key(value,key)]
+             if result is not None),
+            None
+        )        
+
 class ProjectDB(DefaultDB,DatabaseInterface):
     def __init__(self,**folders_files):
         super().__init__(**folders_files)
@@ -366,21 +375,13 @@ class ProjectDB(DefaultDB,DatabaseInterface):
     def save_reconstructions(self,name,data,**kwargs):
         options = self.files['reconstructions']['options']
         time_str=self.get_time_string()
-        #path=self.folders[self.files['reconstructions']['folder']]
-        #path_modifiers={'time':time_str,'structure_name':settings.project.structure_name,'dimensions':settings.project.dimensions}     
-        #run= self.get_latest_run('reconstructions',path_modifiers=path_modifiers) + 1
-        #path_modifiers['run']=run
-        #run_path=path.format(**path_modifiers)
+
         run_path,path_modifiers = self.get_reconstruction_path(return_modifiers=True)
 
         internal_grids = data['configuration']['internal_grid']
-        real_grid  = internal_grids['real_grid'].copy()
-        reciprocal_grid  = internal_grids['reciprocal_grid'].copy()
+        real_grid  = internal_grids['real'].copy()
+        reciprocal_grid  = internal_grids['reciprocal'].copy()
         q_radial_points = reciprocal_grid.__getitem__((slice(None),)+(0,)*settings.project.dimensions)
-        #log.info(reciprocal_grid[:,0,0])
-        #reciprocity_coefficient = data['configuration']['reciprocity_coefficient']
-        #log.info('reciprocity_coefficient in saving = {}'.format(reciprocity_coefficient))
-        #reciprocal_grid[...,0]*=(np.pi/reciprocity_coefficient)
         
         log.info('run_path = {}'.format(run_path))
         if 'projection_matrices' in data:
@@ -389,7 +390,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         ####### Data & Settings #######
         self.save('reconstructions',data,skip_custom_methods=True,path_modifiers=path_modifiers)
         self._save_settings(run_path)
-
+        xprint(f'saving to: {run_path}')
         
 
         ####### Error Metrics #######
@@ -441,34 +442,63 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                 
                 for id in ids_to_plot:
                     result = data['reconstruction_results'][id]
-                    real_density = result['real_density'].real
-                    real_mask = result['support_mask']
+                    data_r = []
+                    data_q = []
+                    names_r = []
+                    names_q = []
+                    
+                    real_density = result['density_history'][-1].real
+                    data_r.append(real_density)
+                    names_r.append("density")
+    
+                    reciprocal_intensity = (result['ft_density_history'][-1]*result['ft_density_history'][-1].conj()).real
+                    data_q.append(reciprocal_intensity)
+                    names_q.append("intensity")
+                    
                     initial_density = result['initial_density'].real
-                    initial_support = result['initial_support']
-                    last_real_density = result['last_real_density'].real
-                    last_real_mask = result['last_support_mask']
-                    reciprocal_intensity = (result['reciprocal_density']*result['reciprocal_density'].conj()).real
-                    last_reciprocal_intensity = (result['last_reciprocal_density']*result['last_reciprocal_density'].conj()).real
+                    data_r.append(initial_density)
+                    names_r.append("initial density")
+
+                    support_mask = recursive_find_key(result['real_proj_metrics'],"support")
+                    if isinstance(support_mask,list):
+                        support_mask = support_mask[-1]
+                    if support_mask is not None:
+                        data_r.append(support_mask)
+                        names_r.append("support")
+                    initial_support = recursive_find_key(result['real_proj_metrics'],"initial_support")
+                    if isinstance(initial_support,list):
+                        initial_support = initial_support[-1]
+                    if initial_support is not None:
+                        data_r.append(initial_support)
+                        names_r.append("initial support")
+                        
+                    distance_mask = recursive_find_key(result['real_proj_metrics'],"distance_mask")
+                    if isinstance(distance_mask,list):
+                        distance_maks=distance_mask[-1]
+                    if distance_mask is not None:
+                        data_r.append(distance_mask)
+                        names_r.append("distance_mask")
 
                     _id_str = str(id)
                     if id in worst_id:
                         _id_str = f'{id}_worst_error'
                     vtk_path_modifiers = {**path_modifiers,**{'reconstruction':_id_str}}
                     real_vtk_path=self.get_path('real_vtk',path_modifiers=vtk_path_modifiers)
-
+                    
+                    
                     if settings.project["dimensions"] == 3:
 
-                        self.save(real_vtk_path,[real_density,real_mask,last_real_density,last_real_mask,initial_density,initial_support],grid =real_grid,grid_type='spherical',skip_custom_methods=True,names=['best_density','best_support','last_density','last_support','initial_density','initial_support'])
+                        self.save(real_vtk_path,data_r,grid =real_grid,grid_type='spherical',skip_custom_methods=True,names=names_r)
                         #save_vtk([real_density,real_mask],real_grid,real_vtk_path,grid_type='spherical')
                          
                         reciprocal_vtk_path=self.get_path('reciprocal_vtk',path_modifiers=vtk_path_modifiers)
-                        self.save(reciprocal_vtk_path,[reciprocal_intensity,last_reciprocal_intensity],grid = reciprocal_grid,grid_type='spherical',skip_custom_methods=True,names=['best_intensity','last_intensity'])
+                        self.save(reciprocal_vtk_path,data_q,grid = reciprocal_grid,grid_type='spherical',skip_custom_methods=True,names=names_q)
                     elif settings.project["dimensions"] == 2:
-                        self.save(real_vtk_path,[real_density,real_mask,last_real_density,last_real_mask,initial_density,initial_support],grid =real_grid,grid_type='polar',skip_custom_methods=True,names=['best_density','best_support','last_density','last_support','initial_density','initial_support'])
+                        self.save(real_vtk_path,data_r,grid =real_grid,grid_type='polar',skip_custom_methods=True,names=names_r)
                         #save_vtk([real_density,real_mask],real_grid,real_vtk_path,grid_type='spherical')
                          
                         reciprocal_vtk_path=self.get_path('reciprocal_vtk',path_modifiers=vtk_path_modifiers)
-                        self.save(reciprocal_vtk_path,[reciprocal_intensity,last_reciprocal_intensity],grid = reciprocal_grid,grid_type='polar',skip_custom_methods=True,names=['best_intensity','last_intensity'])
+                        self.save(reciprocal_vtk_path,data_q,grid = reciprocal_grid,grid_type='polar',skip_custom_methods=True,names=names_q)
                         #log.info(reciprocal_grid[:,0,0])
                          
         except Exception as e:
@@ -756,15 +786,13 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         return data
     
     def load_invariants(self,name,**kwargs):
-        #print(self.get_path("invariants",path_modifiers=kwargs['path_modifiers']))
         data = self.load_direct(name,**kwargs)
+        
         if isinstance(data['data_projection_matrices'],np.ndarray):
             matrices = data['data_projection_matrices']
         else:
             if 'I1I1' in data['data_projection_matrices']:
                 matrices = data['data_projection_matrices']['I1I1']
-                data['data_projection_matrices_2'] = data['data_projection_matrices']
-                
             else:
                 matrices = data['data_projection_matrices']
         low_res_matrices = data.get('data_low_resolution_intensity_coefficients',False)        

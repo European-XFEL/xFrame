@@ -5,7 +5,8 @@ import os
 import numpy as np
 import traceback
 import abc
-from dataclasses import dataclass
+from typing import Any
+from dataclasses import dataclass,fields
 from numpy.typing import NDArray
 from scipy import signal
 
@@ -14,7 +15,7 @@ from xframe import database
 from xframe import Multiprocessing
 from xframe.library.pythonLibrary import (DictNamespace,
                                           xprint)
-from .projectLibrary.misk import _get_reciprocity_coefficient
+
 from xframe.interfaces import ProjectWorkerInterface
 from xframe.library.math_transforms import (HankelTransformWeights,
                                             HankelWeightStruct,
@@ -28,11 +29,24 @@ from xframe.library.mathLibrary import (PolarIntegrator,
                                         _pi_in_q__to__reciprocity_coefficient)
 from .projectLibrary.fxs_Projections import real_projection_factory, ReciprocalProjection, CompositeRealProjection, ProjectionContext
 from .projectLibrary.fxs_IO_methods import generate_error_routines,generate_main_error_routine
+from .projectLibrary.fxs_invariant_tools import Deg2Invar
 log=logging.getLogger('root')
 
 opt = None
 db = None
 comm_module = None
+PHASING_STEP_REGISTRY:dict[str:Any] = {}
+
+def register_phasing_step(name:str):
+    def decorator(cls):
+        if name in PHASING_STEP_REGISTRY:
+            raise ValueError(f"Phasing step '{name}' is already registered.")
+        PHASING_STEP_REGISTRY[name]=cls
+        if isinstance(cls,type):
+            cls.name = name
+        return cls
+    return decorator
+
 def set_globals():
     global opt
     opt = settings.project
@@ -50,6 +64,8 @@ def _get_reciprocity_coefficient(ft_opt):
         reciprocity_coefficient = ft_opt.get('reciprocity_coefficient',np.pi)
     return reciprocity_coefficient
 
+def _dataclass_to_dict(data):
+    return {field.name:getattr(data,field.name) for field in fields(data)}
 
 class ProjectWorker(ProjectWorkerInterface):
     def __init__(self):
@@ -74,8 +90,7 @@ class ProjectWorker(ProjectWorkerInterface):
         self.results['stats']={}
     
     def setup_phasing_loop(self):
-        self.mtip = MTIP(self.process_factory)
-        self.mtip.generate_phasing_loop()
+        self.mtip = MTIP()
     def start_phasing(self):
         run_profiling=settings.project.get('profiling',DictNamespace(enable=False)).enable
         m = self.mtip
@@ -93,13 +108,13 @@ class ProjectWorker(ProjectWorkerInterface):
                 import cProfile
                 profiler = cProfile.Profile()
                 profiler.enable()
-                result = m.phasing_loop()
+                result = m.do_phasing()
                 profiler.disable()
                 profiler.dump_stats(path)                    
             else:
-                result = m.phasing_loop()
+                result = m.do_phasing()
         else:
-            result = m.phasing_loop()
+            result = m.do_phasing()
         return result
         
     def start_parallel_phasing(self):
@@ -118,31 +133,31 @@ class ProjectWorker(ProjectWorkerInterface):
 
 
     def post_processing(self):
+        xprint("start post processing")
         db = database.project
         opt = settings.project
         save = db.save
         try:
-            processed_results=self.results.get('MTIP',{})
+            results=self.results.get('MTIP',{})
             stats=self.results.get('stats',{})
-            processed_results_list=[result_dict for result_dict in processed_results.values()]
-            #log.info([type(result_dict) for result_dict in processed_results])
-            #log.info([result_dict.shape for result_dict in processed_results])
+            phasing_states = [state for state in results.values()]
             errors = []
-            for result_dict in processed_results_list:
-                grid_pair = result_dict.pop('grid_pair')
-                ft_struct = result_dict.pop('fourier_transform_struct')
-                errors.append(result_dict['error_dict']['main'][-1])
-                projection_matrices = result_dict.pop('projection_matrices')                
+            for phasing_state in phasing_states:
+                errors.append(phasing_state['error_dict']['main'][-1])
+                grid_pair = phasing_state.pop('grid_pair')
+                ft_struct = phasing_state.pop('fourier_transform_struct')
+                projection_matrices = phasing_state.pop("projection_matrices")
             r_ids=np.argsort(errors)
             log.info('error sorted reconstruction = {} \n errors ={}'.format(r_ids,np.array(errors)[r_ids]))
-            processed_results_dict={str(_id):processed_results_list[_id] for _id in r_ids}
+            ordered_phasing_states = {str(_id):phasing_states[_id] for _id in r_ids}
             reciprocity_coefficient = _get_reciprocity_coefficient(settings.project.fourier_transform)
-            data_dict={'configuration':{'internal_grid':grid_pair,'xray_wavelength':self.mtip.load_mtip_data()[0]['xray_wavelength'],'reciprocity_coefficient':reciprocity_coefficient},'reconstruction_results':processed_results_dict,'projection_matrices':projection_matrices,'stats':stats,'fourier_transform_struct':ft_struct}
+            data_dict={'configuration':{'internal_grid':grid_pair,'xray_wavelength':self.mtip.load_mtip_data()[0]['xray_wavelength'],'reciprocity_coefficient':reciprocity_coefficient},'reconstruction_results':ordered_phasing_states,'projection_matrices':projection_matrices,'stats':stats,"fourier_transform_struct":ft_struct}
+            xprint("start saving in db ")
             save('reconstructions',data_dict)
         except Exception as e:
-            log.info(f'Error during postprocessing / saving with message:\n {e}')
+            log.error(f'Error during postprocessing / saving with message:\n {e}')
             log.debug(traceback.format_exc())            
-    
+            traceback.print_exc()
     def run(self):
         opt = settings.project
         start_time = time.time()
@@ -153,12 +168,11 @@ class ProjectWorker(ProjectWorkerInterface):
             self.setup_phasing_loop()
             xprint('done.\n')
             xprint(f'Start phasing:\n{self.mtip.loops_str()} ')
-            data = self.start_phasing()
+            result = {0:self.start_phasing()}
             xprint('\nFinished phasing!')
-            result = np.array([data],dtype = object)
             
         xprint('\nSaving results.')
-        self.results['MTIP']=result
+        self.results['MTIP'] = result
         self.results['stats']['run_time'] = time.time()-start_time
         self.post_processing()
         return result,locals()
@@ -222,7 +236,7 @@ class MTIP:
     def load_mtip_data(cls):
         opt = settings.project
         db = database.project
-        data = db.load('invariants',path_modifiers={'structure_name':opt.structure_name,'dimensions':opt.dimensions})        
+        data = db.load('invariants',path_modifiers={'structure_name':opt.structure_name,'dimensions':opt.dimensions})
         data_q_limits = [data['data_radial_points'].min(),data['data_radial_points'].max()]
         data_number_of_radial_points = len(data['data_radial_points'])
         return [data,data_q_limits,data_number_of_radial_points]
@@ -231,19 +245,19 @@ class MTIP:
     def loops_str(cls):
         loops_str = 'Loops:\n'
         opt = cls.loops_opt
-        max_loop_name_size = max([len(name)for name in loops_opt.order])
+        max_loop_name_size = max([len(name)for name in opt.order])
         for loop_name in opt.order:            
             loop_opt = opt.get(loop_name,{})
-            iterations = opt.get('iterations','')
+            iterations = loop_opt.get('iterations','')
             methods_string = ''
-            for method in opt.get('order',[]):
-                method_opt = opt.methods.get(method,{})
+            for method in loop_opt.get('order',[]):
+                method_opt = loop_opt.methods.get(method,{})
                 if isinstance(method_opt,(dict,DictNamespace)):
                     method_iteration = method_opt['iterations']
                 else:
                     method_iteration = method_opt
-            methods_string += f'{method_iteration}x{method} '
-        loops_str += f'\t{loop_name}:'+' '*(max_loop_name_size-len(loop_name))+ f'\t {iterations}x( '+''.join(methods_string)+')\n'
+                methods_string += f'{method_iteration}x{method} '
+            loops_str += f'\t{loop_name}:'+' '*(max_loop_name_size-len(loop_name))+ f'\t {iterations}x( '+''.join(methods_string)+')\n'
         return loops_str
         
     def __init__(self):
@@ -255,6 +269,7 @@ class MTIP:
         self.max_order = self.harmonic_trf.max_order
         self.inv_proj = ReciprocalProjection(self.grid_pair['reciprocal'],self.mtip_data,self.max_order)
         self.real_proj = self.instanciate_real_proj(self.opt.projections.real)
+        self.real_proj_dict = {'default':self.real_proj}
         self.error_routines = self.assemble_error_routines()
         self.main_error_routine = generate_main_error_routine(self.opt.main_loop.error.methods.main.metrics,
                                                          self.opt.main_loop.error.methods.main.type)
@@ -335,7 +350,9 @@ class MTIP:
                                                  used_orders = used_orders,
                                                  n_particles = 1,
                                                  invariant_mask = invariant_mask,
-                                                 xray_wavelength = xray_wavelength)
+                                                 xray_wavelength = xray_wavelength,
+                                                 )
+        #print(error_routines['real'])
         return error_routines
     
     def init_error_dict(self):
@@ -355,6 +372,7 @@ class MTIP:
             phasing_sketch[loop_name]=({},loop_opt.iterations)
             if "projections" in loop_opt:
                 real_proj = self.instanciate_real_proj(loop_opt.projections.real)
+                self.real_proj_dict['loop_name']=real_proj
                 op_dict = {"fourier_transform":self.fourier_trf,
                             "harmonic_transform":self.harmonic_trf,
                             "invariant_projection":self.inv_proj,
@@ -364,14 +382,12 @@ class MTIP:
             method_names = loop_opt.order
             for method_name in method_names:
                 mopt = loop_opt.methods[method_name]
-                camel_name = snake_to_camel_simple(method_name)
-                method_cls = globals().get(camel_name,None) 
+                method_cls = PHASING_STEP_REGISTRY[method_name]
                 if method_cls is not None:
                     method = method_cls(op_dict,mopt)
                     phasing_sketch[loop_name][0][method_name]=(method,mopt.iterations)
                 else:
-                    raise ValueError(f"Class '{camel_name}' for method '{method_name}' does not exist.")
-        print(phasing_sketch)
+                    raise ValueError(f"Class '{camel_name}' for method '{method_name}' does not exist.")                
         return phasing_sketch
     
     def create_initial_density(self):
@@ -441,7 +457,40 @@ class MTIP:
         main_error = self.main_error_routine(errs)
         errs['main'].append(main_error)
         state.error_dict = errs
+    def generate_output(self,state):
+        out = state.export_data()
+
+        # generate real_projection output:
+        real_proj_metrics = {}
+        for proj in self.real_proj_dict.values():
+            out_dict = proj.export_data()
+            for key,value in out_dict.items():
+                if key in real_proj_metrics:
+                    if isinstance(value,list):
+                        real_proj_metrics[key] = real_proj_metrics[key] + value
+                    else:
+                        real_proj_metrics[key] = value
+                else:
+                    real_proj_metrics[key]=value    
+                
+        out['real_proj_metrics']=real_proj_metrics
+        out["fourier_transform_struct"] = _dataclass_to_dict(self.fourier_trf.struct)
+        out["grid_pair"] = {'real':self.fourier_trf.real_grid,
+                            'reciprocal':self.fourier_trf.reciprocal_grid}
         
+        masked_projection_matrices = []
+        for mask, matrix in zip(self.inv_proj.radial_mask,self.inv_proj.projection_matrices):
+            tmp = np.array(matrix)
+            tmp[~mask]=0
+            masked_projection_matrices.append(tmp)
+        out['projection_matrices']=masked_projection_matrices
+        
+        ft = self.fourier_trf
+        ft_d = ft.forward_cmplx(out['density_history'][-1])
+        I = ft_d*ft_d.conjugate()
+        I_lm = ft.harm.forward_cmplx(I) 
+        out['last_deg2_invariant']=Deg2Invar.from_intensity_coeff(I_lm,dim=self.dimensions)
+        return out
     def do_phasing(self):
         state = self.create_initial_state()
         lopt = self.opt.main_loop
@@ -451,7 +500,7 @@ class MTIP:
             print(f"Starting Loop:{loop_name} with {n} iterations")
             for i in range(n):
                 for method_name,(step,m) in loop.items():
-                    print(method_name)
+                    
                     for j in range(m):
                         # Run optimization step
                         state = step(state)
@@ -460,15 +509,15 @@ class MTIP:
                         state.iteration += 1
                         state.proj_context.iteration = state.iteration
                         update_errors(state)
-
-                # Print output 
-                xprint('P{}:  Loop:{} Part:{} Method:{} Main Error: {} \n max_density={}'.format(Multiprocessing.get_process_name(),
+                    # Print output 
+                    xprint('P{}:  Loop:{} Part:{} Method:{} Main Error: {} \n max_density={}'.format(Multiprocessing.get_process_name(),
                                                                                                       state.iteration+1,
                                                                                                       loop_name,
                                                                                                       method_name,
                                                                                                       state.error_dict['main'][-1],
                                                                                                       np.max(state.density)))
-        return state
+        out = self.generate_output(state)
+        return out
    
 def snake_to_camel_simple(name: str) -> str:
     parts = name.split("_")
@@ -523,12 +572,17 @@ class PhasingState:
     @ft_density.setter
     def ft_density(self,value):
         self.ft_density_history = self.density_history[1:]+(value,)
-    
+    def export_data(self):
+        d =  _dataclass_to_dict(self)
+        d['proj_context'] =  _dataclass_to_dict(d['proj_context'])
+        return d
+        
 class StepBase(abc.ABC):
     @abc.abstractmethod
     def __call__(self,state:PhasingState)->PhasingState:
         pass
-    
+
+@register_phasing_step("DR")
 class DuglasRachford(StepBase):
     def __init__(self,operators,opt):
         self.operators = operators
@@ -548,7 +602,7 @@ class DuglasRachford(StepBase):
         np.multiply(ft_d,ft_d.conj(),out = self.tmp_intensity)
         coeff = ht.forward_cmplx(self.tmp_intensity)        
         unknown_U = inv_proj.approximate_unknowns(coeff)
-        new_coeff = inv_proj.mtip_projection(coeff,unknown_U)
+        new_coeff = inv_proj.mtip_projection(coeff,unknown_U).copy()
         new_I = ht.inverse_cmplx(new_coeff)
         
         old_I_from_coeff = ht.inverse_cmplx(coeff)
@@ -575,7 +629,8 @@ class DuglasRachford(StepBase):
         state.ft_density = ft_d1
         
         return state
-    
+
+@register_phasing_step("ER")
 class ErrorReduction(StepBase):
     def __init__(self,operators,opt):
         self.operators = operators
@@ -593,7 +648,7 @@ class ErrorReduction(StepBase):
         np.multiply(ft_d,ft_d.conj(),out = self.tmp_intensity)
         coeff = ht.forward_cmplx(self.tmp_intensity)        
         unknown_U = inv_proj.approximate_unknowns(coeff)
-        new_coeff = inv_proj.mtip_projection(coeff,unknown_U)
+        new_coeff = inv_proj.mtip_projection(coeff,unknown_U).copy()
         new_I = ht.inverse_cmplx(new_coeff)
         old_I_from_coeff = ht.inverse_cmplx(coeff)
         new_ft_d = inv_proj.project_to_modified_intensity(ft_d,
@@ -610,17 +665,18 @@ class ErrorReduction(StepBase):
         d = state.density
         
         d1,ft_d1,new_coeff = self.p1(d)
-        state.intermediate_density = d1
+        state.intermediate_density = np.array(d1)
         state.intensity_harmonic_coefficients = new_coeff
         
         new_density = self.real_proj(d1,context = state.proj_context)
         #new_density.imag = 0
         #new_density[new_density.real<0]=0
-        state.density=new_density
+        state.density = new_density
         state.ft_density = ft_d1
         return state
-    
-class HybridInputOutputFienup(StepBase):
+
+@register_phasing_step("HIO")
+class HybridInputOutputFiencup(StepBase):
     def __init__(self,operators,opt):
         self.operators = operators
         self.ft=operators["fourier_transform"]
@@ -630,6 +686,7 @@ class HybridInputOutputFienup(StepBase):
         self.tmp_intensity = np.zeros(self.ft.reciprocal_grid.shape[:-1],complex)
         self.ft_stab = opt.ft_stab
         self.beta = opt.beta
+        
     def p1(self,density):
         "apply invariant constarint"
         ft,ht,inv_proj = self.ft,self.ht,self.inv_proj
@@ -655,80 +712,25 @@ class HybridInputOutputFienup(StepBase):
         d = state.density
         
         d1,ft_d1,new_coeff = self.p1(d)
-        state.intermediate_density = d1
+        state.intermediate_density = np.array(d1)
         state.intensity_harmonic_coefficients = new_coeff
 
+            
         d2 = self.real_proj(d1)
-        invalid_pixels = ~np.isclose(d1,d2)
-        
-        d1[invalid_pixels]=d[invalid_pixels]-beta*(d2[invalid_pixels]-d1[invalid_pixels])
-
-        state.density =  d1
+        diff = state.intermediate_density-d2
+        negative_feedback = d-self.beta*diff
+        is_invalid = ~np.isclose(diff,0)
+        state.density = np.where(is_invalid,negative_feedback,d2)
         state.ft_density = ft_d1
         return state
 
+@register_phasing_step("SW")
 class ShrinkWrap(StepBase):
     def __init__(self,operators,opt):
-        self.operators = operators
-        self.ft = operators["fourier_transform"]
         self.real_proj  = operators["real_projection"]
-        self._sigma = opt.sigma
-        self.threshold = opt.threshold
-        self.force_connected = opt.force_connected
-        self.centering_distance = opt.centering_distance
-        self.gaussian_values = gaussian_fourier_transformed_spherical(self.ft.reciprocal_grid,self.sigma)
-
-        self.cart_reciprocal_grid = spherical_to_cartesian(self.ft.reciprocal_grid)
         
-        if self.ft.dimensions==2:
-            self.integrator = PolarIntegrator(real_grid)
-        elif self.ft.dimensions==3:
-            self.integrator = SphericalIntegrator(real_grid)
-        else:
-            raise ValueError("Only 2d and 3d fourier transforms are supported.")
-
-        if 'support' not in self.real_proj.projections:
-            raise ValueError("Trying to call ShrinkWrap without support being part of the real projections.")
-    @property
-    def sigma(self):
-        return sigma
-    @sigma.setter
-    def sigma(self,value):
-        self._sigma = value
-        self.gaussian_values = gaussian_fourier_transformed_spherical(self.ft.reciprocal_grid,value)
-        
-    def compute_center(self,density:NDArray)->NDArray:
-        abs_density = np.abs(density)
-        tot_density = self.integrator(abs_density)
-        #print(tot_density)
-        center = np.array(tuple(
-            self.integrator(abs_density*self.cart_real_grid[...,i]) for i in range(self.ft.dimensions)
-        ))/tot_density
-        return center
-    
     def __call__(self,state:PhasingState)->PhasingState:
-        # center reconstruction if it wandered to far
-        center = self.compute_center(d)
-        if np.linalg.norm(center)> self.centering_distance:
-            phases = np.exp(1.j*np.dot(self.cart_reciprocal_grid,center))
-            state.density = self.ft.inverse_cmplx(self.ft.forward_cmplx(d)*phases)
-
-        # compute new support
-        ft_d = self.ft.forward_cmplx(np.abs(state.density))
-        ft_d*=self.gaussian_values
-        convolved_d = self.ft.inverse_cmplx(ft_d)
-
-        max_value= convolved_d.max()
-        min_value= convolved_d.min()
-        diff = max_value-min_value
-        new_support = convolved_d >= min_value + threshold[0]*diff
-
-        if self.force_connected:
-            connected_components,_ = ndimage.label(new_support)
-            component_names,counts = np.unique(connected_components[connected_components>0],return_counts=True)
-            largest_component_id = np.argmax(counts)
-            new_support = (connected_components == component_names[largest_component_id])
-            
-        # Update projection context so support projection can use the new support.
-        state.proj_context.data['support']['support']=new_support
+        state.proj_context.update_support = True
+        state.density = self.real_proj(state.density)
         return state
+    

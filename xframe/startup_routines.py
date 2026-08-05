@@ -219,7 +219,7 @@ def _load_db(name,db_name,opt,target='project'):
     try:      
         db = getattr(importlib.import_module(db_module_pypath),db_name)(**opt)
     except (AttributeError, ModuleNotFoundError) as e:
-        log.info('Could not instanciate database class {} in project {} use default database instead. Recived the following error during initialization: \n {}'.format(db_name,name,e))
+        log.error('Could not instanciate database class {} in project {} use default database instead. Recived the following error during initialization: \n {}'.format(db_name,name,e))
         log.debug(traceback.format_exc())
         db = xframe.database.database.DefaultDB(**opt)
     return db

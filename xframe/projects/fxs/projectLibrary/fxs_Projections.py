@@ -85,7 +85,8 @@ class ProjectionBase(abc.ABC):
     def save_configured_metrics(self):
         for metric,mode in self._metrics_to_save.items():
             val = getattr(self,metric)
-            self._save_metric(metric,val,mode=mode)            
+            self._save_metric(metric,val,mode=mode)
+            
     def _save_metric(self, name: str, value: Any, mode:MetricMode = 'last') -> None:
         """
         Save a metric locally inside the projection.
@@ -113,7 +114,6 @@ class ProjectionBase(abc.ABC):
             )        
     def export_data(self, history_to_numpy: bool = True) -> dict[str, Any]:
         out: dict[str, Any] = {}
-        
         for name, value in self._saved_data.items():
             if history_to_numpy and isinstance(value, list):            
                 out[name] = np.asarray(value)
@@ -267,6 +267,9 @@ class VolumetricSupportProjection(ProjectionBase):
     @metric
     def contrast_function(self):
         return self._contrast_function
+    @metric
+    def volume(self):
+        return self._volume
     
     def compute_distance_from_barycenter(self,density):
         abs_density = np.abs(density)
@@ -333,6 +336,8 @@ class VolumetricSupportProjection(ProjectionBase):
         if self.force_connected:
             connected_components,_ = ndimage.label(self.support)
             component_names,counts = np.unique(connected_components[connected_components>0],return_counts=True)
+            #for n in component_names[counts<10]:
+            #    self._support[connected_components==n]=False
             largest_component_id = np.argmax(counts)
             self._support[:] = (connected_components == component_names[largest_component_id])
             
@@ -350,21 +355,23 @@ class Support(ProjectionBase):
                  max_radius = np.inf,
                  metrics_to_save:dict[str,MetricMode]|None=None):
         self.ft = fourier_transform
-        self._support = initial_support
         if initial_support_radius is None:
             self.initial_support_radius = 0.3*self.ft.rs.max()
         else:
             self.initial_support_radius = initial_support_radius
         self._initial_support = self.ft.real_grid[...,0]<self.initial_support_radius
-        self._distance_mask = initial_support.copy()
+        self._support = self._initial_support.copy()
+        self._distance_mask = self._initial_support.copy()
 
+        self.dim = self.ft.dimensions
         if self.dim == 2:
             self.integrator = PolarIntegrator(self.ft.real_grid)
         elif self.dim ==3:
-            self.integrator = SphericalIntegrator(self.ft..real_grid)
+            self.integrator = SphericalIntegrator(self.ft.real_grid)
         else:
             raise ValueError(f'Only 2 and 3 Dimensional grids are  supported, given grid dim is {self.real_grid.shape[-1]}.')
-        
+
+        self.max_radius = max_radius
         if sw_sigma is None:
             sw_sigma = 2*np.pi/self.ft.qs.max() # resolution limit
         self._sw_sigma = max(sw_sigma,0.)
@@ -423,7 +430,7 @@ class Support(ProjectionBase):
     
     def shrink_wrap(self,density):
         # Apply gaussian bluring
-        abs_density = np.abs(density)
+        abs_density = np.abs(density).astype(complex)
         ft_d = self.ft.forward_cmplx(abs_density)
         ft_d *= self.gaussian_values
         convolved_d = self.ft.inverse_cmplx(ft_d).real
@@ -503,8 +510,12 @@ def real_projection_factory(
         return obj
 
     kwargs = {**(options or {}), **(data or {})}
-    inspect.signature(obj).bind(**kwargs)  # validate arguments
-    return obj(**kwargs)
+    sig = inspect.signature(obj)
+    bound = sig.bind(**{
+        k: v for k, v in kwargs.items()
+        if k in sig.parameters
+    })
+    return obj(*bound.args,**bound.kwargs)
 
     
 ### FXS Projections
@@ -538,7 +549,6 @@ class ReciprocalProjection:
         if self.dimensions==2:
             self.integrated_intensity = midpoint_rule(self.average_intensity.data * self.data_radial_points , self.data_radial_points,axis = 0)*2*np.sqrt(np.pi)
         else:
-            #xprint(f'aint shape = {self.average_intensity.data.shape} data points shape = {self.data_radial_points.shape}')
             
             self.integrated_intensity = midpoint_rule(self.average_intensity.data * self.data_radial_points**2 , self.data_radial_points,axis = 0)*2*np.sqrt(np.pi)
             if opt.use_real_spherical_harmonics:

@@ -19,7 +19,6 @@ from xframe.library.mathLibrary import (eval_legendre,
 from xframe.library.mathLibrary import RadialIntegrator,solve_procrustes_problem,psd_back_substitution,back_substitution
 from xframe.library.math_transforms import get_harmonic_transform_from_array
 from xframe.library.math_transforms import get_harmonic_transform
-from .harmonic_transforms import HarmonicTransform
 import xframe.library.mathLibrary as mLib
 from xframe.library.mathLibrary import nearest_positive_semidefinite_matrix
 from scipy.signal import butter,sosfilt
@@ -1179,10 +1178,7 @@ class Deg2Invar:
             B = np.array(tuple(coeff.lm[l] @ np.conj(coeff.lm[l].T) for l in coeff.ls))
         return B
     @staticmethod
-    def from_intensity_coeff():
-        pass
-    @staticmethod
-    def regularize(b_matrices,
+    def rcegularize(b_matrices,
                    dim=3,
                    q_id_limits=None,
                    sort_mode=0,

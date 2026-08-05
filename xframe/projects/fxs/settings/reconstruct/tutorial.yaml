@@ -38,23 +38,86 @@ multi_process:
   use: True
   n_weight_generating_processes: false
 GPU:
-  use: True
+  use: False
   n_gpu_workers:
     command: max(Multiprocessing.free_cpus//10,1)
 main_loop:
   sub_loops:
     order:
     - prepare
-    - main
+    #- main
     prepare:
       projections:
         real:
           apply:
-            - support
+            - supp
+            - center
+            #- supp_sw
+            - real
+            - positivity
+          supp:
+            type: support_by_volume
+            options:
+              max_radius: 240
+              volume_limits:
+                command: "(1e6,np.inf)"
+              metrics_to_save:
+                support: last
+                contrast: history
+                volume: history
+                distance_mask: last
+          supp_sw:
+            type: shrink_wrap_support
+            options:
+              max_radius: 240
+              sw_sigma: 10
+              sw_threshold: 0.09
+              metrics_to_save:
+                support: last
+                initial_support: last
+                distance_mask: last
+          center:
+            type: centering
+            options:
+              activation_distance: 30
+              offset: 
+                command: "np.array([0.0,0.0,0.0])"
+              metrics_to_save:
+                center: history
+          real:
+            type: realness
+          positivity:
+            type: positivity
+            
+      methods:
+        DR:
+          iterations: 60
+          ft_stab: True
+          beta: 0.5
+        HIO:
+          iterations: 60
+          ft_stab: True
+          beta: 0.5
+        SW:
+          iterations: 1
+        ER:
+          iterations: 20
+          ft_stab: false
+      iterations: 3
+      order:
+        - DR
+        #- HIO
+        - SW
+        - ER
+    main:
+      projections:
+        real:
+          apply:
+            - supp
             - center
             - real
             - positivity
-          support:
+          supp:
             type: support_by_volume
             options:
               max_radius: 240
@@ -71,51 +134,7 @@ main_loop:
               activation_distance: 30
               offset: 
                 command: "np.array([0.0,0.0,0.0])"
-              collect_metrics:
-                center: history
-          real:
-            type: realness
-          positivity:
-            type: positivity
-            
-      methods:
-        duglas_rachford:
-          iterations: 60
-          ft_stab: True
-          beta: 0.5
-        error_reduction:
-          iterations: 20
-          ft_stab: false
-      iterations: 3
-      order:
-        - duglas_rachford
-        - error_reduction
-    main:
-      projections:
-        real:
-          apply:
-            - support
-            - center
-            - real
-            - positivity
-          support:
-            type: support_by_volume
-            options:
-              max_radius: 240
-              volume_limits:
-                command: "(1e6,np.inf)"
               metrics_to_save:
-                support: last
-                contrast: history
-                volume: history
-                distance: mask
-          center:
-            type: centering
-            options:
-              activation_distance: 30
-              offset: 
-                command: "np.array([0.0,0.0,0.0])"
-              collect_metrics:
                 center: history
           real:
             type: realness
@@ -129,7 +148,7 @@ main_loop:
         error_reduction:
           iterations: 20
           ft_stab: True
-      iterations: 6
+      iterations: 3
       order:
         - duglas_rachford
         - error_reduction

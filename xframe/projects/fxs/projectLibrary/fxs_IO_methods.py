@@ -123,22 +123,14 @@ def generate_fxs_error_routine(grid_pair,opt):
 def generate_l2_rel_diff_error_routine(grid_pair,_type='real',mask = True):
     if _type == 'reciprocal':
         grid = grid_pair['reciprocal']
-        pair_id = 0
-        power = 1
     else:            
         grid = grid_pair['real']
-        pair_id = 1
-        power = 2
     dim=grid.shape[-1]
     integrate = get_integrator(dim,grid)
 
     nabs = np.abs
     nsquare = np.square
     def error_routine(values,projected_values):
-        if _type=='real':
-            projected_values = projected_values[0]
-        #square_diff = (nabs(values - projected_values).real)**2
-        #square = (nabs(values).real)**2
         diff = values - projected_values
         square_diff = (diff*diff.conj()).real
         square = (values*values.conj()).real
@@ -157,12 +149,8 @@ def generate_l2_rel_diff_error_routine(grid_pair,_type='real',mask = True):
 def generate_l2_rel_diff_error_routine_cache_aware(grid_pair,L2_cache,_type='real',mask = True):
     if _type == 'reciprocal':
         grid = grid_pair['reciprocal']
-        pair_id = 0
-        power = 1
     else:            
         grid = grid_pair['real']
-        pair_id = 1
-        power = 2
     dim=grid.shape[-1]
     integrate = get_integrator(dim,grid)
 
@@ -211,8 +199,6 @@ def generate_l2_rel_diff_error_routine_cache_aware(grid_pair,L2_cache,_type='rea
         square = loop_2
         
     def error_routine(values,projected_values):
-        if _type=='real':
-            projected_values = projected_values[0]
         diff = values - projected_values
         square(diff,values)
         tmp_square_diff[~mask]=0
@@ -311,13 +297,8 @@ def generate_l2_rel_diff_error_routine_gpu(grid_pair,_type='real'):
 
 
 def generate_real_l2_rel_diff_error_routine(grid_pair,**kwargs):
-    use_gpu = settings.project.GPU.get('error_squares',False)
-    limit_to_initial_mask = kwargs.get('inside_initial_support',False)
-    if limit_to_initial_mask:
-        #log.info('limit to initial support \n\n\n\n') 
-        mask = kwargs['initial_mask']
-    else:
-        mask = True
+    max_radius = kwargs.get('max_radius',np.inf)
+    mask = grid_pair["real"][...,0]<=max_radius
         
     if settings.general.cache_aware:
         error_routine = generate_l2_rel_diff_error_routine_cache_aware(grid_pair,settings.general.L2_cache,_type='real',mask = mask)
@@ -325,7 +306,6 @@ def generate_real_l2_rel_diff_error_routine(grid_pair,**kwargs):
         error_routine = generate_l2_rel_diff_error_routine(grid_pair,_type='real',mask = mask)
     return error_routine
 def generate_reciprocal_l2_rel_diff_error_routine(grid_pair,**kwargs):
-    use_gpu = settings.project.GPU.get('error_squares',False)
     if settings.general.cache_aware:
         error_routine = generate_l2_rel_diff_error_routine_cache_aware(grid_pair,settings.general.L2_cache,_type='reziprocal')
     else:

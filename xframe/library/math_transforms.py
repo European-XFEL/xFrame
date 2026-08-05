@@ -398,7 +398,6 @@ class HankelTransform:
         self.q_max = struct.max_q
         self.r_max = struct.max_r
         self.r_support = struct.max_nonzero_r
-
         #xprint(f'current process id = {Multiprocessing.get_process_name()}')
         if struct.use_gpu and Multiprocessing.get_process_name()==0:
             comm = Multiprocessing.comm_module
@@ -418,7 +417,6 @@ class HankelTransform:
             iw = self.assembled_weights['inverse'][:,:max_id]
             self.assembled_weights['forward'] = fw
             self.assembled_weights['inverse'] = iw
-
         if 'pinv' in struct.other:
             #fw = self.assembled_weights['forward']            
             #self.assembled_weights['inverse'] = np.moveaxis(np.array([np.linalg.pinv(fw[...,i]) for i in range(fw.shape[-1])]),0,-1)

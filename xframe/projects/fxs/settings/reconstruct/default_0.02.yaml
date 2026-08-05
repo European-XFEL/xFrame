@@ -176,8 +176,9 @@ main_loop:
           _only_if:
             x: calculate
             condition: '"l2_projection_diff" in x'
-          inside_initial_support:
-            _value: False
+          max_radius:
+            _value:
+              _copy: /particle_radius
       reciprocal:
         calculate:
           _value: []
@@ -185,8 +186,9 @@ main_loop:
           _only_if:
             x: calculate
             condition: '"l2_projection_diff" in x'
-          inside_initial_support:
-            _value: False
+          max_radius:
+            _value:
+              _copy: /particle_radius
         deg2_invariant_l2_diff:
           _only_if:
             x: calculate
