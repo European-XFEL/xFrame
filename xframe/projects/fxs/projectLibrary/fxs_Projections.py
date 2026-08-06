@@ -1,6 +1,7 @@
 import numpy as np
 from numpy.typing import NDArray
 from scipy import ndimage
+from scipy.ndimage import gaussian_filter1d
 import logging
 from typing import Protocol,Any,Literal
 from dataclasses import dataclass
@@ -226,11 +227,14 @@ class CenterDensity(ProjectionBase):
 @register_real_projection("support_by_volume")
 class VolumetricSupportProjection(ProjectionBase):
     def __init__(self,
+                 fourier_transform,
                  real_grid:NDArray,
                  max_radius:float = np.inf,
                  volume_limits=(0,np.inf),
                  force_connected = False,
+                 gaussian_sigma = None,
                  metrics_to_save = None):
+        self.ft = fourier_transform
         self.real_grid = real_grid
         self.cart_grid = spherical_to_cartesian(real_grid)
         self.dim = self.real_grid.shape[-1]
@@ -246,7 +250,7 @@ class VolumetricSupportProjection(ProjectionBase):
         self._volume = 0
         self._contrast = 0
         self._contrast_function = 0 
-        self._support = np.zeros(self.vol_elements.shape,bool)
+        self._support = np.zeros(self.vol_elements.shape,float)
         self._distance_mask = np.zeros(self.vol_elements.shape,bool)
         self.force_connected = force_connected
         self.max_radius = float(max_radius)
@@ -254,6 +258,9 @@ class VolumetricSupportProjection(ProjectionBase):
             raise ValueError(f'volume_limits[0] must be <= volume_limits[1], but volume_limits= {volume_limits} was given.')
         self.max_allowed_volume = min(self.total_volume,float(volume_limits[1]))
         self.min_allowed_volume = max(float(volume_limits[0]),np.min(self.vol_elements))
+        self.gaussian_sigma = gaussian_sigma
+        if self.gaussian_sigma is not None:
+            self.gaussian_values = gaussian_fourier_transformed_spherical(self.ft.reciprocal_grid,self.gaussian_sigma)
         super().__init__(metrics_to_save)
     @metric
     def support(self):
@@ -305,7 +312,13 @@ class VolumetricSupportProjection(ProjectionBase):
         return (meds-maxs[::-1])/max_data
                     
     def __call__(self,density,context=None):
-        abs_density = np.abs(density)
+        if self.gaussian_sigma is not None:
+            ft_d = self.ft.forward_cmplx(density)
+            ft_d *= self.gaussian_values
+            smooth_density = self.ft.inverse_cmplx(ft_d)
+            
+        abs_density = np.abs(smooth_density)
+        #abs_density = gaussian_filter1d(abs_density,self.gaussian_sigma,mode='constant',axis=0)
         flat_d = abs_density.ravel()
         order = np.argsort(flat_d)[::-1]
         
@@ -328,7 +341,7 @@ class VolumetricSupportProjection(ProjectionBase):
         volume_id = min(np.searchsorted(c_volume,new_vol,side='left'),len(c_volume)-1)
         self._volume = new_vol
         self._contrast = self.contrast_function[volume_id]
-        
+
         # define greedy support by picking voxels until volume is reached
         self._support[:]=False
         self._support.ravel()[order[:max(volume_id+1,1)]]=True
@@ -336,13 +349,13 @@ class VolumetricSupportProjection(ProjectionBase):
         if self.force_connected:
             connected_components,_ = ndimage.label(self.support)
             component_names,counts = np.unique(connected_components[connected_components>0],return_counts=True)
-            #for n in component_names[counts<10]:
-            #    self._support[connected_components==n]=False
-            largest_component_id = np.argmax(counts)
-            self._support[:] = (connected_components == component_names[largest_component_id])
+            for n in component_names[counts<100]:
+                self._support[connected_components==n]=False
+            #largest_component_id = np.argmax(counts)
+            #self._support[:] = (connected_components == component_names[largest_component_id])
             
         # Do density projection
-        density[~self._support] = 0
+        density *= self._support
         self.save_configured_metrics()
         return density
 
@@ -430,10 +443,9 @@ class Support(ProjectionBase):
     
     def shrink_wrap(self,density):
         # Apply gaussian bluring
-        abs_density = np.abs(density).astype(complex)
-        ft_d = self.ft.forward_cmplx(abs_density)
+        ft_d = self.ft.forward_cmplx(density)
         ft_d *= self.gaussian_values
-        convolved_d = self.ft.inverse_cmplx(ft_d).real
+        convolved_d = np.abs(self.ft.inverse_cmplx(ft_d))
         self._distance_mask = self.compute_distance_from_barycenter(convolved_d)<=self.max_radius
         
         # Define new support

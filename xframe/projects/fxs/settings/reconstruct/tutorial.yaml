@@ -61,6 +61,7 @@ main_loop:
               max_radius: 240
               volume_limits:
                 command: "(1e6,np.inf)"
+              gaussian_sigma: 10.0
               metrics_to_save:
                 support: last
                 contrast: history
@@ -107,7 +108,7 @@ main_loop:
       order:
         - DR
         #- HIO
-        - SW
+        #- SW
         - ER
     main:
       projections:
