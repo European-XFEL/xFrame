@@ -479,10 +479,7 @@ class MTIP:
         # update to correct support
         support = recursive_find_key(real_proj_metrics,"support")
         if support is not None:
-            print("yay")
             out['support'] = support
-        else:
-            print("no support found")
         
         out['real_proj_metrics']=real_proj_metrics
         out["fourier_transform_struct"] = _dataclass_to_dict(self.fourier_trf.struct)
