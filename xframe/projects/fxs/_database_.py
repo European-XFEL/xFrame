@@ -386,7 +386,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
         log.info('run_path = {}'.format(run_path))
         if 'projection_matrices' in data:
             p_matrices = data['projection_matrices']
-
+            
         ####### Data & Settings #######
         self.save('reconstructions',data,skip_custom_methods=True,path_modifiers=path_modifiers)
         self._save_settings(run_path)
@@ -458,9 +458,8 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                     initial_density = result['initial_density'].real
                     data_r.append(initial_density)
                     names_r.append("initial density")
-
+                    
                     support_mask = recursive_find_key(result['real_proj_metrics'],"support")
-                    result["support"] = support_mask
                     if isinstance(support_mask,list):
                         support_mask = support_mask[-1]
                     if support_mask is not None:

@@ -30,6 +30,7 @@ from xframe.library.mathLibrary import (PolarIntegrator,
 from .projectLibrary.fxs_Projections import real_projection_factory, ReciprocalProjection, CompositeRealProjection, ProjectionContext
 from .projectLibrary.fxs_IO_methods import generate_error_routines,generate_main_error_routine
 from .projectLibrary.fxs_invariant_tools import Deg2Invar
+from ._database_ import recursive_find_key
 log=logging.getLogger('root')
 
 opt = None
@@ -66,7 +67,7 @@ def _get_reciprocity_coefficient(ft_opt):
 
 def _dataclass_to_dict(data):
     return {field.name:getattr(data,field.name) for field in fields(data)}
-
+    
 class ProjectWorker(ProjectWorkerInterface):
     def __init__(self):
         #log.info('analysis worker init')
@@ -474,7 +475,15 @@ class MTIP:
                         real_proj_metrics[key] = value
                 else:
                     real_proj_metrics[key]=value    
-                
+
+        # update to correct support
+        support = recursive_find_key(real_proj_metrics,"support")
+        if support is not None:
+            print("yay")
+            out['support'] = support
+        else:
+            print("no support found")
+        
         out['real_proj_metrics']=real_proj_metrics
         out["fourier_transform_struct"] = _dataclass_to_dict(self.fourier_trf.struct)
         out["grid_pair"] = {'real':self.fourier_trf.real_grid,
