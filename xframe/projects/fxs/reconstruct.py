@@ -275,7 +275,7 @@ class MTIP:
                                                          self.opt.main_loop.error.methods.main.type)
         dr = self.fourier_trf.real_grid[1,0,0,0]-self.fourier_trf.real_grid[0,0,0,0]
         q_max  = self.fourier_trf.reciprocal_grid[-1,0,0,0]/(2*np.pi)
-        print(f'qlim = {q_max}, fs = {1/dr}')
+        #print(f'qlim = {q_max}, fs = {1/dr}')
         self.op_dict = {"fourier_transform":self.fourier_trf,
                         "harmonic_transform":self.harmonic_trf,
                         "invariant_projection":self.inv_proj,
@@ -497,7 +497,7 @@ class MTIP:
         update_errors = self.update_errors
         
         for loop_name,(loop,n) in self.phasing_sketch.items():
-            print(f"Starting Loop:{loop_name} with {n} iterations")
+            xprint(f"Starting Loop:{loop_name} with {n} iterations")
             for i in range(n):
                 for method_name,(step,m) in loop.items():
                     
