@@ -441,7 +441,8 @@ class MTIP:
                              ft_density_history=(None,ft_density),
                              error_dict=error_dict,
                              initial_density=density.copy(),
-                             proj_context = ProjectionContext())
+                             proj_context = ProjectionContext(),
+                             support = np.ones(density.shape,bool))
         return state
     
     def update_errors(self,state):
@@ -562,6 +563,7 @@ class PhasingState:
     ft_density_history:list = None
     intermediate_density:NDArray= None # After inv constraint before real constraint
     intensity_harmonic_coefficients:NDArray = None # harmonic coefficients of |ft_density|^2
+    support:NDArray = None
     iteration:int = 0
     error_dict: dict = None
     custom_outputs:dict = None

@@ -1,7 +1,7 @@
 structure_name: 'tutorial'
 
 reconstruction_files:
-  - 3d_tutorial/{today}/run_0/data.h5
+  - 3d_tutorial/{today}/run_22/data.h5
   #- 3d_tutorial/{today}/run_1/data.h5
   #- 3d_tutorial/4_2_2042/run_0/data.h5
 
@@ -16,19 +16,21 @@ multi_processing:
 selection:
   use_selection_file: False
   error_limits: [None,None]
+  n_reconstructions: all
   
-  
+
 alignment:
-  align_by_masks: False
+  align_by: 0 #0:density,
   normalization:
-    use: True
+    apply: True
     method:
       command: 'np.max' # 'mean'
   positional:
     apply: True
   rotational:
     apply: True
-    r_limits: [None,None] # in angstroem
+    #r_limits: [270,350] # in angstroem
+    r_limits: [None,None] #[270,350] # in angstroem
     consider_point_inverse: True
   
 averaging:

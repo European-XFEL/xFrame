@@ -54,6 +54,7 @@ class ProjectWorker(ProjectWorkerInterface):
         db = self.db
 
         file_paths = [os.path.join(db.get_path('reconstructions',is_file=False),path).format(today = db.get_time_string()) for path in opt.reconstruction_files]
+        print(file_paths)
         _struct = SphericalFourierTransformStruct(**db.load(file_paths[0],h5_path='fourier_transform_struct'))
         _struct.use_gpu=self.opt.GPU.use
         self.fourier_struct = _struct
@@ -63,7 +64,7 @@ class ProjectWorker(ProjectWorkerInterface):
                                                      n_processes = opt.multi_processing.n_processes)
         self.dim = _struct.dimension
         input_proj_dict = db.load(file_paths[0],h5_path = 'projection_matrices')
-        self.input_proj_matrices = tuple(input_proj_dict[int(f'{i}')] for i in range(_struct.angular_bandwidth))
+        self.input_proj_matrices = tuple(input_proj_dict) #tuple(input_proj_dict[int(f'{i}')] for i in range(_struct.angular_bandwidth))
         rec_ids = []
         errors = []
         for file_id,path in enumerate(file_paths):
@@ -79,7 +80,6 @@ class ProjectWorker(ProjectWorkerInterface):
                         continue
                 rec = rec_results[str(key)]
                 rec_ids.append((file_id,int(key)))
-                
                 errors.append(rec['error_dict/main'][-1])
             dat.close()
             

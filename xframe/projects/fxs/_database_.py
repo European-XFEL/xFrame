@@ -460,6 +460,7 @@ class ProjectDB(DefaultDB,DatabaseInterface):
                     names_r.append("initial density")
 
                     support_mask = recursive_find_key(result['real_proj_metrics'],"support")
+                    result["support"] = support_mask
                     if isinstance(support_mask,list):
                         support_mask = support_mask[-1]
                     if support_mask is not None:

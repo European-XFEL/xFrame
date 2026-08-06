@@ -1269,16 +1269,16 @@ class SphericalIntegrator:
         self.gauss_weights = roots_legendre(self.n_theta)[1]
 
     def __call__(self,values, normed=False):
-        w_shape = (1,) + self.gauss_weights.shape + (1,)*(values.ndim - 3)        
-        s2_int = np.pi/self.n_theta*(np.sum(self.gauss_weights.reshape(w_shape)*np.sum(values,axis=-1),axis = 1))
-        r_int = np.sum(s2_int * (self.rs**2)*self.dr)
+        w_shape = (1,)*(values.ndim - 3) + (1,) + self.gauss_weights.shape
+        s2_int = np.pi/self.n_theta*(np.sum(self.gauss_weights.reshape(w_shape)*np.sum(values,axis=-1),axis = -1))
+        r_int = np.sum(s2_int * (self.rs**2)*self.dr,axis=-1)
         if normed:
             r_int /=self.norm
         return r_int
 
     def angular_only(self,values,normed=False):
-        w_shape = (1,) + w.shape + (1,)*(values.ndim - 3)        
-        s2_int = np.pi/self.n_theta*(np.sum(self.gauss_weights.reshape(w_shape)*np.sum(values,axis=-1),axis = 1))
+        w_shape = (1,)*(values.ndim - 3) + (1,) + self.gauss_weights.shape
+        s2_int = np.pi/self.n_theta*(np.sum(self.gauss_weights.reshape(w_shape)*np.sum(values,axis=-1),axis = -1))
         if normed:
             s2_int /=self.norm_angular
         return s2_int
@@ -1306,9 +1306,9 @@ class PolarIntegrator():
         self.norm = np.pi*self.max_r**2
 
     def __call__(self, values, norm=False):
-        rs_shape = self.rs.shape + (1,)*(values.ndim - 2)
-        s_int = np.sum(values*self.dphi,axis = 1)
-        r_int = np.sum(s_int * self.rs.reshape(rs_shape)*self.dr, axis = 0)
+        rs_shape = (1,)*(values.ndim - 2) + self.rs.shape
+        s_int = np.sum(values*self.dphi,axis = -1)
+        r_int = np.sum(s_int * self.rs.reshape(rs_shape)*self.dr, axis = -1)
         return r_int
 
     def L2_norm(self,values):
@@ -2134,7 +2134,7 @@ class CumulativeVariance:
 #################
 ####alignment####
 def generate_calc_center(real_grid):
-    cart_grid = spherical_to_cartesian(real_grid)
+    cart_grid = np.moveaxis(spherical_to_cartesian(real_grid),-1,0)
     dim = real_grid[:].shape[-1]
 
     if dim ==2:
@@ -2146,7 +2146,7 @@ def generate_calc_center(real_grid):
         density_integral = si(density.real)            
         if density_integral==0:
             density_integral=1
-        center = si(cart_grid[:]*density[...,None].real)/density_integral
+        center = si(cart_grid[:]*density[...].real)/density_integral
         center = cartesian_to_spherical(center)
         return center        
     return calc_center

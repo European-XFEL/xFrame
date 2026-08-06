@@ -27,14 +27,14 @@ projections:
     q_mask:
       type: from_projection_matrices
     used_order_ids:
-      command: np.arange(31)
+      command: np.arange(32)
     regrid:
       interpolation: cubic
     odd_orders_to_0: true
     SO_freedom:
       use: false
 multi_process:
-  n_parallel_reconstructions: 1 # 'auto' 
+  n_parallel_reconstructions: 3 # 'auto' 
   use: True
   n_weight_generating_processes: false
 GPU:
