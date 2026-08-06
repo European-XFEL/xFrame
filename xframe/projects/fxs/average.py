@@ -79,6 +79,7 @@ class ProjectWorker(ProjectWorkerInterface):
                         continue
                 rec = rec_results[str(key)]
                 rec_ids.append((file_id,int(key)))
+                
                 errors.append(rec['error_dict/main'][-1])
             dat.close()
             
@@ -130,7 +131,7 @@ class ProjectWorker(ProjectWorkerInterface):
         self.averager = averager
         averages = averager.average(self.data_loader.load,self.data_loader.n_reconstructions)
     def average_3d(self):        
-        averager = AlignedAverager(self.averager_struct,dataset_length = 3)        
+        averager = AlignedAverager(self.averager_struct,dataset_length = 2)        
         self.averager = averager
         averages = averager.average(self.data_loader.load,self.data_loader.n_reconstructions)        
         return averages
@@ -212,7 +213,7 @@ class DataLoader:
             self.current_h5_object = self.db.load(path,as_h5_object = True)
         o= self.current_h5_object
         result = o[f'reconstruction_results/{data_id}']
-        dataset = tuple((result['last_real_density'][:],result['last_reciprocal_density'][:],result['last_support_mask'][:].astype(complex)))
+        dataset = tuple((result['density_history'][-1],result['ft_density_history'][-1]))
         return dataset
         
 

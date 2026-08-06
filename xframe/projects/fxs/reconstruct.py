@@ -458,6 +458,7 @@ class MTIP:
         errs['main'].append(main_error)
         state.error_dict = errs
     def generate_output(self,state):
+        #convert error lists to ndarray
         out = state.export_data()
 
         # generate real_projection output:
@@ -518,7 +519,14 @@ class MTIP:
                                                                                                       np.max(state.density)))
         out = self.generate_output(state)
         return out
-   
+
+def recursive_list_to_ndarray(d:dict)->dict:
+    for key,value in d.items():
+        if isinstance(value,list):
+            d[key]=np.array(value)
+        elif isinstance(value,dict):
+            recursive_list_to_ndarray(value)
+            
 def snake_to_camel_simple(name: str) -> str:
     parts = name.split("_")
     return "".join(part.capitalize() for part in parts)
@@ -574,6 +582,7 @@ class PhasingState:
         self.ft_density_history = self.density_history[1:]+(value,)
     def export_data(self):
         d =  _dataclass_to_dict(self)
+        recursive_list_to_ndarray(d['error_dict'])
         d['proj_context'] =  _dataclass_to_dict(d['proj_context'])
         return d
         

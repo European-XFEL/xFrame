@@ -249,7 +249,8 @@ class VolumetricSupportProjection(ProjectionBase):
         self.total_volume = self.integrator.get_total_volume()
         self._volume = 0
         self._contrast = 0
-        self._contrast_function = 0 
+        self._contrast_function = 0
+        self._connected_counts = 0
         self._support = np.zeros(self.vol_elements.shape,float)
         self._distance_mask = np.zeros(self.vol_elements.shape,bool)
         self.force_connected = force_connected
@@ -277,6 +278,9 @@ class VolumetricSupportProjection(ProjectionBase):
     @metric
     def volume(self):
         return self._volume
+    @metric
+    def connected_counts(self):
+        return self._connected_counts
     
     def compute_distance_from_barycenter(self,density):
         abs_density = np.abs(density)
@@ -312,6 +316,7 @@ class VolumetricSupportProjection(ProjectionBase):
         return (meds-maxs[::-1])/max_data
                     
     def __call__(self,density,context=None):
+        smooth_density = density
         if self.gaussian_sigma is not None:
             ft_d = self.ft.forward_cmplx(density)
             ft_d *= self.gaussian_values
@@ -349,6 +354,7 @@ class VolumetricSupportProjection(ProjectionBase):
         if self.force_connected:
             connected_components,_ = ndimage.label(self.support)
             component_names,counts = np.unique(connected_components[connected_components>0],return_counts=True)
+            self._connected_counts = np.sort(counts)
             for n in component_names[counts<100]:
                 self._support[connected_components==n]=False
             #largest_component_id = np.argmax(counts)
