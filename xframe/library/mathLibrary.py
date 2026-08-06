@@ -2143,10 +2143,10 @@ def generate_calc_center(real_grid):
         si = SphericalIntegrator(real_grid[:])
         
     def calc_center(density):            
-        density_integral = si.integrate(density.real)            
+        density_integral = si(density.real)            
         if density_integral==0:
             density_integral=1
-        center = si.integrate(cart_grid[:]*density[...,None].real)/density_integral
+        center = si(cart_grid[:]*density[...,None].real)/density_integral
         center = cartesian_to_spherical(center)
         return center        
     return calc_center

@@ -579,10 +579,12 @@ class PhasingState:
         return self.ft_density_history[-1]
     @ft_density.setter
     def ft_density(self,value):
-        self.ft_density_history = self.density_history[1:]+(value,)
+        self.ft_density_history = self.ft_density_history[1:]+(value,)
     def export_data(self):
         d =  _dataclass_to_dict(self)
         recursive_list_to_ndarray(d['error_dict'])
+        d['density_history']=np.array(d['density_history'])
+        d['ft_density_history']=np.array(d['ft_density_history'])
         d['proj_context'] =  _dataclass_to_dict(d['proj_context'])
         return d
         
