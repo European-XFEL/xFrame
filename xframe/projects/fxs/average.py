@@ -217,7 +217,7 @@ class DataLoader:
             self.current_h5_object = self.db.load(path,as_h5_object = True)
         o= self.current_h5_object
         result = o[f'reconstruction_results/{data_id}']
-        dataset = tuple((result['density_history'][-1],result['ft_density_history'][-1]))
+        dataset = tuple((result['density_history'][-1],result['ft_density_history'][-1],result['support'][:]))
         return dataset
         
 
