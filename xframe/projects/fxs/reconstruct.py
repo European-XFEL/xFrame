@@ -134,7 +134,6 @@ class ProjectWorker(ProjectWorkerInterface):
 
 
     def post_processing(self):
-        xprint("start post processing")
         db = database.project
         opt = settings.project
         save = db.save
@@ -153,7 +152,6 @@ class ProjectWorker(ProjectWorkerInterface):
             ordered_phasing_states = {str(_id):phasing_states[_id] for _id in r_ids}
             reciprocity_coefficient = _get_reciprocity_coefficient(settings.project.fourier_transform)
             data_dict={'configuration':{'internal_grid':grid_pair,'xray_wavelength':self.mtip.load_mtip_data()[0]['xray_wavelength'],'reciprocity_coefficient':reciprocity_coefficient},'reconstruction_results':ordered_phasing_states,'projection_matrices':projection_matrices,'stats':stats,"fourier_transform_struct":ft_struct}
-            xprint("start saving in db ")
             save('reconstructions',data_dict)
         except Exception as e:
             log.error(f'Error during postprocessing / saving with message:\n {e}')
@@ -505,10 +503,8 @@ class MTIP:
         update_errors = self.update_errors
         
         for loop_name,(loop,n) in self.phasing_sketch.items():
-            xprint(f"Starting Loop:{loop_name} with {n} iterations")
             for i in range(n):
-                for method_name,(step,m) in loop.items():
-                    
+                for method_name,(step,m) in loop.items():                    
                     for j in range(m):
                         # Run optimization step
                         state = step(state)
@@ -517,9 +513,11 @@ class MTIP:
                         state.iteration += 1
                         state.proj_context.iteration = state.iteration
                         update_errors(state)
+                        
                     # Print output 
-                    xprint('P{}:  Loop:{} Part:{} Method:{} Main Error: {} \n max_density={}'.format(Multiprocessing.get_process_name(),
-                                                                                                      state.iteration+1,
+                    xprint('P{}:  Loop:{}/{} Part:{} Method:{} Main Error: {} \n max_density={}'.format(Multiprocessing.get_process_name(),
+                                                                                                      j+1,
+                                                                                                      m,
                                                                                                       loop_name,
                                                                                                       method_name,
                                                                                                       state.error_dict['main'][-1],
