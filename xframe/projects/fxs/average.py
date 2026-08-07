@@ -174,7 +174,7 @@ class ProjectWorker(ProjectWorkerInterface):
     def post_processing(self,results):
         var_objects = results[0][0]
         resolution_metrics_dict = self.compute_resolution_metrics(results)
-        ft_d = self.averager.fourier(var_objects[0].mean)
+        ft_d = self.averager.fourier.forward_cmplx(var_objects[0].mean)
         I = (ft_d*ft_d.conj()).real
         SAXS = np.mean(I,axis=tuple(range(1,I.ndim)))
         out = {'real_density':var_objects[0].mean,
