@@ -174,6 +174,9 @@ class ProjectWorker(ProjectWorkerInterface):
     def post_processing(self,results):
         var_objects = results[0][0]
         resolution_metrics_dict = self.compute_resolution_metrics(results)
+        ft_d = self.averager.fourier(var_objects[0].mean)
+        I = (ft_d*ft_d.conj()).real
+        SAXS = np.mean(I,axis=tuple(range(1,I.ndim)))
         out = {'real_density':var_objects[0].mean,
                'real_variance':var_objects[0].variance,
                'reciprocal_density':var_objects[1].mean,
@@ -184,7 +187,8 @@ class ProjectWorker(ProjectWorkerInterface):
                'n_used_reconstructions':var_objects[0].count,
                'fourier_transform_struct':self.fourier_struct.__dict__,
                'initial_ids':results[1],
-               'input_proj_matrices':self.input_proj_matrices
+               'input_proj_matrices':self.input_proj_matrices,
+               "SAXS_from_density":SAXS
                }
         first_variance_per_step = {f'{i}':{label:{'mean':v[n].mean,'count':v[n].count,'variance':v[n].variance} for n,label in enumerate(['real','reciprocal','mask'])} for i,v in enumerate(results[2])}
         out['variance_step_progression']=first_variance_per_step
