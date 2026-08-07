@@ -131,7 +131,7 @@ class ProjectWorker(ProjectWorkerInterface):
         self.averager = averager
         averages = averager.average(self.data_loader.load,self.data_loader.n_reconstructions)
     def average_3d(self):        
-        averager = AlignedAverager(self.averager_struct,dataset_length = 2)        
+        averager = AlignedAverager(self.averager_struct,dataset_length = 3)        
         self.averager = averager
         averages = averager.average(self.data_loader.load,self.data_loader.n_reconstructions)        
         return averages
