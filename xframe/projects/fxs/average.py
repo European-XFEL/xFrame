@@ -178,10 +178,13 @@ class ProjectWorker(ProjectWorkerInterface):
         I = (ft_d*ft_d.conj()).real
         SAXS = np.mean(I,axis=tuple(range(1,I.ndim)))
         out = {'real_density':var_objects[0].mean,
+               'real_count':var_objects[0].count,
                'real_variance':var_objects[0].variance,
                'reciprocal_density':var_objects[1].mean,
+               'reciprocal_count':var_objects[1].count,
                'reciprocal_variance':var_objects[1].variance,
                'mask':var_objects[2].mean,
+               'mask_count':var_objects[2].count,
                'mask_variance':var_objects[2].variance,
                'resolution_metrics': resolution_metrics_dict,
                'n_used_reconstructions':var_objects[0].count,
