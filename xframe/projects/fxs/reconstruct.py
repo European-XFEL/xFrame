@@ -516,8 +516,8 @@ class MTIP:
                         
                     # Print output 
                     xprint('P{}:  Loop:{}/{} Part:{} Method:{} Main Error: {} \n max_density={}'.format(Multiprocessing.get_process_name(),
-                                                                                                      j+1,
-                                                                                                      m,
+                                                                                                      i+1,
+                                                                                                      n,
                                                                                                       loop_name,
                                                                                                       method_name,
                                                                                                       state.error_dict['main'][-1],
