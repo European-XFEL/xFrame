@@ -607,7 +607,7 @@ class AutoSupport(ProjectionBase):
         best_threshold = flat_c[order[np.argmax(self._contrast_function)]]
 
         self._sw_threshold = max(min(best_threshold,self.sw_threshold_limits[1]),self.sw_threshold_limits[0])
-        self._support = convolved_d > self._sw_threshold 
+        self._support = (convolved_d > self._sw_threshold) & self._distance_mask
     
     def __call__(self,density:NDArray,context = None)->NDArray:
         self.auto_shrink_wrap(density)
