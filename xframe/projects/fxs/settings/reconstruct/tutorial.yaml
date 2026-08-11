@@ -50,7 +50,8 @@ main_loop:
       projections:
         real:
           apply:
-            - supp
+            #- supp
+            - supp_swc
             - center
             #- supp_sw
             - real
@@ -69,6 +70,20 @@ main_loop:
                 volume: history
                 distance_mask: last
                 connected_counts: last
+                contrast_function: last
+          supp_swc:
+            type: contrast_shrink_wrap_support
+            options:
+              max_radius: 240
+              sw_threshold_limits:
+                command: "(0.01,np.inf)"
+              sw_sigma: 2
+              force_connected: False
+              metrics_to_save:
+                support: last
+                sw_threshold: history
+                distance_mask: last
+                contrast_function: last                
           supp_sw:
             type: shrink_wrap_support
             options:
@@ -94,7 +109,7 @@ main_loop:
             
       methods:
         DR:
-          iterations: 60
+          iterations: 30
           ft_stab: True
           beta: 0.5
         HIO:
@@ -104,13 +119,12 @@ main_loop:
         SW:
           iterations: 1
         ER:
-          iterations: 20
+          iterations: 10
           ft_stab: false
-      iterations: 3
+      iterations: 6
       order:
         - DR
         #- HIO
-        #- SW
         - ER
     main:
       projections:

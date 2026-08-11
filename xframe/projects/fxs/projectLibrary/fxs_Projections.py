@@ -300,20 +300,28 @@ class VolumetricSupportProjection(ProjectionBase):
             raise ValueError("Maximum absolute density is 0. Stop computation.")
         
         meds = np.zeros(len(order),float)
+        #meds_bg = np.zeros(len(order),float)
         maxs = np.zeros(len(order),float)
+        #mins = np.zeros(len(order),float)
         
         # fill maxima
         maxs[0] = data[order[-1]]
+        #mins[0] = data[order[-1]]
         for i,o in enumerate(order[::-1][1:]):
             val = data[o]
             maxs[i+1] = max(maxs[i],val)
+            #mins[i+1] = max(mins[i],val)
             
         # fill medians
         meds[0::2] = data[order[:len(meds[0::2])]]
         meds[1::2] = (data[order[:len(meds[1::2])]]+data[order[1:len(meds[1::2])+1]])/2
-        
+
+        #meds_bg[0::2] = data[order[::-1][:len(meds[0::2])]]
+        #meds_bg[1::2] = (data[order[::-1][:len(meds[1::2])]]+data[order[::-1][1:len(meds[1::2])+1]])/2
+
         # compute and return contrast metric
-        return (meds-maxs[::-1])/max_data
+        return (meds-maxs[::-1])/max_data 
+        #return (meds-maxs[::-1])/max_data
                     
     def __call__(self,density,context=None):
         smooth_density = density
@@ -354,11 +362,11 @@ class VolumetricSupportProjection(ProjectionBase):
         if self.force_connected:
             connected_components,_ = ndimage.label(self.support)
             component_names,counts = np.unique(connected_components[connected_components>0],return_counts=True)
-            self._connected_counts = np.sort(counts)
-            for n in component_names[counts<100]:
-                self._support[connected_components==n]=False
-            #largest_component_id = np.argmax(counts)
-            #self._support[:] = (connected_components == component_names[largest_component_id])
+            self._connected_counts = np.sort(counts)[::-1]
+            #for n in component_names[counts<100]:
+            #    self._support[connected_components==n]=False
+            largest_component_id = np.argmax(counts)
+            self._support[:] = (connected_components == component_names[largest_component_id])
             
         # Do density projection
         density *= self._support
@@ -372,6 +380,7 @@ class Support(ProjectionBase):
                  sw_sigma=None,
                  sw_threshold=0.3,
                  max_radius = np.inf,
+                 always_update_support = True,
                  metrics_to_save:dict[str,MetricMode]|None=None):
         self.ft = fourier_transform
         if initial_support_radius is None:
@@ -395,6 +404,7 @@ class Support(ProjectionBase):
             sw_sigma = 2*np.pi/self.ft.qs.max() # resolution limit
         self._sw_sigma = max(sw_sigma,0.)
         self._sw_threshold = min(max(sw_threshold,0.),1.)
+        self.always_update_support = always_update_support
         self.gaussian_values = gaussian_fourier_transformed_spherical(self.ft.reciprocal_grid,self._sw_sigma)
         self.cart_grid = spherical_to_cartesian(self.ft.real_grid)
         super().__init__(metrics_to_save)
@@ -461,9 +471,146 @@ class Support(ProjectionBase):
         self._support = (convolved_d >= min_value + self._sw_threshold*diff) & self._distance_mask
     
     def __call__(self,density:NDArray,context = None)->NDArray:
-        if context is not None:
-            if context.update_support:
-                self.shrink_wrap(density)
+
+        if self.always_update_support:
+            self.shrink_wrap(density)
+        elif ((context is not None) and context.update_support):
+            self.shrink_wrap(density)
+            context.update_support = False            
+        density*=self._support
+        self.save_configured_metrics()
+        return density
+
+@register_real_projection("contrast_shrink_wrap_support")
+class AutoSupport(ProjectionBase):
+    def __init__(self,fourier_transform,
+                 initial_support_radius = None,
+                 sw_sigma=None,
+                 sw_threshold_limits=[0.01,np.inf],
+                 max_radius = np.inf,
+                 metrics_to_save:dict[str,MetricMode]|None=None):
+        self.ft = fourier_transform
+        if initial_support_radius is None:
+            self.initial_support_radius = 0.3*self.ft.rs.max()
+        else:
+            self.initial_support_radius = initial_support_radius
+        self._initial_support = self.ft.real_grid[...,0]<self.initial_support_radius
+        self._support = self._initial_support.copy()
+        self._distance_mask = self._initial_support.copy()
+
+        self.dim = self.ft.dimensions
+        if self.dim == 2:
+            self.integrator = PolarIntegrator(self.ft.real_grid)
+        elif self.dim ==3:
+            self.integrator = SphericalIntegrator(self.ft.real_grid)
+        else:
+            raise ValueError(f'Only 2 and 3 Dimensional grids are  supported, given grid dim is {self.real_grid.shape[-1]}.')
+
+        self.max_radius = max_radius
+        if sw_sigma is None:
+            sw_sigma = 2*np.pi/self.ft.qs.max() # resolution limit
+        self._sw_sigma = max(sw_sigma,0.)
+        self.sw_threshold_limits = sw_threshold_limits
+        self._sw_threshold = sw_threshold_limits[0]
+        self.gaussian_values = gaussian_fourier_transformed_spherical(self.ft.reciprocal_grid,self._sw_sigma)
+        self._contrast_function = 0
+        self.cart_grid = spherical_to_cartesian(self.ft.real_grid)
+        super().__init__(metrics_to_save)
+        
+    @property
+    def sw_sigma(self):
+        return self._sw_sigma
+    @sw_sigma.setter
+    def sw_sigma(self,value):
+        if value>=0:
+            self._sw_sigma = value
+        else:
+            self._sw_sigma=0
+            log.warning(f'Gaussian sigma has to be grater than 0 but given value is {value}. Projecting threshold to {self._sw_sigma}.')
+        self.gaussian_values[:] = gaussian_fourier_transformed_spherical(self.ft.reciprocal_grid,self._sw_sigma)
+        
+    @metric
+    def sw_threshold(self):
+        return self._sw_threshold
+    @metric
+    def contrast_function(self):
+        return self._contrast_function
+    @metric
+    def support(self):
+        return self._support
+    @metric
+    def distance_mask(self):
+        return self._distance_mask
+    @metric
+    def initial_support(self):
+        return self._initial_support
+
+    def compute_distance_from_barycenter(self,density):
+        abs_density = np.abs(density)
+        tot_density = self.integrator(abs_density)
+        if tot_density == 0:
+            center =- np.array([0]*self.dim)
+        else:
+            center = np.array(tuple(
+                self.integrator(abs_density*self.cart_grid[...,i]) for i in range(self.dim)
+            ))/tot_density        
+        distances = np.linalg.norm(self.cart_grid-center,axis = -1)
+        return distances
+
+    def compute_contrast_metric(self,data,order):
+        max_data = np.max(data)
+        if max_data == 0:
+            raise ValueError("Maximum absolute density is 0. Stop computation.")
+        
+        meds = np.zeros(len(order),float)
+        maxs = np.zeros(len(order),float)
+        
+        # fill maxima
+        maxs[0] = data[order[-1]]
+        #mins[0] = data[order[-1]]
+        for i,o in enumerate(order[::-1][1:]):
+            val = data[o]
+            maxs[i+1] = max(maxs[i],val)
+            
+        # fill medians
+        meds[0::2] = data[order[:len(meds[0::2])]]
+        meds[1::2] = (data[order[:len(meds[1::2])]]+data[order[1:len(meds[1::2])+1]])/2
+
+
+        # compute and return contrast metric
+        return (meds-maxs[::-1])/max_data
+    
+    def auto_shrink_wrap(self,density):
+        # Apply gaussian bluring
+        ft_d = self.ft.forward_cmplx(density)
+        ft_d *= self.gaussian_values
+        convolved_d = np.abs(self.ft.inverse_cmplx(ft_d))
+
+        flat_c = convolved_d.ravel()
+        order = np.argsort(flat_c)[::-1]
+
+        self._distance_mask[:] = self.compute_distance_from_barycenter(convolved_d)<=self.max_radius
+        order = order[self._distance_mask.ravel()[order]]
+       
+        
+        # Define new support
+        max_value= convolved_d.max()
+        min_value= convolved_d.min()
+        diff = max_value-min_value
+        self._support = (convolved_d >= min_value + self._sw_threshold*diff) & self._distance_mask
+
+        if order.size==0:
+            raise ValueError("No valid pixels. Support collapsed.")
+        
+        # find threshold that gives maximum contrast
+        self._contrast_function = self.compute_contrast_metric(flat_c,order)
+        best_threshold = flat_c[order[np.argmax(self._contrast_function)]]
+
+        self._sw_threshold = max(min(best_threshold,self.sw_threshold_limits[1]),self.sw_threshold_limits[0])
+        self._support = convolved_d > self._sw_threshold 
+    
+    def __call__(self,density:NDArray,context = None)->NDArray:
+        self.auto_shrink_wrap(density)
         density*=self._support
         self.save_configured_metrics()
         return density
