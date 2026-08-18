@@ -116,14 +116,20 @@ class ProjectionBase(abc.ABC):
     def export_data(self, history_to_numpy: bool = True) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for name, value in self._saved_data.items():
-            if history_to_numpy and isinstance(value, list):            
-                out[name] = np.asarray(value)
+            if history_to_numpy and isinstance(value, list):
+                try:
+                    out[name] = np.asarray(value)
+                except ValueError:
+                    # trying to recover from list of varying size 1d data
+                    min_size = int(np.min([len(a) for a in value]))
+                    out[name] = np.asarray([a[:min_size] for a in value])
             else:
                 out[name] = value
         return out    
     def reset_data(self) -> None:
         self._saved_data.clear()
-    
+
+        
 class CompositeRealProjection:
     def __init__(self,projections:dict):
         self.projections = projections
@@ -486,6 +492,7 @@ class AutoSupport(ProjectionBase):
     def __init__(self,fourier_transform,
                  initial_support_radius = None,
                  sw_sigma=None,
+                 apply_smoothing = True,
                  sw_threshold_limits=[0.01,np.inf],
                  max_radius = np.inf,
                  metrics_to_save:dict[str,MetricMode]|None=None):
@@ -510,10 +517,13 @@ class AutoSupport(ProjectionBase):
         if sw_sigma is None:
             sw_sigma = 2*np.pi/self.ft.qs.max() # resolution limit
         self._sw_sigma = max(sw_sigma,0.)
+        self.apply_smoothing = apply_smoothing
         self.sw_threshold_limits = sw_threshold_limits
         self._sw_threshold = sw_threshold_limits[0]
         self.gaussian_values = gaussian_fourier_transformed_spherical(self.ft.reciprocal_grid,self._sw_sigma)
         self._contrast_function = 0
+        self._contrast_max_bg = 0
+        self._contrast_med_fg = 0
         self.cart_grid = spherical_to_cartesian(self.ft.real_grid)
         super().__init__(metrics_to_save)
         
@@ -536,6 +546,12 @@ class AutoSupport(ProjectionBase):
     def contrast_function(self):
         return self._contrast_function
     @metric
+    def contrast_med_fg(self):
+        return self._contrast_med_fg
+    @metric
+    def contrast_max_bg(self):
+        return self._contrast_max_bg
+    @metric
     def support(self):
         return self._support
     @metric
@@ -557,57 +573,66 @@ class AutoSupport(ProjectionBase):
         distances = np.linalg.norm(self.cart_grid-center,axis = -1)
         return distances
 
-    def compute_contrast_metric(self,data,order):
-        max_data = np.max(data)
-        if max_data == 0:
-            raise ValueError("Maximum absolute density is 0. Stop computation.")
-        
-        meds = np.zeros(len(order),float)
-        maxs = np.zeros(len(order),float)
-        
-        # fill maxima
-        maxs[0] = data[order[-1]]
-        #mins[0] = data[order[-1]]
-        for i,o in enumerate(order[::-1][1:]):
-            val = data[o]
-            maxs[i+1] = max(maxs[i],val)
-            
+    def compute_percentiles(self,data,order,percentile = 0.5):
         # fill medians
-        meds[0::2] = data[order[:len(meds[0::2])]]
-        meds[1::2] = (data[order[:len(meds[1::2])]]+data[order[1:len(meds[1::2])+1]])/2
+        q = percentile
+        #q = 0.5
+        k = np.arange(0, len(order))
 
-
-        # compute and return contrast metric
-        return (meds-maxs[::-1])/max_data
+        # Position in each descending prefix.
+        # In ascending order, q corresponds to position (k - 1) * q.
+        # In descending order, this becomes (k - 1) * (1 - q).
+        pos = k * (1 - q)
     
+        lo = np.floor(pos).astype(int)
+        hi = np.ceil(pos).astype(int)
+        weight = pos - lo
+    
+        meds = (1 - weight) * data[order[lo]] + weight * data[order[hi]]
+        return meds  
+    
+    def compute_contrast_metric(self,data,order):
+        #ordered_data = data[order]
+        #percentile_25 = self.compute_percentiles(data,order,0.25)
+        #percentile_75 = self.compute_percentiles(data,order,0.75)
+
+        #metric = (percentile_25[:-1] - ordered_data[1:] + percentile_75[:-1] - ordered_data[1:])/(2*ordered_data[0])
+
+        ordered_data = data[order]
+        means = (np.cumsum(ordered_data)/np.arange(1,len(ordered_data)+1))
+        return means[:-1] - ordered_data[1:]
     def auto_shrink_wrap(self,density):
         # Apply gaussian bluring
-        ft_d = self.ft.forward_cmplx(density)
-        ft_d *= self.gaussian_values
-        convolved_d = np.abs(self.ft.inverse_cmplx(ft_d))
+        if self.apply_smoothing:
+            ft_d = self.ft.forward_cmplx(density)
+            ft_d *= self.gaussian_values
+            tmp = self.ft.inverse_cmplx(ft_d)
+        else:
+            tmp = density
+        convolved_d = np.abs(tmp) # tmp.real #np.abs(tmp)
 
         flat_c = convolved_d.ravel()
         order = np.argsort(flat_c)[::-1]
 
         self._distance_mask[:] = self.compute_distance_from_barycenter(convolved_d)<=self.max_radius
         order = order[self._distance_mask.ravel()[order]]
-       
-        
-        # Define new support
-        max_value= convolved_d.max()
-        min_value= convolved_d.min()
-        diff = max_value-min_value
-        self._support = (convolved_d >= min_value + self._sw_threshold*diff) & self._distance_mask
 
         if order.size==0:
             raise ValueError("No valid pixels. Support collapsed.")
         
         # find threshold that gives maximum contrast
         self._contrast_function = self.compute_contrast_metric(flat_c,order)
+        self._contrast_max_bg = flat_c[order]
         best_threshold = flat_c[order[np.argmax(self._contrast_function)]]
+        raw_threshold = max(min(best_threshold,self.sw_threshold_limits[1]),self.sw_threshold_limits[0])
 
-        self._sw_threshold = max(min(best_threshold,self.sw_threshold_limits[1]),self.sw_threshold_limits[0])
-        self._support = (convolved_d > self._sw_threshold) & self._distance_mask
+        # Define new support
+        max_value= convolved_d.max()
+        min_value= convolved_d.min()
+        diff = max_value-min_value
+
+        self._sw_threshold =  raw_threshold/np.median(np.abs(density.ravel()[order])) #(raw_threshold-min_value)/diff
+        self._support = (np.abs(tmp) > raw_threshold) & self._distance_mask
     
     def __call__(self,density:NDArray,context = None)->NDArray:
         self.auto_shrink_wrap(density)
