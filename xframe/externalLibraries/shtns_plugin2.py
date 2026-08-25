@@ -69,7 +69,11 @@ class ShCoeff(np.ndarray):
         return ShCoeff(np.array(self),self.l_ids,self.m_ids,ls = self.ls,ms = self.ms)
     def conj(self,*args,**kwargs):
         return ShCoeff(super().conj(*args,**kwargs),self.l_ids,self.m_ids,ls = self.ls,ms = self.ms)
-        
+    def point_inverse(self):
+        out = self.copy()
+        for l in self.ls:
+            out.lm[l]=(-1)**l*self.lm[l]
+        return out   
 class ShCoeffView:
     def __init__(self,coeff:ShCoeff,mode='complex'):
         self.coeff = coeff
