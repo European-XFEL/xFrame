@@ -52,7 +52,7 @@ class ShCoeff(np.ndarray):
                 m_ids_complex[i]=m
         return cls(array,l_ids_complex,m_ids_complex,ls = ls,ms=ms)
     
-    def __new__(cls,array,l_ids,m_ids,ls=None,ms=None,real=False):
+    def __new__(cls,array,l_ids,m_ids,ls=None,ms=None,is_complex=True):
         coeff = array.view(cls)
         coeff.ls = ls
         coeff.ms = ms
@@ -64,16 +64,29 @@ class ShCoeff(np.ndarray):
         coeff.m_ids = m_ids
         
         coeff.lm=ShCoeffView(coeff)
+        coeff.is_complex = is_complex
         return coeff
     def copy(self):
-        return ShCoeff(np.array(self),self.l_ids,self.m_ids,ls = self.ls,ms = self.ms)
+        return ShCoeff(np.array(self),
+                       self.l_ids,
+                       self.m_ids,
+                       ls = self.ls,
+                       ms = self.ms,
+                       is_complex = self.is_complex)
     def conj(self,*args,**kwargs):
-        return ShCoeff(super().conj(*args,**kwargs),self.l_ids,self.m_ids,ls = self.ls,ms = self.ms)
+        return ShCoeff(super().conj(*args,**kwargs),
+                       self.l_ids,
+                       self.m_ids,
+                       ls = self.ls,
+                       ms = self.ms,
+                       is_complex = self.is_complex)
+    
     def point_inverse(self):
         out = self.copy()
         for l in self.ls:
             out.lm[l]=(-1)**l*self.lm[l]
-        return out   
+        return out
+    
 class ShCoeffView:
     def __init__(self,coeff:ShCoeff,mode='complex'):
         self.coeff = coeff
@@ -231,9 +244,9 @@ class ShSmall:
         def forward_real_inner(data):
             temp = tuple(analys(r_shell.real) for r_shell in data)            
             return np.array(tuple(np.concatenate((coeff[zero_m].real,np.sqrt(2)*coeff.real[nonzero_m],np.sqrt(2)*coeff.imag[nonzero_m])) for coeff in temp))
-        cmplx_inner = shape_change_decorator(self.angular_shape,out_shape=(self.n_coeff,))(forward_real_inner)
+        real_inner = shape_change_decorator(self.angular_shape,out_shape=(self.n_coeff,))(forward_real_inner)
         def forward_real(data):
-            return ShCoeff(cmplx_inner(data),self.l_ids_real,self.m_ids_real,ls=ls,ms=ms)
+            return ShCoeff(real_inner(data),self.l_ids_real,self.m_ids_real,ls=ls,ms=ms)
         return forward_real
     def _generate_inverse_real(self):
         synth = self._sh.synth
@@ -251,13 +264,34 @@ class ShSmall:
             return  np.array(tuple(synth(_real_to_complex(coeff)) for coeff in data))
         inverse_real= shape_change_decorator((self.n_coeff,),out_shape=self.angular_shape)(inverse_real_inner)
         return inverse_real
-    def get_empty_coeff(self,pre_shape=None):
+    
+    def forward(data):
+        if np.iscomplexobj(data):
+            return self.forward_cmplx(data)
+        else:
+            return self.forward_real(data)
+        
+    def inverse(data):
+        if data.is_complex:
+            return self.inverse_cmplx(data)
+        else:
+            return self.inverse_real(data)
+
+    def get_empty_coeff(self,pre_shape=None,is_complex=True):
+        if is_complex:
+            l_ids = self.l_ids_complex
+            m_ids = self.m_ids_complex
+        else:
+            l_ids = self.l_ids_real
+            m_ids = self.m_ids_real
+            
         if not isinstance(pre_shape,tuple):
             data = np.zeros(self.n_coeff,dtype=complex)
-            return ShCoeff(data,self.ls,self.ms)
+            return ShCoeff(data,l_ids=l_ids,m_ids=m_ids,self.ls,self.ms,is_complex=True)
         else:
             data = np.zeros(pre_shape+(self.n_coeff,),dtype=complex)
-            return ShCoeff(data,self.ls,self.ms)
+            return ShCoeff(data,l_ids=l_ids,m_ids=m_ids,self.ls,self.ms)
+        
     @property
     def grid(self):
         return GridFactory.construct_grid('uniform',(self.thetas,self.phis))
