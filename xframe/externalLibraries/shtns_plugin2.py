@@ -29,6 +29,8 @@ def complex_l_slice(l):
     return slice(l**2,(l+1)**2)
 def get_lm_id(l,m):
     return l*(l+1)+m
+def get_ml_id_real(m,l,bw):
+    return int((m*(2*bw-1-m))//2+l)
 def get_m_ids(m,l0s):
     return l0s[abs(m):]+m
 def coeff_shape_complex(bandwidth):
@@ -52,7 +54,7 @@ class ShCoeff(np.ndarray):
                 m_ids_complex[i]=m
         return cls(array,l_ids_complex,m_ids_complex,ls = ls,ms=ms)
     
-    def __new__(cls,array,l_ids,m_ids,ls=None,ms=None,is_complex=True):
+    def __new__(cls,array,l_ids,m_ids,ls=None,ms=None,complex_data=True):
         coeff = array.view(cls)
         coeff.ls = ls
         coeff.ms = ms
@@ -64,7 +66,7 @@ class ShCoeff(np.ndarray):
         coeff.m_ids = m_ids
         
         coeff.lm=ShCoeffView(coeff)
-        coeff.is_complex = is_complex
+        coeff.complex_data = complex_data
         return coeff
     def copy(self):
         return ShCoeff(np.array(self),
@@ -72,14 +74,14 @@ class ShCoeff(np.ndarray):
                        self.m_ids,
                        ls = self.ls,
                        ms = self.ms,
-                       is_complex = self.is_complex)
+                       complex_data = self.complex_data)
     def conj(self,*args,**kwargs):
         return ShCoeff(super().conj(*args,**kwargs),
                        self.l_ids,
                        self.m_ids,
                        ls = self.ls,
                        ms = self.ms,
-                       is_complex = self.is_complex)
+                       complex_data = self.complex_data)
     
     def point_inverse(self):
         out = self.copy()
@@ -116,8 +118,8 @@ class ShCoeffView:
                 
                 return self.coeff[...,get_m_ids(items[1],self.l0s)]
             elif (isinstance(items[0],int)) and  (isinstance(items[1],int)):
-                l_mask = self.get_l_mask(items[0])
-                m_mask = self.get_m_mask(items[1])
+                #l_mask = self.get_l_mask(items[0])
+                #m_mask = self.get_m_mask(items[1])
                 #print(np.sum(l_mask & m_mask))
                 #return self.coeff[...,l_mask & m_mask]
                 return self.coeff[...,get_lm_id(items[0],items[1])]
@@ -144,8 +146,9 @@ class ShSmall:
         self._sh = sh
         self.bandwidth = bandwidth
         self.max_order = bandwidth-1
-        self.anti_aliazing_degree = anti_aliazing_degree        
+        self.anti_aliazing_degree = anti_aliazing_degree
         self.n_coeff = (bandwidth)**2
+        self.n_coeff_real_data_complex_coeff = bandwidth*(bandwidth+1)//2
 
         #log.info(" sh trying to create grids with n_phi= {},n_theta={}".format(n_phi,n_theta))
         thetas,phis=self._generate_grid(n_phi=n_phi,n_theta=n_theta)
@@ -173,11 +176,23 @@ class ShSmall:
         self.shtns_real_zero_ms = (self._sh.m==0)
         self.l_ids_real = np.concatenate((self._sh.l,self._sh.l[~self.shtns_real_zero_ms]))
         self.m_ids_real = np.concatenate((self._sh.m,-self._sh.m[~self.shtns_real_zero_ms]))
-
+        
+        
+        self.l_ids_real_data_complex_coeff = np.zeros(self.n_coeff,dtype = int)
+        self.m_ids_real_data_complex_coeff = np.zeros(self.n_coeff,dtype = int)
+        self.ms_real_data_complex_coeff = self.ls.copy()
+        for m in range(bandwidth):
+            for l in range(m,bandwidth):
+                i = get_ml_id_real(m,l,bandwidth)
+                self.l_ids_real_data_complex_coeff[i] = l
+                self.m_ids_real_data_complex_coeff[i] = m
+        
         self.forward_cmplx = self._generate_forward_cmplx()
         self.inverse_cmplx =  self._generate_inverse_cmplx()
         self.forward_real = self._generate_forward_real()
         self.inverse_real =  self._generate_inverse_real()
+        self.forward_real_data_cmplx_coeff = self._generate_forward_real_data_cmplx_coeff()
+        self.inverse_real_data_cmplx_coeff_inner =  self._generate_inverse_real_data_cmplx_coeff()
     def _generate_grid(self,n_phi=False,n_theta=False):
         sh=self._sh
         size_dict = self.n_angular_step_from_max_order()
@@ -217,12 +232,10 @@ class ShSmall:
             return np.array(tuple(analys_cplx(r_shell) for r_shell in data))
         cmplx_inner = shape_change_decorator(self.angular_shape,out_shape=(self.n_coeff,))(forward_cmplx_inner)
         def forward_cmplx(data):
-            return ShCoeff(cmplx_inner(data),self.l_ids_complex,self.m_ids_complex,ls=ls,ms=ms)
+            return ShCoeff(cmplx_inner(data),self.l_ids_complex,self.m_ids_complex,ls=ls,ms=ms,complex_data=True)
         return forward_cmplx
     def _generate_inverse_cmplx(self):
         synth_cplx = self._sh.synth_cplx
-        ls = self.ls
-        ms = self.ms
         def inverse_cmplx_inner(data):            
             return  np.array(tuple(synth_cplx(coeff) for coeff in data))
         inverse_cmplx = shape_change_decorator((self.n_coeff,),out_shape=self.angular_shape)(inverse_cmplx_inner)
@@ -246,7 +259,7 @@ class ShSmall:
             return np.array(tuple(np.concatenate((coeff[zero_m].real,np.sqrt(2)*coeff.real[nonzero_m],np.sqrt(2)*coeff.imag[nonzero_m])) for coeff in temp))
         real_inner = shape_change_decorator(self.angular_shape,out_shape=(self.n_coeff,))(forward_real_inner)
         def forward_real(data):
-            return ShCoeff(real_inner(data),self.l_ids_real,self.m_ids_real,ls=ls,ms=ms)
+            return ShCoeff(real_inner(data),self.l_ids_real,self.m_ids_real,ls=ls,ms=ms,complex_data=False)
         return forward_real
     def _generate_inverse_real(self):
         synth = self._sh.synth
@@ -264,33 +277,67 @@ class ShSmall:
             return  np.array(tuple(synth(_real_to_complex(coeff)) for coeff in data))
         inverse_real= shape_change_decorator((self.n_coeff,),out_shape=self.angular_shape)(inverse_real_inner)
         return inverse_real
+    def _generate_forward_real_data_cmplx_coeff(self):
+        r'''
+        computes the complex sphrical harmonic coefficients for real input data.
+        '''
+        analys = self._sh.analys
+        ls = self.ls
+        ms = self.ms_real_data_complex_coeff
+        def forward_real_data_cmplx_coeff_inner(data):            
+            return np.array(tuple(analys(r_shell.real) for r_shell in data))
+        real_inner = shape_change_decorator(self.angular_shape,
+                                            out_shape=(self.n_coeff_real_data_complex_coeff,))(forward_real_data_cmplx_coeff_inner)
+        def forward_real_data_cmplx_coeff(data):
+            return ShCoeff(real_inner(data),
+                           self.l_ids_real_data_complex_coeff,
+                           self.m_ids_real_data_complex_coeff,
+                           ls=ls,
+                           ms=ms,
+                           complex_data=False)
+        return forward_real_data_cmplx_coeff
+    def _generate_inverse_real_data_cmplx_coeff(self):
+        synth = self._sh.synth
+        def inverse_real_data_cmplx_coeff_inner(data):            
+            return  np.array(tuple(synth(coeff) for coeff in data))
+        inverse_cmplx = shape_change_decorator((self.n_coeff_real_data_complex_coeff,),
+                                               out_shape=self.angular_shape)(inverse_real_data_cmplx_coeff_inner)
+        return inverse_cmplx
     
-    def forward(data):
+    def forward(self,data):
         if np.iscomplexobj(data):
             return self.forward_cmplx(data)
         else:
-            return self.forward_real(data)
+            return self.forward_real_data_cmplx_coeff(data)
         
-    def inverse(data):
-        if data.is_complex:
+    def inverse(self,data):
+        if data.complex_data:
             return self.inverse_cmplx(data)
         else:
-            return self.inverse_real(data)
+            return self.inverse_real_data_cmplx_coeff_inner(data)
 
-    def get_empty_coeff(self,pre_shape=None,is_complex=True):
-        if is_complex:
+    def get_empty_coeff(self,pre_shape=None,complex_data=True,real_harmonics=False):
+        n_coeff = self.n_coeff
+        dtype = complex
+        if complex_data:
             l_ids = self.l_ids_complex
             m_ids = self.m_ids_complex
+            complex_data=True
         else:
+            complex_data=False
+            if not real_harmonics:
+                n_coeff = self.n_coeff_real_data_complex_coeff
+            else:
+                dtype=float
             l_ids = self.l_ids_real
             m_ids = self.m_ids_real
             
         if not isinstance(pre_shape,tuple):
-            data = np.zeros(self.n_coeff,dtype=complex)
-            return ShCoeff(data,l_ids=l_ids,m_ids=m_ids,self.ls,self.ms,is_complex=True)
+            data = np.zeros(n_coeff,dtype=dtype)
+            return ShCoeff(data,l_ids,m_ids,ls = self.ls,ms = self.ms,complex_data=complex_data)
         else:
-            data = np.zeros(pre_shape+(self.n_coeff,),dtype=complex)
-            return ShCoeff(data,l_ids=l_ids,m_ids=m_ids,self.ls,self.ms)
+            data = np.zeros(pre_shape+(n_coeff,),dtype=dtype)
+            return ShCoeff(data,l_ids,m_ids,ls = self.ls,ms = self.ms,complex_data=complex_data)
         
     @property
     def grid(self):
