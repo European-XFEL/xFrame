@@ -1,6 +1,7 @@
 import numpy as np
 import traceback
 import logging
+from typing import Literal
 from scipy.special import jv as bessel_jnu
 from scipy.special import loggamma
 from scipy.special import spherical_jn as bessel_spherical_jnu
@@ -883,9 +884,15 @@ class SphericalFourierTransform:
         if self.reciprocal_grid_in_cartesian_coords is None:
             self.reciprocal_grid_in_cartesian_coords = spherical_to_cartesian(self.reciprocal_grid)
         cart_grid = self.reciprocal_grid_in_cartesian_coords
-        def shift(reciprocal_density,vector,opposite_direction=False,power = 1):
+        def shift(reciprocal_density,vector,
+                  opposite_direction=False,
+                  power = 1,
+                  center_coord_sys:Literal['spherical','cartesian']='spherical'):
             prefactor = -1.j*(-1)**opposite_direction*power
-            cart_vect = spherical_to_cartesian(vector)
+            if center_coord_sys == 'spherical':
+                cart_vect = spherical_to_cartesian(vector)
+            else:
+                cart_vect = vector
             phases = np.exp(prefactor*(cart_grid*cart_vect).sum(axis=-1))
             reciprocal_density*=phases
             return reciprocal_density

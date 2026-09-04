@@ -3304,7 +3304,7 @@ class AlignedAverager:
         for c in counts[:-1]:
             weights.append(c/(c.sum(axis = -1)[:,None]))
         return arrays,weights,pairs_list
-
+    
     def average_pairwise(self,data: np.ndarray|typing.Callable,n_datasets:int):
         if isinstance(data,np.ndarray):
             data = data.__getitem__

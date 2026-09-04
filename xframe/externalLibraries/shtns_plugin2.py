@@ -68,6 +68,19 @@ class ShCoeff(np.ndarray):
         coeff.lm=ShCoeffView(coeff)
         coeff.complex_data = complex_data
         return coeff
+    
+    def __array_finalize__(self, obj):
+        # see InfoArray.__array_finalize__ for comments
+        if obj is None:
+            return
+        
+        self.ls = getattr(obj,'ls',None)
+        self.ms = getattr(obj,'ms',None)
+        self.l_ids = getattr(obj,'l_ids',None)
+        self.m_ids = getattr(obj,'m_ids',None)
+        self.lm = getattr(obj,'lm',None)
+        self.complex_data= getattr(obj,'complex_data',None)
+        
     def copy(self):
         return ShCoeff(np.array(self),
                        self.l_ids,
@@ -75,6 +88,7 @@ class ShCoeff(np.ndarray):
                        ls = self.ls,
                        ms = self.ms,
                        complex_data = self.complex_data)
+    
     def conj(self,*args,**kwargs):
         return ShCoeff(super().conj(*args,**kwargs),
                        self.l_ids,
@@ -142,14 +156,13 @@ class ShCoeffView:
 class ShSmall:
     def __init__(self,bandwidth,anti_aliazing_degree = 2,n_phi = 0,n_theta=0):
         #print(f'bandwidth = {bandwidth}')
-        sh = shtns.sht(int(bandwidth-1))#,norm = shtns.sht_schmidt)        
+        sh = shtns.sht(int(bandwidth-1))#,norm = shtns.sht_schmidt)
         self._sh = sh
         self.bandwidth = bandwidth
         self.max_order = bandwidth-1
         self.anti_aliazing_degree = anti_aliazing_degree
         self.n_coeff = (bandwidth)**2
         self.n_coeff_real_data_complex_coeff = bandwidth*(bandwidth+1)//2
-
         #log.info(" sh trying to create grids with n_phi= {},n_theta={}".format(n_phi,n_theta))
         thetas,phis=self._generate_grid(n_phi=n_phi,n_theta=n_theta)
         #log.info(" sh created  grids n_phi= {},n_theta={}".format(len(phis),len(thetas)))
@@ -163,7 +176,7 @@ class ShSmall:
         self.ms = np.concatenate((np.arange(bandwidth,dtype=int),-np.arange(1,bandwidth,dtype=int)[::-1]))
         
         self.l_ids_complex = np.zeros(self.n_coeff,dtype = int)
-
+        
         # array such that np.split(coeff,self.l_split_ids_complex) returns a list in which the l'th entry contains harmonic coefficients of degree l, i.e. (I^L_m) for L=l and |m|<=l.          
         self.m_ids_complex = np.zeros(self.n_coeff,dtype = int)
         for l in self.ls:
@@ -176,7 +189,6 @@ class ShSmall:
         self.shtns_real_zero_ms = (self._sh.m==0)
         self.l_ids_real = np.concatenate((self._sh.l,self._sh.l[~self.shtns_real_zero_ms]))
         self.m_ids_real = np.concatenate((self._sh.m,-self._sh.m[~self.shtns_real_zero_ms]))
-        
         
         self.l_ids_real_data_complex_coeff = np.zeros(self.n_coeff,dtype = int)
         self.m_ids_real_data_complex_coeff = np.zeros(self.n_coeff,dtype = int)
@@ -192,7 +204,8 @@ class ShSmall:
         self.forward_real = self._generate_forward_real()
         self.inverse_real =  self._generate_inverse_real()
         self.forward_real_data_cmplx_coeff = self._generate_forward_real_data_cmplx_coeff()
-        self.inverse_real_data_cmplx_coeff_inner =  self._generate_inverse_real_data_cmplx_coeff()
+        self.inverse_real_data_cmplx_coeff =  self._generate_inverse_real_data_cmplx_coeff()
+        
     def _generate_grid(self,n_phi=False,n_theta=False):
         sh=self._sh
         size_dict = self.n_angular_step_from_max_order()
@@ -207,7 +220,6 @@ class ShSmall:
             n_phi = int(n_phi)
             
         #log.info(f'nlat = {n_theta} nphi = {n_phi}')
-        
         sh.set_grid(polar_opt=0,flags=shtns.sht_gauss) #extra call needed otherwise there are sometimes errors in shtns grid generation
         n_theta,n_phi = sh.set_grid(nlat = n_theta,nphi=n_phi,polar_opt=0,flags=shtns.sht_gauss)            
         phis=2*np.pi*np.arange(n_phi)/(n_phi*sh.mres)
@@ -314,7 +326,7 @@ class ShSmall:
         if data.complex_data:
             return self.inverse_cmplx(data)
         else:
-            return self.inverse_real_data_cmplx_coeff_inner(data)
+            return self.inverse_real_data_cmplx_coeff(data)
 
     def get_empty_coeff(self,pre_shape=None,complex_data=True,real_harmonics=False):
         n_coeff = self.n_coeff

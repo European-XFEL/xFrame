@@ -1214,7 +1214,6 @@ class GpuProcessHandle:
             o.release()
 
 
-
 class GpuProcessManager:
     @staticmethod
     def request_gpu_handle_client_old(cls,target_name,gpu_process):
