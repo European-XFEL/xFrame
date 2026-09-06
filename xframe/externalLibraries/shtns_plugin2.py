@@ -107,6 +107,7 @@ class ShCoeffView:
     def __init__(self,coeff:ShCoeff,mode='complex'):
         self.coeff = coeff
         self.ls = coeff.ls
+        self.bw = np.max(self.ls)+1
         self.ms = coeff.ms
         self.l_ids = coeff.l_ids
         self.m_ids = coeff.m_ids
@@ -119,38 +120,64 @@ class ShCoeffView:
         selected_ms = self.ms[m_sel]
         mask = np.in1d(self.m_ids,selected_ms)
         return mask
-    def __getitem__(self,items):
+
+    def _to_coeff_items_complex(self,items):
         if not isinstance(items,tuple):
-            return self.coeff[...,complex_l_slice(items)]
+            return (Ellipsis,complex_l_slice(items))
         elif len(items)==1:
             if isinstance(items[0],int):
-                return self.coeff[...,complex_l_slice(items[0])]
+                return (Ellipsis,complex_l_slice(items[0]))
             else:
-                return self.coeff[...,self.get_l_mask(items[0])]                
+                return (Ellipsis,self.get_l_mask(items[0]))
         else:
             if (items[0]==slice(None)) and isinstance(items[1],int):
-                
-                return self.coeff[...,get_m_ids(items[1],self.l0s)]
+                return (Ellipsis,get_m_ids(items[1],self.l0s))
             elif (isinstance(items[0],int)) and  (isinstance(items[1],int)):
                 #l_mask = self.get_l_mask(items[0])
                 #m_mask = self.get_m_mask(items[1])
                 #print(np.sum(l_mask & m_mask))
                 #return self.coeff[...,l_mask & m_mask]
-                return self.coeff[...,get_lm_id(items[0],items[1])]
+                return (Ellipsis,get_lm_id(items[0],items[1]))
             else:
                 l_mask = self.get_l_mask(items[0])
                 m_mask = self.get_m_mask(items[1])               
                 mask = l_mask & m_mask
-                return self.coeff[...,mask]
+                return (Ellipsis,mask)
+            
+    def _to_coeff_items_real(self,items):
+        if not isinstance(items,tuple):
+            items = (items,)
+            
+        if len(items) == 1:
+            return (Ellipsis,self.get_l_mask(items[0]))
+        else:
+            l_mask = self.get_l_mask(items[0])
+            m_mask = self.get_m_mask(items[1])               
+            mask = l_mask & m_mask
+            return (Ellipsis,mask)
+        
+    def _to_coeff_items(self,items):
+        if self.coeff.complex_data:
+            return self._to_coeff_items_complex(items)
+        else:
+            return self._to_coeff_items_real(items)
+    def __getitem__(self,items):
+        items = self._to_coeff_items(items)
+        return self.coeff[*items]
+
+            
     def __setitem__(self,items,value):
-        self.__getitem__(items)[:] = value
+        coeff_items = self._to_coeff_items(items)
         if isinstance(items,tuple):
             if len(items) ==2:
-                self.coeff[...,get_lm_id(items[0],items[1])] = value
+                if self.coeff.complex_data:
+                    self.coeff[...,get_lm_id(items[0],items[1])] = value
+                else:
+                    self.coeff[...,get_ml_id_real(items[1],items[0],self.bw)] = value
             else:
-                self.__getitem__(items)[:] = value
+                self.coeff[*coeff_items] = value
         else:
-            self.__getitem__(items)[:] = value
+            self.coeff[*coeff_items] = value
             
         
 class ShSmall:
@@ -163,6 +190,7 @@ class ShSmall:
         self.anti_aliazing_degree = anti_aliazing_degree
         self.n_coeff = (bandwidth)**2
         self.n_coeff_real_data_complex_coeff = bandwidth*(bandwidth+1)//2
+        print('generating grid')
         #log.info(" sh trying to create grids with n_phi= {},n_theta={}".format(n_phi,n_theta))
         thetas,phis=self._generate_grid(n_phi=n_phi,n_theta=n_theta)
         #log.info(" sh created  grids n_phi= {},n_theta={}".format(len(phis),len(thetas)))
@@ -190,8 +218,8 @@ class ShSmall:
         self.l_ids_real = np.concatenate((self._sh.l,self._sh.l[~self.shtns_real_zero_ms]))
         self.m_ids_real = np.concatenate((self._sh.m,-self._sh.m[~self.shtns_real_zero_ms]))
         
-        self.l_ids_real_data_complex_coeff = np.zeros(self.n_coeff,dtype = int)
-        self.m_ids_real_data_complex_coeff = np.zeros(self.n_coeff,dtype = int)
+        self.l_ids_real_data_complex_coeff = np.zeros(self.n_coeff_real_data_complex_coeff,dtype = int)
+        self.m_ids_real_data_complex_coeff = np.zeros(self.n_coeff_real_data_complex_coeff,dtype = int)
         self.ms_real_data_complex_coeff = self.ls.copy()
         for m in range(bandwidth):
             for l in range(m,bandwidth):
