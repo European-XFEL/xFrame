@@ -190,7 +190,6 @@ class ShSmall:
         self.anti_aliazing_degree = anti_aliazing_degree
         self.n_coeff = (bandwidth)**2
         self.n_coeff_real_data_complex_coeff = bandwidth*(bandwidth+1)//2
-        print('generating grid')
         #log.info(" sh trying to create grids with n_phi= {},n_theta={}".format(n_phi,n_theta))
         thetas,phis=self._generate_grid(n_phi=n_phi,n_theta=n_theta)
         #log.info(" sh created  grids n_phi= {},n_theta={}".format(len(phis),len(thetas)))
