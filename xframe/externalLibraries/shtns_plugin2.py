@@ -367,10 +367,12 @@ class ShSmall:
             complex_data=False
             if not real_harmonics:
                 n_coeff = self.n_coeff_real_data_complex_coeff
+                l_ids = self.l_ids_real_data_complex_coeff
+                m_ids = self.m_ids_real_data_complex_coeff
             else:
                 dtype=float
-            l_ids = self.l_ids_real
-            m_ids = self.m_ids_real
+                l_ids = self.l_ids_real
+                m_ids = self.m_ids_real
             
         if not isinstance(pre_shape,tuple):
             data = np.zeros(n_coeff,dtype=dtype)
