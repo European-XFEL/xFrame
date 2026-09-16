@@ -900,7 +900,15 @@ class SphericalFourierTransform:
     
 class ZernikeTransform:
     '''class implementing Zernike Series expansion.'''
-    def __init__(self,bandwidth=32,order=0,n_points=128,max_r=1,dimension=3,grid='uniform',bw_to_sampling_factor=4):
+    def __init__(self,
+                 bandwidth=32,
+                 order=0,
+                 n_points=128,
+                 max_r=1,
+                 dimension=3,
+                 grid='uniform',
+                 bw_to_sampling_factor=4):
+        
         from xframe.library.mathLibrary import eval_ND_zernike_polynomials
         step = max_r/n_points
         self.s = np.arange(order,bandwidth,2)
@@ -908,7 +916,6 @@ class ZernikeTransform:
             R = max_r
             N = n_points
             ks = np.arange(1,N+1)
-            phis = np.pi/2-(ks-0.5)*np.pi/(2*N)
             self.points = p = (R/2*(1+np.cos((ks-1/2)/N*np.pi)))[::-1]
             #self.points = p = R*np.cos(phis)
             self.weight = np.pi/N #*np.sqrt(R*p-(p*R)**2)#*2

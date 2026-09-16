@@ -2130,7 +2130,54 @@ class CumulativeVariance:
     def copy(self):
         return CumulativeVariance(mean = np.array(self.mean),count = self.count ,m2=np.array(self.m2))
 
+class CumulativeMean:
+    '''
+    Adaptation of Cumulative variance that only computes the mean 
+    '''
+    def __init__(self,mean=0,count=0,bessels_correction=True):
+        self.count = count
+        self.mean = mean
+    
+    @classmethod    
+    def from_dataset(cls,dataset,axis=0):
+        '''
+        Creates object from an array(dataset) calculating var and mean along a specified axis.
+        '''
+        obj = cls()
+        tmp = np.moveaxis(dataset,axis,0)
+        for d in tmp:
+            obj.update(d)
+        return obj
+        
+    def update(self,val:np.ndarray|int|float|complex):
+        # updates the running mean and variance by a single new value
+        self.count += 1
+        delta = val - self.mean
+        self.mean += delta / self.count
+        return self
+        
+    def merge(self,var):
+        # merges another CumulativeVariance instance to create the combined average and variance.
+        return self.merge_from_data(var.mean,var.count)
+        
+    def merge_from_data(self,mean,count):
+        # merges the data of another CummulativeVariance instance to create the combined average and variance.
+        count_a = self.count
+        self.count += count
+        delta = mean-self.mean
+        temp = delta*count/self.count
+        self.mean = self.mean + temp
+        return self
+    
+    @property
+    def data(self):
+        return (self.mean,self.count,self.m2)
+    def copy(self):
+        return CumulativeMean(mean = np.array(self.mean),count = self.count)
 
+    def __getitem__(self,items):
+        return self.mean.__getitem__(items)
+    
 #################
 ####alignment####
 def generate_calc_center(real_grid):
