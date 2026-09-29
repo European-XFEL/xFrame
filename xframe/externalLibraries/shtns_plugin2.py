@@ -4,6 +4,7 @@ import logging
 from xframe.library.gridLibrary import GridFactory
 from xframe.library import pythonLibrary as pyLib
 from xframe.library.interfaces import SphericalHarmonicTransformInterface
+from numbers import Integral
 import shtns
 
 log=logging.getLogger('root')
@@ -36,6 +37,11 @@ def get_m_ids(m,l0s):
 def coeff_shape_complex(bandwidth):
     return bandwidth**2
 
+def is_integer(a):
+    if isinstance(a,np.ndarray):
+        return a.ndim==0 and np.issubdtype(a.dtype,np.dtype(int))
+    else:
+        return isinstance(a,Integral)
 
 
 
@@ -68,7 +74,6 @@ class ShCoeff(np.ndarray):
         coeff.lm=ShCoeffView(coeff)
         coeff.complex_data = complex_data
         return coeff
-    
     def __array_finalize__(self, obj):
         # see InfoArray.__array_finalize__ for comments
         if obj is None:
@@ -80,7 +85,6 @@ class ShCoeff(np.ndarray):
         self.m_ids = getattr(obj,'m_ids',None)
         self.lm = getattr(obj,'lm',None)
         self.complex_data= getattr(obj,'complex_data',None)
-        
     def copy(self):
         return ShCoeff(np.array(self),
                        self.l_ids,
@@ -88,7 +92,6 @@ class ShCoeff(np.ndarray):
                        ls = self.ls,
                        ms = self.ms,
                        complex_data = self.complex_data)
-    
     def conj(self,*args,**kwargs):
         return ShCoeff(super().conj(*args,**kwargs),
                        self.l_ids,
@@ -96,12 +99,13 @@ class ShCoeff(np.ndarray):
                        ls = self.ls,
                        ms = self.ms,
                        complex_data = self.complex_data)
-    
     def point_inverse(self):
         out = self.copy()
         for l in self.ls:
             out.lm[l]=(-1)**l*self.lm[l]
         return out
+            
+        
     
 class ShCoeffView:
     def __init__(self,coeff:ShCoeff,mode='complex'):
@@ -120,7 +124,7 @@ class ShCoeffView:
         selected_ms = self.ms[m_sel]
         mask = np.in1d(self.m_ids,selected_ms)
         return mask
-
+    
     def _to_coeff_items_complex(self,items):
         if not isinstance(items,tuple):
             return (Ellipsis,complex_l_slice(items))
@@ -130,14 +134,12 @@ class ShCoeffView:
             else:
                 return (Ellipsis,self.get_l_mask(items[0]))
         else:
-            if (items[0]==slice(None)) and isinstance(items[1],int):
+            if (items[0]==slice(None)) and np.issubdtype(items[1],np.dtype(int)):
                 return (Ellipsis,get_m_ids(items[1],self.l0s))
-            elif (isinstance(items[0],int)) and  (isinstance(items[1],int)):
-                #l_mask = self.get_l_mask(items[0])
-                #m_mask = self.get_m_mask(items[1])
-                #print(np.sum(l_mask & m_mask))
-                #return self.coeff[...,l_mask & m_mask]
-                return (Ellipsis,get_lm_id(items[0],items[1]))
+            elif (len(items)==2 and
+                  is_integer(items[0]) and
+                  is_integer(items[1])):                
+                return (Ellipsis,get_lm_id(*items))
             else:
                 l_mask = self.get_l_mask(items[0])
                 m_mask = self.get_m_mask(items[1])               
@@ -146,10 +148,13 @@ class ShCoeffView:
             
     def _to_coeff_items_real(self,items):
         if not isinstance(items,tuple):
-            items = (items,)
-            
+            items = (items,)            
         if len(items) == 1:
             return (Ellipsis,self.get_l_mask(items[0]))
+        elif (len(items)==2 and
+              is_integer(items[0]) and
+              is_integer(items[1])):
+            return (Ellipsis,get_ml_id_real(items[1],items[0],self.bw))
         else:
             l_mask = self.get_l_mask(items[0])
             m_mask = self.get_m_mask(items[1])               
@@ -161,11 +166,11 @@ class ShCoeffView:
             return self._to_coeff_items_complex(items)
         else:
             return self._to_coeff_items_real(items)
+
     def __getitem__(self,items):
         items = self._to_coeff_items(items)
         return self.coeff[*items]
-
-            
+    
     def __setitem__(self,items,value):
         coeff_items = self._to_coeff_items(items)
         if isinstance(items,tuple):
@@ -180,7 +185,7 @@ class ShCoeffView:
             self.coeff[*coeff_items] = value
             
         
-class ShSmall:
+class ShSmall(SphericalHarmonicTransformInterface):
     def __init__(self,bandwidth,anti_aliazing_degree = 2,n_phi = 0,n_theta=0):
         #print(f'bandwidth = {bandwidth}')
         sh = shtns.sht(int(bandwidth-1))#,norm = shtns.sht_schmidt)
@@ -354,7 +359,7 @@ class ShSmall:
             return self.inverse_cmplx(data)
         else:
             return self.inverse_real_data_cmplx_coeff(data)
-
+        
     def get_empty_coeff(self,pre_shape=None,complex_data=True,real_harmonics=False):
         n_coeff = self.n_coeff
         dtype = complex
@@ -383,7 +388,24 @@ class ShSmall:
     @property
     def grid(self):
         return GridFactory.construct_grid('uniform',(self.thetas,self.phis))
-
+    
+    def convert_coeff_to_complex_data_format(self,coeff):
+        ''' Does wat it sais it does
+        '''
+        if coeff.complex_data:
+            return coeff.copy()
+        else:
+            pre_shape = coeff.shape[:-1]
+            cplx_coeff = self.get_empty_coeff(pre_shape=pre_shape,complex_data=True)
+            for l in coeff.ls:
+                mm=np.array(0)
+                cplx_coeff.lm[l,0] = coeff.lm[l,0]
+                for m in np.arange(1,l+1):
+                    cplx_coeff.lm[l,m] = coeff.lm[l,m]
+                    cplx_coeff.lm[l,-m] = ((-1)**l)*coeff.lm[l,m].conj()
+            return cplx_coeff
+                
+                
 class sh(SphericalHarmonicTransformInterface):
     ShSmall = ShSmall
     ShCoeff = ShCoeff

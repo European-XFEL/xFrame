@@ -9,9 +9,11 @@ from scipy.special import eval_gegenbauer
 from xframe import Multiprocessing
 from xframe import settings
 from xframe.library.pythonLibrary import xprint
+from xframe.library.interfaces import SphericalHarmonicTransformInterface
+from xframe.library.mathLibrary import eval_single_ND_zernike_polynomial_gsl,ND_zernike_polynomials,cartesian_to_spherical
 from dataclasses import dataclass,field
 from typing import ClassVar
-
+from time import time
 log = logging.getLogger('root')
 
 
@@ -897,112 +899,321 @@ class SphericalFourierTransform:
             reciprocal_density*=phases
             return reciprocal_density
         return shift
+
+@dataclass
+class SphericalZernikeTransformStruct:
+    bandwidth:int = 32
+    n_points:int = 128
+    max_r:float = 1.0
+    grid_type:str = 'midpoint'
     
-class ZernikeTransform:
-    '''class implementing Zernike Series expansion.'''
+class SphericalZernikeTransform:
     def __init__(self,
-                 bandwidth=32,
-                 order=0,
-                 n_points=128,
-                 max_r=1,
-                 dimension=3,
-                 grid='uniform',
-                 bw_to_sampling_factor=4):
+                 struct:SphericalZernikeTransformStruct= None,
+                 harmonic_transform:SphericalHarmonicTransformInterface = None):
+        if struct is None:
+            struct = SphericalZernikeTransformStruct()
+        if harmonic_transform is None:
+            harmonic_transform = get_harmonic_transform(32)            
+        self.struct = struct
+        self.harm = harmonic_transform
+        self._dim = 3
+        self.weights,self.rs = self.generate_weights()
         
-        from xframe.library.mathLibrary import eval_ND_zernike_polynomials
-        step = max_r/n_points
-        self.s = np.arange(order,bandwidth,2)
-        if grid=='chebyshev':
-            R = max_r
-            N = n_points
-            ks = np.arange(1,N+1)
-            self.points = p = (R/2*(1+np.cos((ks-1/2)/N*np.pi)))[::-1]
-            #self.points = p = R*np.cos(phis)
-            self.weight = np.pi/N #*np.sqrt(R*p-(p*R)**2)#*2
-            #self.weight = np.pi/(N*2) #*np.sqrt(R*p-(p*R)**2)#*2
-            self.izernike_values = eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,self.points,dimension)[order]
-            self.zernike_values = self.izernike_values*np.sqrt(1-p**2)[None,:]#np.sqrt(R*p-(p*R)**2)[None,:]
-            #self.zernike_values = self.izernike_values*np.sqrt(R*p-(p*R)**2)[None,:]
-            
-            
-            zernike_points_per_step = int(bandwidth*bw_to_sampling_factor/n_points)+1
-            zN = N*zernike_points_per_step
-            zks = np.arange(1,zN+1)
-            zernike_points = zp = (R/2*(1+np.cos((zks-1/2)/zN*np.pi)))[::-1]
-            zweights = 1/zernike_points_per_step*np.sqrt(R*zp-(zp*R)**2)
-            zernike_values=np.zeros((len(self.s),n_points),dtype=float)
-            izernike_values=np.zeros((len(self.s),n_points),dtype=float)
-            for i in range(zernike_points_per_step):
-                vals = eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,zernike_points[i::zernike_points_per_step],dimension)[order]
-                zernike_values+=vals*zweights[i::zernike_points_per_step]
-                izernike_values+=vals/zernike_points_per_step#*zweights[i::zernike_points_per_step]                
-            #self.zernike_values = zernike_values
-            #self.izernike_values = izernike_values
-        elif grid == 'cheby2':
-            R = max_r
-            N = n_points
-            cks = np.cos((np.arange(N)+0.5)*np.pi/(2*N))
-            self.points = cks
-            self.weight = np.pi/(2*N)
-            self.izernike_values = eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,cks,dimension)[order]
-            self.zernike_values = self.izernike_values*np.sqrt(1-cks**2)
-        elif grid == 'cheby3':
-            R = max_r
-            N = n_points
-            sks = np.sin((np.arange(N)+0.5)*np.pi/(2*N))
-            self.points = sks
-            self.weight = np.pi/(2*N)
-            self.izernike_values = eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,sks,dimension)[order]
-            self.zernike_values = self.izernike_values*np.sqrt(1-sks**2)
-        elif grid == 'cheby4':
-            R = max_r
-            N = n_points
-            sks = np.sin((np.arange(N)+0.5)*np.pi/(2*N))
-            self.points = sks
-            self.weight = np.pi/(2*N)
-            self.izernike_values = eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,sks,dimension)[order]
-            self.zernike_values = self.izernike_values*np.sqrt(1-sks**2)
-
-            zernike_points_per_step = int(bandwidth*bw_to_sampling_factor/n_points)
-            print(f'n_points = {n_points}, zernike_points_per_step = {zernike_points_per_step}')
-            zN = N*zernike_points_per_step
-            zks = np.arange(1,zN)                 
-            zernike_points = zp =  np.sin((np.arange(zN)+0.5)*np.pi/(2*zN))
-            zweights = np.sqrt(1-zp**2)/(zernike_points_per_step)
-            zernike_values=np.zeros((len(self.s),n_points),dtype=float)
-            izernike_values=np.zeros((len(self.s),n_points),dtype=float)
-            for i in range(zernike_points_per_step):
-                vals = eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,zernike_points[i::zernike_points_per_step],dimension)[order]
-                zernike_values+=vals*zweights[i::zernike_points_per_step]
-                izernike_values+=vals/zernike_points_per_step#*zweights[i::zernike_points_per_step]
-            self.izernike_values = izernike_values
-            self.zernike_values = zernike_values
-        else:
-            self.points = (np.arange(n_points)+0.5)*step
-            zernike_points_per_step = int(bandwidth*bw_to_sampling_factor/n_points)+1
-            zernike_points = (np.arange(n_points*zernike_points_per_step)+0.5)*(step/zernike_points_per_step)
-            self.weight= step
-            zernike_values=np.zeros((len(self.s),n_points),dtype=float)
-            for i in range(zernike_points_per_step):
-                zernike_values+=eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,zernike_points[i::zernike_points_per_step],dimension)[order]/zernike_points_per_step
-                
-            self.zernike_values = zernike_values
-            self.izernike_values = zernike_values
-            
-#        self.zernike_values = eval_ND_zernike_polynomials(np.array([order]),bandwidth-1,self.points,dimension)[order]
-
-        self.bandwidth = bandwidth
-        self.order = order
-        self.dimension=dimension
-        self.n_points = n_points
-        self.C=np.sqrt(2*self.s+dimension)
-    def forward(self,f):
-        fs = (self.zernike_values*self.C[:,None]*self.points[None,:]**(self.dimension-1)*self.weight) @ f
-        return fs
-    def inverse(self,fs):
-        return np.sum(self.izernike_values*self.C[:,None]*fs[:,None],axis=0)
-
+    def generate_weights(self):
+        Nr = self.struct.n_points
+        max_r = self.struct.max_r
+        angular_bw = self.harm.bandwidth
+        bw = self.struct.bandwidth
+        if self.struct.grid_type != 'midpoint':
+            raise NotImplementedError(f'Wrong grid type {self.struct.grid_tpye}. Currently only grid_type = "midpoint" is supported.' )
+        points = (np.arange(Nr)+0.5)/Nr
+        rs = points*max_r
+        weights = np.zeros((angular_bw,bw,Nr),dtype=float)
+        
+        for l in range(min(angular_bw,bw)):
+            weights[l,l::2,:] = ND_zernike_polynomials(l,bw,points,self._dim)
+        return weights,rs
     
+    def forward(self,lm_coeff):
+        out = self.harm.get_empty_coeff(pre_shape=(self.struct.bandwidth,),
+                                        complex_data=lm_coeff.complex_data,
+                                        real_harmonics= np.issubdtype(lm_coeff.dtype,np.floating))
+        max_r = self.struct.max_r
+        r2 = self.rs**(self._dim-1)
+        delta_r = self.rs[1]-self.rs[0]
+        bw = min(self.harm.bandwidth,self.struct.bandwidth)
+        for l in range(bw):
+            out_l = out.lm[l]
+            for s in range(self.struct.bandwidth):
+                const = ((2*s+self._dim)/max_r**self._dim)*delta_r
+                out_l[s] = const*np.sum(lm_coeff.lm[l].T*r2[None,:]*self.weights[l,s][None,:],axis=-1)
+            out.lm[l] = out_l
+        return out
+    
+    def inverse(self,lms_coeff):
+        out = self.harm.get_empty_coeff(pre_shape=(self.struct.n_points,),
+                                        complex_data=lms_coeff.complex_data,
+                                        real_harmonics= np.issubdtype(lms_coeff.dtype,np.floating))
+        bw = min(self.harm.bandwidth,self.struct.bandwidth)
+        for l in range(bw):
+            out.lm[l] = np.sum(lms_coeff.lm[l][:,None,:]*self.weights[l,:,:,None],axis=0)
+        return out
+
+    def full_inverse_at(self, lms_coeff, new_points):
+        """
+        Evaluate the spherical-Zernike expansion at arbitrary points.
+
+        Parameters
+        ----------
+        lms_coeff : ShCoeff
+            Zernike coefficients with radial/Zernike index s as first axis.
+        new_points : ndarray, shape (..., 3)
+            Points in spherical coordinates: (r, theta, phi).
+        """
+        new_points = np.asarray(new_points)
+        
+        if new_points.shape[-1] != 3:
+            raise ValueError("new_points must have shape (..., 3).")
+        
+        if lms_coeff.shape[0] != self.struct.bandwidth:
+            raise ValueError("Unexpected radial/Zernike coefficient dimension.")
+        
+        if (not lms_coeff.complex_data
+            and np.issubdtype(lms_coeff.dtype, np.floating)):
+            raise NotImplementedError(
+                "Full real-harmonic coefficient representation is not supported."
+            )
+        
+        output_shape = new_points.shape[:-1]
+        r, theta, phi = new_points.reshape(-1, 3).T
+        
+        if np.any(r < 0) or np.any(r > self.struct.max_r):
+            raise ValueError("Points must satisfy 0 <= r <= max_r.")
+        
+        if np.any(theta < 0) or np.any(theta > np.pi):
+            raise ValueError("theta must lie in [0, pi].")
+        
+        rho = r / self.struct.max_r
+        phi = np.mod(phi, 2 * np.pi)
+        cos_theta = np.cos(theta)
+        # One SHTns angular-coefficient vector for every requested point.
+        angular_coeffs = self.harm.get_empty_coeff(pre_shape=(len(rho),),complex_data = lms_coeff.complex_data)
+        bw = min(self.harm.bandwidth, self.struct.bandwidth)
+        #print('Zernike inverse')
+        for l in range(bw):
+            valid_s = np.arange(l, self.struct.bandwidth, 2)
+            coeff_part = lms_coeff.lm[l][valid_s]
+            # Shape: (n_points, n_valid_s)
+            start = time()
+            radial_basis = ND_zernike_polynomials(l,self.struct.bandwidth,rho,self._dim)
+            #print(f'Basis creation time ={time()-start} basis shape = {radial_basis.shape} coeff_part.shape = {coeff_part.shape}')
+            # Radial synthesis:
+            # f_lm(r) = sum_s a_slm R_sl(r / max_r)
+            start = time()
+            angular_coeffs.lm[l] = radial_basis.T @ coeff_part
+            #print(f'Matrix mult time ={time()-start}')
+            
+        if angular_coeffs.complex_data:
+            eval_sh = self.harm._sh.SH_to_point_cplx
+        else:
+            eval_sh = self.harm._sh.SH_to_point
+            
+        #print('sh inverse')
+        values = np.array([
+            eval_sh(coeff, ct, p)
+            for coeff, ct, p in zip(angular_coeffs, cos_theta, phi)
+        ])
+        return values.reshape(output_shape)
+
+    def _get_cart_points(self,start,stop,points):
+        '''
+        computes cartesian grid points based on a 1d index
+        and the list of points along one dimension.
+        '''
+        n = len(points)
+        if stop>n**3:
+            stop = n**3
+        ids = np.arange(start,stop)
+            
+        out = np.zeros((len(ids),3),float)
+        out[:,0] = points[(ids//n**2)%n]
+        out[:,1] = points[(ids//n)%n]
+        out[:,2] = points[ids%n]
+        return out
+
+    def _full_inverse_cartesian_single_process(self, lms_coeff, points,batch_size=8192,fill_value=0):
+        """
+        Evaluate the spherical-Zernike expansion at arbitrary points.
+
+        Parameters
+        ----------
+        lms_coeff : ShCoeff
+            Zernike coefficients with radial/Zernike index s as first axis.
+        points : ndarray, shape (Np)
+            Points in spherical coordinates: (r, theta, phi).
+        """
+        points = np.asarray(points)
+        n = len(points)
+        
+        if lms_coeff.shape[0] != self.struct.bandwidth:
+            raise ValueError("Unexpected radial/Zernike coefficient dimension.")
+        
+        if (not lms_coeff.complex_data
+            and np.issubdtype(lms_coeff.dtype, np.floating)):
+            raise NotImplementedError(
+                "Full real-harmonic coefficient representation is not supported."
+            )
+
+        if lms_coeff.complex_data:
+            output = np.full(n**3,fill_value,dtype=complex)
+            eval_sh = self.harm._sh.SH_to_point_cplx
+        else:
+            output = np.full(n**3,fill_value,dtype=float)
+            eval_sh = self.harm._sh.SH_to_point
+            
+            
+        max_r = self.struct.max_r
+        
+        bw = min(self.harm.bandwidth, self.struct.bandwidth)
+
+        n_batches = int(np.ceil((n**3)/(batch_size-1)))
+        n_big_batches = (n**3)%n_batches
+        batch_size = int((n**3)//n_batches)
+        batch_split_ids = (
+            tuple(i*(batch_size+1) for i in range(n_big_batches))
+            +tuple(min(n_big_batches*(batch_size+1)+i*batch_size,n**3) for i in range(n_batches-n_big_batches+1))
+        )
+        
+        coeff_workspace = self.harm.get_empty_coeff(
+            pre_shape=(batch_size,),
+            complex_data=lms_coeff.complex_data,
+        )
+        coeff_workspace2 = self.harm.get_empty_coeff(
+            pre_shape=(batch_size+1,),
+            complex_data=lms_coeff.complex_data,
+        )
+        #currently does not ignore values outside of data range....
+        for batch_id in range(n_batches):
+            start = time()
+            start_id = batch_split_ids[batch_id]
+            stop_id = batch_split_ids[batch_id+1]
+            len_batch = stop_id-start_id
+            batch_points = self._get_cart_points(start_id,stop_id,points)
+            r,theta,phi = cartesian_to_spherical(batch_points).T
+            
+            
+            rho = r / self.struct.max_r
+            phi = np.mod(phi, 2 * np.pi)
+            cos_theta = np.cos(theta)
+            
+            for l in range(bw):
+                coeff_part = lms_coeff.lm[l][l:self.struct.bandwidth:2]
+                radial_basis = ND_zernike_polynomials(l,self.struct.bandwidth,rho,self._dim).T
+                if len_batch == batch_size:
+                    tmp_workspace = coeff_workspace
+                    tmp_workspace.lm[l] = radial_basis @ coeff_part
+                else:
+                    tmp_workspace = coeff_workspace2
+                    tmp_workspace.lm[l] = radial_basis @ coeff_part
+                
+            values = np.array([
+                eval_sh(coeff, ct, p)
+                for coeff, ct, p in zip(tmp_workspace, cos_theta, phi)
+            ])
+            output[start_id:stop_id] = values
+            print(f'batch {batch_id}/{n_batches} took {time()-start} seconds')
+        return output.reshape((n,)*3)
+    def _full_inverse_cartesian_multi_process(self, lms_coeff, points,batch_size=8192,fill_value=0,n_processes = 2):
+        """
+        Evaluate the spherical-Zernike expansion at arbitrary points.
+
+        Parameters
+        ----------
+        lms_coeff : ShCoeff
+            Zernike coefficients with radial/Zernike index s as first axis.
+        points : ndarray, shape (Np)
+            Points in spherical coordinates: (r, theta, phi).
+        """
+        points = np.asarray(points)
+        n = len(points)
+        
+        if lms_coeff.shape[0] != self.struct.bandwidth:
+            raise ValueError("Unexpected radial/Zernike coefficient dimension.")
+        
+        if (not lms_coeff.complex_data
+            and np.issubdtype(lms_coeff.dtype, np.floating)):
+            raise NotImplementedError(
+                "Full real-harmonic coefficient representation is not supported."
+            )
+
+        if lms_coeff.complex_data:
+            output = np.full(n**3,fill_value,dtype=complex)
+            eval_sh = self.harm._sh.SH_to_point_cplx
+        else:
+            output = np.full(n**3,fill_value,dtype=float)
+            eval_sh = self.harm._sh.SH_to_point
+            
+            
+        max_r = self.struct.max_r
+        
+        bw = min(self.harm.bandwidth, self.struct.bandwidth)
+
+        n_batches = int(np.ceil((n**3)/(batch_size-1)))
+        n_big_batches = (n**3)%n_batches
+        batch_size = int((n**3)//n_batches)
+        batch_split_ids = (
+            tuple(i*(batch_size+1) for i in range(n_big_batches))
+            +tuple(min(n_big_batches*(batch_size+1)+i*batch_size,n**3) for i in range(n_batches-n_big_batches+1))
+        )
+        
+        coeff_workspace = self.harm.get_empty_coeff(
+            pre_shape=(batch_size,),
+            complex_data=lms_coeff.complex_data,
+        )
+        coeff_workspace2 = self.harm.get_empty_coeff(
+            pre_shape=(batch_size+1,),
+            complex_data=lms_coeff.complex_data,
+        )
+        
+        for batch_id in range(n_batches):
+            start = time()
+            start_id = batch_split_ids[batch_id]
+            stop_id = batch_split_ids[batch_id+1]
+            len_batch = stop_id-start_id
+            batch_points = self._get_cart_points(start_id,stop_id,points)
+            r,theta,phi = cartesian_to_spherical(batch_points).T
+            
+            
+            rho = r / self.struct.max_r
+            phi = np.mod(phi, 2 * np.pi)
+            cos_theta = np.cos(theta)
+
+            
+            for l in range(bw):
+                coeff_part = lms_coeff.lm[l][l:self.struct.bandwidth:2]
+                radial_basis = ND_zernike_polynomials(l,self.struct.bandwidth,rho,self._dim).T
+                if len_batch == batch_size:
+                    tmp_workspace = coeff_workspace
+                    tmp_workspace.lm[l] = radial_basis @ coeff_part
+                else:
+                    tmp_workspace = coeff_workspace2
+                    tmp_workspace.lm[l] = radial_basis @ coeff_part
+                
+            values = np.array([
+                eval_sh(coeff, ct, p)
+                for coeff, ct, p in zip(tmp_workspace, cos_theta, phi)
+            ])
+            output[start_id:stop_id] = values
+            print(f'batch {batch_id}/{n_batches} took {time()-start} seconds')
+        return output.reshape((n,)*3)
+    def full_inverse_cartesian(self, lms_coeff, points,batch_size=8192,fill_value=0,n_processes = 1):
+        if n_processes <=1:
+            return self._full_inverse_cartesian_single_process(lms_coeff, points,batch_size=8192,fill_value=0)
+        else:
+            return self._full_inverse_cartesian_multi_process(lms_coeff, points,batch_size=8192,fill_value=0,n_processes=n_processes)
+        
+            
 #######################
 ## Experimental Area ##
 ## 
