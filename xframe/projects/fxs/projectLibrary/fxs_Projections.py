@@ -1036,7 +1036,7 @@ class ReciprocalProjection:
             def approximate_unknowns(intensity_harmonic_coefficients):
                 #log.info('len harmonic coeff = {}'.format(len(intensity_harmonic_coefficients)))
                 for unknown,PD,oid,l,qmask in zip(unknowns,PDs,order_ids,used_orders,radial_mask):
-                    I = intensity_harmonic_coefficients.lm[l]
+                    I = intensity_harmonic_coefficients.lm[...,l,:]
                     #xprint(f'PD contains Nans : {np.isnan(PD).any()}')
                     #xprint(f'unknown dtype = {unknown.dtype}, PD dtype = {PD.dtype}, coeff dtype = {I[qmask].dtype}')
                     matmul(*svd(PD @ (I[qmask]),full_matrices=False)[::2],out = unknown)  # PD @ Intensity is  B^\dagger A in a Procrustres Problem min|A-BR|
@@ -1054,7 +1054,7 @@ class ReciprocalProjection:
                 
                 def function(intensity_harmonic_coefficients):
                     for ms,unknown,PD,l,qmask in zip(unknowns,PDs,used_orders,radial_mask):
-                        I = intensity_harmonic_coefficients.lm[l]
+                        I = intensity_harmonic_coefficients.lm[...,l,:]
                         u,s,vh = svd(PD @ I[qmask],full_matrices=False)
                         matmul(u,vh,out = unknown)  # PD @ Intensity is  B^\dagger A in a Procrustres Problem min|A-BR|
                     
@@ -1114,8 +1114,8 @@ class ReciprocalProjection:
                     projected_intensity_coefficients=intensity_harmonic_coefficients.copy()
                     for l,o_id in self.used_orders.items():
                         tmp_coeff = projection_matrices[o_id] @ unknowns[o_id]
-                        projected_intensity_coefficients.lm[l][radial_mask[o_id]] = tmp_coeff[radial_mask[o_id]]
-                    projected_intensity_coefficients.lm[0][radial_mask[zero_id]] = projection_matrices[zero_id][radial_mask[zero_id]]
+                        projected_intensity_coefficients.lm[...,l,:][radial_mask[o_id]] = tmp_coeff[radial_mask[o_id]]
+                    projected_intensity_coefficients.lm[...,0,:][radial_mask[zero_id]] = projection_matrices[zero_id][radial_mask[zero_id]]
                     return projected_intensity_coefficients
             else:
                 def mtip_projection(intensity_harmonic_coefficients,unknowns):
@@ -1123,7 +1123,7 @@ class ReciprocalProjection:
                     for o_id in self.used_orders.values():
                         tmp_coeff = projection_matrices[o_id] @ unknowns[o_id]
                         #projected_intensity_coefficients[o_id][radial_mask[o_id],...] = tmp_coeff[radial_mask[o_id],...]
-                        projected_intensity_coefficients.lm[l][radial_mask[o_id]] = tmp_coeff[radial_mask[o_id]]
+                        projected_intensity_coefficients.lm[...,l,:][radial_mask[o_id]] = tmp_coeff[radial_mask[o_id]]
                     return projected_intensity_coefficients
         return mtip_projection
     def generate_coeff_projection(self,coeff_projection):
@@ -1145,14 +1145,14 @@ class ReciprocalProjection:
                 projected_intensity_coefficients = coeff_projection(intensity_harmonic_coefficients,unknowns)
                 #projected_intensity_coefficients[zero_id][radial_mask[zero_id]]/=np.sqrt(number_of_particles[0])
                 #log.info(f'number of particles scaling factor = {1/np.sqrt(number_of_particles[0])}')
-                projected_intensity_coefficients.lm[0][:]/=np.sqrt(number_of_particles[0])
+                projected_intensity_coefficients.lm[...,0,:][:]/=np.sqrt(number_of_particles[0])
                 
                 #for l,o_id in self.used_orders.items():
                 #    if not radial_mask[o_id].all():
                 #        qmask = radial_mask[o_id]
                 #        first_unmasked = np.argmin(~qmask)+1
                 #        #xprint(first_unmasked)
-                #        Il = projected_intensity_coefficients.lm[l]
+                #        Il = projected_intensity_coefficients.lm[...,l,:]
                 #        signs_ref = np.sign((Il@Il[first_unmasked].conj()).real)
                 #        signs = np.sign((Il@Il[~qmask].T.conj()).real)
                 #        metrics = np.sum(np.abs(signs-signs_ref[:,None]),axis =0)>np.sum(np.abs(-signs-signs_ref[:,None]),axis =0)
