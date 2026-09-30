@@ -446,8 +446,8 @@ class HankelTransform:
         coeff_shape_i = (self.Nr,self.bandwidth**2)
         forward_array = np.zeros(coeff_shape_f,dtype=complex)
         inverse_array = np.zeros(coeff_shape_i,dtype=complex)
-        forward_coeff = shtns.ShCoeff.from_bandwith_complex(forward_array,self.bandwidth)
-        inverse_coeff = shtns.ShCoeff.from_bandwith_complex(inverse_array,self.bandwidth)
+        forward_coeff = shtns.ShCoeff.from_bandwidth_complex(forward_array,self.bandwidth)
+        inverse_coeff = shtns.ShCoeff.from_bandwidth_complex(inverse_array,self.bandwidth)
         return forward_coeff,inverse_coeff
     def _generate_polar_coeff_arrays(self):
         coeff_shape_f = (self.Nq,2*self.bandwidth)
@@ -492,11 +492,11 @@ class HankelTransform:
             def ht(harmonic_coeff):
                 #return tuple(np.sum(forward_weights[:,:,np.abs(m):]*harmonic_coeff[m][1:,None,:l_max - np.abs(m)+1],axis=0) for m in m_orders)
                 for l in l_orders:
-                    matmul(fw[:,:,l],harmonic_coeff.lm[l][1:],out = forward_coeff.lm[l])
+                    matmul(fw[:,:,l],harmonic_coeff.lm[...,l,:][1:],out = forward_coeff.lm[...,l,:])
                 return forward_coeff
             def iht(harmonic_coeff):
                 for l in l_orders:
-                    matmul(iw[:,:,l],harmonic_coeff.lm[l][1:],out = inverse_coeff.lm[l])
+                    matmul(iw[:,:,l],harmonic_coeff.lm[...,l,:][1:],out = inverse_coeff.lm[...,l,:])
                 return inverse_coeff               
         else:
             def ht(harmonic_coeff):
@@ -504,14 +504,14 @@ class HankelTransform:
                 #print(f'fw shape = {fw.shape}')
                 #print(f'fw shape = {fw.shape}')
                 for l in l_orders:
-                    matmul(fw[:,:,l],harmonic_coeff.lm[l],out = forward_coeff.lm[l])
+                    matmul(fw[:,:,l],harmonic_coeff.lm[...,l,:],out = forward_coeff.lm[...,l,:])
                 return forward_coeff        
             def iht(harmonic_coeff):
                 #print(f'in shape = {harmonic_coeff.shape}')
                 #print(f'iw shape = {iw.shape}')
                 #print(f'inverse_coeff shape = {inverse_coeff.shape}')
                 for l in l_orders:
-                    matmul(iw[:,:,l],harmonic_coeff.lm[l],out = inverse_coeff.lm[l])
+                    matmul(iw[:,:,l],harmonic_coeff.lm[...,l,:],out = inverse_coeff.lm[...,l,:])
                 return inverse_coeff
         return ht,iht
 
@@ -944,11 +944,11 @@ class SphericalZernikeTransform:
         delta_r = self.rs[1]-self.rs[0]
         bw = min(self.harm.bandwidth,self.struct.bandwidth)
         for l in range(bw):
-            out_l = out.lm[l]
+            out_l = out.lm[...,l,:]
             for s in range(self.struct.bandwidth):
                 const = ((2*s+self._dim)/max_r**self._dim)*delta_r
-                out_l[s] = const*np.sum(lm_coeff.lm[l].T*r2[None,:]*self.weights[l,s][None,:],axis=-1)
-            out.lm[l] = out_l
+                out_l[s] = const*np.sum(lm_coeff.lm[...,l,:].T*r2[None,:]*self.weights[l,s][None,:],axis=-1)
+            out.lm[...,l,:] = out_l
         return out
     
     def inverse(self,lms_coeff):
@@ -957,7 +957,7 @@ class SphericalZernikeTransform:
                                         real_harmonics= np.issubdtype(lms_coeff.dtype,np.floating))
         bw = min(self.harm.bandwidth,self.struct.bandwidth)
         for l in range(bw):
-            out.lm[l] = np.sum(lms_coeff.lm[l][:,None,:]*self.weights[l,:,:,None],axis=0)
+            out.lm[...,l,:] = np.sum(lms_coeff.lm[...,l,:][:,None,:]*self.weights[l,:,:,None],axis=0)
         return out
 
     def full_inverse_at(self, lms_coeff, new_points):
@@ -1003,7 +1003,7 @@ class SphericalZernikeTransform:
         #print('Zernike inverse')
         for l in range(bw):
             valid_s = np.arange(l, self.struct.bandwidth, 2)
-            coeff_part = lms_coeff.lm[l][valid_s]
+            coeff_part = lms_coeff.lm[...,l,:][valid_s]
             # Shape: (n_points, n_valid_s)
             start = time()
             radial_basis = ND_zernike_polynomials(l,self.struct.bandwidth,rho,self._dim)
@@ -1011,7 +1011,7 @@ class SphericalZernikeTransform:
             # Radial synthesis:
             # f_lm(r) = sum_s a_slm R_sl(r / max_r)
             start = time()
-            angular_coeffs.lm[l] = radial_basis.T @ coeff_part
+            angular_coeffs.lm[...,l,:] = radial_basis.T @ coeff_part
             #print(f'Matrix mult time ={time()-start}')
             
         if angular_coeffs.complex_data:
@@ -1108,14 +1108,14 @@ class SphericalZernikeTransform:
             cos_theta = np.cos(theta)
             
             for l in range(bw):
-                coeff_part = lms_coeff.lm[l][l:self.struct.bandwidth:2]
+                coeff_part = lms_coeff.lm[...,l,:][l:self.struct.bandwidth:2]
                 radial_basis = ND_zernike_polynomials(l,self.struct.bandwidth,rho,self._dim).T
                 if len_batch == batch_size:
                     tmp_workspace = coeff_workspace
-                    tmp_workspace.lm[l] = radial_basis @ coeff_part
+                    tmp_workspace.lm[...,l,:] = radial_basis @ coeff_part
                 else:
                     tmp_workspace = coeff_workspace2
-                    tmp_workspace.lm[l] = radial_basis @ coeff_part
+                    tmp_workspace.lm[...,l,:] = radial_basis @ coeff_part
                 
             values = np.array([
                 eval_sh(coeff, ct, p)
@@ -1191,14 +1191,14 @@ class SphericalZernikeTransform:
 
             
             for l in range(bw):
-                coeff_part = lms_coeff.lm[l][l:self.struct.bandwidth:2]
+                coeff_part = lms_coeff.lm[...,l,:][l:self.struct.bandwidth:2]
                 radial_basis = ND_zernike_polynomials(l,self.struct.bandwidth,rho,self._dim).T
                 if len_batch == batch_size:
                     tmp_workspace = coeff_workspace
-                    tmp_workspace.lm[l] = radial_basis @ coeff_part
+                    tmp_workspace.lm[...,l,:] = radial_basis @ coeff_part
                 else:
                     tmp_workspace = coeff_workspace2
-                    tmp_workspace.lm[l] = radial_basis @ coeff_part
+                    tmp_workspace.lm[...,l,:] = radial_basis @ coeff_part
                 
             values = np.array([
                 eval_sh(coeff, ct, p)
@@ -1209,9 +1209,9 @@ class SphericalZernikeTransform:
         return output.reshape((n,)*3)
     def full_inverse_cartesian(self, lms_coeff, points,batch_size=8192,fill_value=0,n_processes = 1):
         if n_processes <=1:
-            return self._full_inverse_cartesian_single_process(lms_coeff, points,batch_size=8192,fill_value=0)
+            return self._full_inverse_cartesian_single_process(lms_coeff, points,batch_size=batch_size,fill_value=fill_value)
         else:
-            return self._full_inverse_cartesian_multi_process(lms_coeff, points,batch_size=8192,fill_value=0,n_processes=n_processes)
+            return self._full_inverse_cartesian_multi_process(lms_coeff, points,batch_size=batch_size,fill_value=fill_value,n_processes=n_processes)
         
             
 #######################
