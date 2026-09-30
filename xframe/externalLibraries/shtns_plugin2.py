@@ -190,6 +190,8 @@ class ShCoeffView:
         if  is_full_slice(mids):
             if is_integer(lids):
                 return items[:-2]+(complex_l_slice(lids),)
+            elif is_full_slice(lids):
+                return items[:-1]
             else:
                 return items[:-2]+(self.get_l_mask(lids),)
         elif is_integer(mids):
