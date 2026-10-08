@@ -493,6 +493,7 @@ class AutoSupport(ProjectionBase):
                  initial_support_radius = None,
                  sw_sigma=None,
                  apply_smoothing = True,
+                 force_connected = False,
                  sw_threshold_limits=[0.01,np.inf],
                  max_radius = np.inf,
                  metrics_to_save:dict[str,MetricMode]|None=None):
@@ -518,6 +519,7 @@ class AutoSupport(ProjectionBase):
             sw_sigma = 2*np.pi/self.ft.qs.max() # resolution limit
         self._sw_sigma = max(sw_sigma,0.)
         self.apply_smoothing = apply_smoothing
+        self.force_connected = force_connected
         self.sw_threshold_limits = sw_threshold_limits
         self._sw_threshold = sw_threshold_limits[0]
         self.gaussian_values = gaussian_fourier_transformed_spherical(self.ft.reciprocal_grid,self._sw_sigma)
