@@ -1172,10 +1172,10 @@ class Deg2Invar:
         pass
     @staticmethod
     def from_intensity_coeff(coeff,dim=3):
-        if dim == 2:
+        if dim == 2:            # 
             B = np.array(tuple(c[:,None]*c[None,:].conj() for c in coeff.T))
         else:
-            B = np.array(tuple(coeff.lm[l] @ np.conj(coeff.lm[l].T) for l in coeff.ls))
+            B = np.array(tuple(coeff.lm[...,l,:] @ np.conj(coeff.lm[...,l,:].T) for l in coeff.ls))
         return B
     @staticmethod
     def rcegularize(b_matrices,
@@ -1906,13 +1906,13 @@ def harmonic_coeff_to_deg2_invariants_3d(Ilm,Ilm2 = None):
             Bl = np.array(tuple(Il @ Il.T.conj() for Il in Ilm))
         else:
             ls = Ilm.ls
-            Bl = np.array(tuple(Ilm.lm[l] @ np.conj(Ilm.lm[l].T) for l in ls))
+            Bl = np.array(tuple(Ilm.lm[...,l,:] @ np.conj(Ilm.lm[...,l,:].T) for l in ls))
     else:
         if isinstance(Ilm,(tuple,list)):
             Bl = np.array(tuple(Il1 @ (Il2.T.conj()) for Il1,Il2 in zip(Ilm,Ilm2)))
         else:
             ls = Ilm.ls
-            Bl = np.array(tuple(Ilm.lm[l] @ np.conj(Ilm2.lm[l].T) for l in ls))            
+            Bl = np.array(tuple(Ilm.lm[...,l,:] @ np.conj(Ilm2.lm[...,l,:].T) for l in ls))            
     return Bl
 
 
