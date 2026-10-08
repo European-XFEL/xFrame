@@ -51,6 +51,14 @@ class ShCoeff(np.ndarray):
         for l in self.ls:
             out.lm[l]=(-1)**l*self.lm[l]
         return out
+    
+    def __array_finalize__(self, obj):
+        # see InfoArray.__array_finalize__ for comments
+        if obj is None:
+            return       
+        self.ls = getattr(obj, 'ls', None)
+        self.ms = getattr(obj, 'ms', None)
+        self.lm = ShCoeffView(obj,self.ls,self.ms)
         
 class ShCoeffView:
     def __init__(self,coeff:ShCoeff,ls,ms,mode='complex'):
