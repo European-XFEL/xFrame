@@ -919,7 +919,6 @@ class SphericalZernikeTransform:
         self.harm = harmonic_transform
         self._dim = 3
         self.weights,self.rs = self.generate_weights()
-        
     def generate_weights(self):
         Nr = self.struct.n_points
         max_r = self.struct.max_r
@@ -934,7 +933,6 @@ class SphericalZernikeTransform:
         for l in range(min(angular_bw,bw)):
             weights[l,l::2,:] = ND_zernike_polynomials(l,bw,points,self._dim)
         return weights,rs
-    
     def forward(self,lm_coeff):
         out = self.harm.get_empty_coeff(pre_shape=(self.struct.bandwidth,),
                                         complex_data=lm_coeff.complex_data,
@@ -950,7 +948,6 @@ class SphericalZernikeTransform:
                 out_l[s] = const*np.sum(lm_coeff.lm[...,l,:].T*r2[None,:]*self.weights[l,s][None,:],axis=-1)
             out.lm[...,l,:] = out_l
         return out
-    
     def inverse(self,lms_coeff):
         out = self.harm.get_empty_coeff(pre_shape=(self.struct.n_points,),
                                         complex_data=lms_coeff.complex_data,
@@ -959,7 +956,6 @@ class SphericalZernikeTransform:
         for l in range(bw):
             out.lm[...,l,:] = np.sum(lms_coeff.lm[...,l,:][:,None,:]*self.weights[l,:,:,None],axis=0)
         return out
-
     def full_inverse_at(self, lms_coeff, new_points):
         """
         Evaluate the spherical-Zernike expansion at arbitrary points.
@@ -1025,7 +1021,6 @@ class SphericalZernikeTransform:
             for coeff, ct, p in zip(angular_coeffs, cos_theta, phi)
         ])
         return values.reshape(output_shape)
-
     def _get_cart_points(self,start,stop,points):
         '''
         computes cartesian grid points based on a 1d index
@@ -1041,7 +1036,6 @@ class SphericalZernikeTransform:
         out[:,1] = points[(ids//n)%n]
         out[:,2] = points[ids%n]
         return out
-
     def _full_inverse_cartesian_single_process(self, lms_coeff, points,batch_size=8192,fill_value=0):
         """
         Evaluate the spherical-Zernike expansion at arbitrary points.
@@ -1086,10 +1080,6 @@ class SphericalZernikeTransform:
         )
         
         coeff_workspace = self.harm.get_empty_coeff(
-            pre_shape=(batch_size,),
-            complex_data=lms_coeff.complex_data,
-        )
-        coeff_workspace2 = self.harm.get_empty_coeff(
             pre_shape=(batch_size+1,),
             complex_data=lms_coeff.complex_data,
         )
@@ -1110,20 +1100,49 @@ class SphericalZernikeTransform:
             for l in range(bw):
                 coeff_part = lms_coeff.lm[...,l,:][l:self.struct.bandwidth:2]
                 radial_basis = ND_zernike_polynomials(l,self.struct.bandwidth,rho,self._dim).T
-                if len_batch == batch_size:
-                    tmp_workspace = coeff_workspace
-                    tmp_workspace.lm[...,l,:] = radial_basis @ coeff_part
-                else:
-                    tmp_workspace = coeff_workspace2
-                    tmp_workspace.lm[...,l,:] = radial_basis @ coeff_part
+                coeff_workspace.lm[:len_batch,l,:] = radial_basis @ coeff_part
                 
             values = np.array([
                 eval_sh(coeff, ct, p)
-                for coeff, ct, p in zip(tmp_workspace, cos_theta, phi)
+                for coeff, ct, p in zip(coeff_workspace.lm[:len_batch], cos_theta, phi)
             ])
             output[start_id:stop_id] = values
             print(f'batch {batch_id}/{n_batches} took {time()-start} seconds')
         return output.reshape((n,)*3)
+    def _full_inverse_cartesian_multi_process_worker(self,batch_ids,lms_coeff,batch_split_ids,points,**kwargs):
+        bw = min(self.harm.bandwidth, self.struct.bandwidth)
+        if lms_coeff.complex_data:
+            eval_sh = self.harm._sh.SH_to_point_cplx
+        else:
+            eval_sh = self.harm._sh.SH_to_point
+        batch_size = batch_split_ids[batch_ids[0]+1]-batch_split_ids[batch_ids[0]]
+        coeff_workspace = self.harm.get_empty_coeff(
+            pre_shape=(batch_size+1,),
+            complex_data=lms_coeff.complex_data,
+        )
+        
+        output = kwargs['outputs'][0]
+        for batch_id in batch_ids:
+            start_id = batch_split_ids[batch_id]
+            stop_id = batch_split_ids[batch_id+1]
+            len_batch = stop_id-start_id
+            batch_points = self._get_cart_points(start_id,stop_id,points)
+            r,theta,phi = cartesian_to_spherical(batch_points).T
+            
+            rho = r / self.struct.max_r
+            phi = np.mod(phi, 2 * np.pi)
+            cos_theta = np.cos(theta)
+            
+            for l in range(bw):
+                coeff_part = lms_coeff.lm[...,l,:][l:self.struct.bandwidth:2]
+                radial_basis = ND_zernike_polynomials(l,self.struct.bandwidth,rho,self._dim).T
+                coeff_workspace.lm[:len_batch,l,:] = radial_basis @ coeff_part
+                
+            values = np.array([
+                eval_sh(coeff, ct, p)
+                for coeff, ct, p in zip(coeff_workspace[:len_batch], cos_theta, phi)
+            ])
+            output[start_id:stop_id] = values
     def _full_inverse_cartesian_multi_process(self, lms_coeff, points,batch_size=8192,fill_value=0,n_processes = 2):
         """
         Evaluate the spherical-Zernike expansion at arbitrary points.
@@ -1148,65 +1167,33 @@ class SphericalZernikeTransform:
             )
 
         if lms_coeff.complex_data:
-            output = np.full(n**3,fill_value,dtype=complex)
-            eval_sh = self.harm._sh.SH_to_point_cplx
+            out_dtypes = (np.complex128,)
         else:
-            output = np.full(n**3,fill_value,dtype=float)
-            eval_sh = self.harm._sh.SH_to_point
-            
-            
-        max_r = self.struct.max_r
-        
-        bw = min(self.harm.bandwidth, self.struct.bandwidth)
+            out_dtypes = (np.float64,)
 
         n_batches = int(np.ceil((n**3)/(batch_size-1)))
         n_big_batches = (n**3)%n_batches
         batch_size = int((n**3)//n_batches)
         batch_split_ids = (
             tuple(i*(batch_size+1) for i in range(n_big_batches))
-            +tuple(min(n_big_batches*(batch_size+1)+i*batch_size,n**3) for i in range(n_batches-n_big_batches+1))
+            + tuple(min(n_big_batches*(batch_size+1)+i*batch_size,n**3) for i in range(n_batches-n_big_batches+1))
         )
-        
-        coeff_workspace = self.harm.get_empty_coeff(
-            pre_shape=(batch_size,),
-            complex_data=lms_coeff.complex_data,
-        )
-        coeff_workspace2 = self.harm.get_empty_coeff(
-            pre_shape=(batch_size+1,),
-            complex_data=lms_coeff.complex_data,
-        )
-        
-        for batch_id in range(n_batches):
-            start = time()
-            start_id = batch_split_ids[batch_id]
-            stop_id = batch_split_ids[batch_id+1]
-            len_batch = stop_id-start_id
-            batch_points = self._get_cart_points(start_id,stop_id,points)
-            r,theta,phi = cartesian_to_spherical(batch_points).T
-            
-            
-            rho = r / self.struct.max_r
-            phi = np.mod(phi, 2 * np.pi)
-            cos_theta = np.cos(theta)
 
-            
-            for l in range(bw):
-                coeff_part = lms_coeff.lm[...,l,:][l:self.struct.bandwidth:2]
-                radial_basis = ND_zernike_polynomials(l,self.struct.bandwidth,rho,self._dim).T
-                if len_batch == batch_size:
-                    tmp_workspace = coeff_workspace
-                    tmp_workspace.lm[...,l,:] = radial_basis @ coeff_part
-                else:
-                    tmp_workspace = coeff_workspace2
-                    tmp_workspace.lm[...,l,:] = radial_basis @ coeff_part
-                
-            values = np.array([
-                eval_sh(coeff, ct, p)
-                for coeff, ct, p in zip(tmp_workspace, cos_theta, phi)
-            ])
-            output[start_id:stop_id] = values
-            print(f'batch {batch_id}/{n_batches} took {time()-start} seconds')
-        return output.reshape((n,)*3)
+        batch_ids = np.arange(len(batch_split_ids)-1)
+        out_shapes = (n**3,)
+        reduce_arguments = (False,)
+        print('yay mp is used',len(batch_ids))
+        out = Multiprocessing.process_mp_request(self._full_inverse_cartesian_multi_process_worker,
+                                                     mode = Multiprocessing.MPMode_SharedArray(out_shapes,out_dtypes,reduce_arguments=reduce_arguments),
+                                                     input_arrays=[batch_ids],
+                                                     const_inputs=[lms_coeff,batch_split_ids,points],
+                                                     call_with_multiple_arguments=True,
+                                                     split_mode='sequential',
+                                                     n_processes = n_processes)
+        
+        
+        
+        return out[0].reshape((n,)*3)
     def full_inverse_cartesian(self, lms_coeff, points,batch_size=8192,fill_value=0,n_processes = 1):
         if n_processes <=1:
             return self._full_inverse_cartesian_single_process(lms_coeff, points,batch_size=batch_size,fill_value=fill_value)
