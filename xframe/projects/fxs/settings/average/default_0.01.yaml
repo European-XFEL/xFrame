@@ -1,0 +1,163 @@
+structure_name:
+  _value: 'default'
+
+reconstruciton_files:
+  _value:
+    - 3d_tutorial/{today}/run_22/data.h5
+  _description: list of file paths relative to xframe_opt.IO.folders.home/data/fxs/reconstrucitons/ that contain the rectionstructions to align and average.
+
+GPU:
+  use:
+    _value: False
+    _description: Whether or not to use GPU for part of the spherical fourier transforms.
+  n_gpu_workers:
+    _value:
+      command: 'max(Multiprocessing.free_cpus//10,1)'
+
+multi_processing:
+  n_processes:
+    _value: auto
+    _description: 'auto' or integer. Number of parallel processes to use.
+  n_weight_generation:
+    _value: auto
+    _description: number of processes to use in the weight generation of the sperical fourier transform.
+
+selection:
+  use_selection_file:
+    _value: False
+    _description: Whether or not to use the selection file to define the included reconstructions.
+  error_limits:
+    _value: [None,None]
+    _description: [min,max] Only consider reconstructions with errors between min and max. 
+  n_reconstructions:
+    _value: all
+    _description: 'all' or int. Specifies a limit for the number of reconstructions to include in the average.
+    
+alignment:
+  align_by:
+    _value: 0 #0:density 1:,
+    _description: Map used to determine relative orientation. 0 = density 1 = scattering amplitude
+  normalization:
+    apply:
+      _value: True
+      _description: Whether or not to apply normalization during the alignment.
+    method:
+      _value:
+        command: 'np.max' # 'mean'
+      _description: Function called on a dataset to figure out the normalization constant.
+  positional:
+    apply:
+      _value: True
+      _description: Whether or not to shift all reconstructions to their center of density.
+  rotational:
+    _value:
+      apply: True
+    _description: Whether or not to do rotational alignment.
+    r_limits:
+      _value: [None,None] #[270,350] # in angstroem
+      _description: r or q range considered during alignment. Units are Angström or Angström^{-1} depending on the align_by option. 
+    consider_point_inverse:
+      _value:
+        True
+      _description: Whether or not to also detect point inversions.
+      
+averaging:
+  mode:
+    _value: 'pairwise' # single_reference
+    _description: "pairwise" or "single_reference". The former is a binary tree style reduction the latter alligns all datasets to a fixed reference pattern. 
+  single_reference:
+    reference_selection_mode:
+      _value: 'least_error' #'custom' , 'first_id'
+      _description: 'least_error' or 'custom', Choose the one with the lowest error value or specify the reference manually.
+    custom:
+      _value: (0,0)
+      _description: (file id in reconstuction_list, reconstruction id) of the used reference
+
+resolution_metrics:
+  PRTF:
+    _value: True
+    _description: Flag for the computation of the Phase Retrieval Transfer Function.
+  relative_std:
+    _value: True
+    _description: Flag for the computation of the 3D relative standard deviation.
+
+
+IO:
+  folders:
+    home:
+      _value:
+        command: 'xframe_opt.IO.folders.home'
+    data:
+      home:
+        _value: 'data/fxs/'
+    reconstructions:
+      data:
+        _value: 'reconstructions/'
+    averaged_results:
+      data:
+        _value: 'averages/{dimensions}d_{structure_name}/{time}/run_{run}/'
+    vtk_results:
+      averaged_results:
+        _value: 'vtk/'
+    ft_weights:
+      data:
+        _value: 'ft_weights/'
+  files:
+    reconstructions:
+      name:
+        _value: '{path}'
+      folder:
+        _value: 'reconstructions'
+      options:
+        generate_vtk_files:
+          _value: True
+    selection:
+      name:
+        _value: 'selection.h5'
+      folder:
+        _value: 'reconstructions'
+    reconstruction_settings:
+      name:
+        _value: '{path}/settings.yaml'
+      folder:
+        _value: 'reconstructions'
+      
+    average_results:
+      name:
+        _value: 'average_results.h5'
+      folder:
+        _value: 'averaged_results'
+      options:
+        generate_average_vtk:
+          _value: True
+        generate_aligned_vtk:
+          _value: False
+        generate_input_vtk:
+          _value: False
+        generate_rotation_metric_vtk:
+          _value: False
+        save_settings:
+          _value: True
+        plot_resolution_metrics:
+          _value: True
+        plot_average_bl:
+          _value: False
+        plot_average_cn:
+          _value: False
+
+    real_vtk:
+      name:
+        _value: 'real_{reconstruction}.vts'
+      folder:
+        _value: 'vtk_results'
+    rotation_metric_vtk:
+      name:
+        _value: 'rotation_metric_{reconstruction}_{iteration}.vtr'
+      folder:
+        _value: 'vtk_results'      
+    reciprocal_vtk:
+      name:
+        _value: 'reciprocal_{reconstruction}.vts'
+      folder:
+        _value: 'vtk_results'
+
