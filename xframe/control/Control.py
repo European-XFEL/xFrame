@@ -66,7 +66,7 @@ class Controller:
             # ones to the settings provided by the analysis worker. (e.g for profiling)
             self.control_worker.restart_working()
         try:
-            if not self.control_worker.are_workers_running:
+            if not self.control_worker.are_workers_running():
                 self.control_worker.start_working()
                 
             job=self.choose_job()
