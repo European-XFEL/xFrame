@@ -165,7 +165,7 @@ class Peak:
         self.died = None
 
     def get_persistence(self, seq):
-        return float("inf") if self.died is None else seq[self.born] - seq[self.died]
+        return np.inf if self.died is None else seq[self.born] - seq[self.died]
 
 def get_persistent_homology_1d(seq):
     peaks = []

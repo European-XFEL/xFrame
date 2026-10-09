@@ -46,6 +46,19 @@ class ShCoeff(np.ndarray):
         return ShCoeff(np.array(self),self.ls,self.ms)
     def conj(self,*args,**kwargs):
         return ShCoeff(self.conj(*args,**kwargs),self.ls,self.ms)
+    def point_inverse(self):
+        out = self.copy()
+        for l in self.ls:
+            out.lm[l]=(-1)**l*self.lm[l]
+        return out
+    
+    def __array_finalize__(self, obj):
+        # see InfoArray.__array_finalize__ for comments
+        if obj is None:
+            return       
+        self.ls = getattr(obj, 'ls', None)
+        self.ms = getattr(obj, 'ms', None)
+        self.lm = ShCoeffView(obj,self.ls,self.ms)
         
 class ShCoeffView:
     def __init__(self,coeff:ShCoeff,ls,ms,mode='complex'):

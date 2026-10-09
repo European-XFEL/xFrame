@@ -210,8 +210,7 @@ class DataLoader:
         db =self.db
         self.n_reconstructions = len(specifiers)
         
-        
-    def load(self,rec_id):
+    def _open_file(self):
         path_id,data_id = self.reconstruction_specifiers[rec_id]
         path = self.paths[path_id]
         if path != self.current_path:
@@ -219,11 +218,19 @@ class DataLoader:
                 self.current_h5_object.close()
             self.current_h5_object = self.db.load(path,as_h5_object = True)
         o= self.current_h5_object
+        return o
+    def __getitem__(self,rec_id):
+        o = self._open_file()
         result = o[f'reconstruction_results/{data_id}']
         dataset = tuple((result['density_history'][-1].astype(complex),
                          result['ft_density_history'][-1].astype(complex),
                          result['support'][:].astype(complex)))
+        o.close()
         return dataset
-        
-
+    
+    def __len__(self):
+        o = self._open_file()
+        n_reconstructions =  len(o[f'reconstruction_results'])
+        o.close()
+        return n_reconstructions
 
