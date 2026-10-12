@@ -55,17 +55,20 @@ class Map(np.ndarray):
         
     def normalize(self,constant=None,method = np.max):
         if constant is None:
-            constant = method(np.abs(self))
+            constant = self.normalization_constant(method=method)
         if not self.is_support:     
             self/=constant
             self.is_normalized = True
         return self
     
-    def normalization_constant(self,method=np.max):
+    def normalization_constant(self,method=np.max):        
         if self.is_support:
             return 1.0
         else:
-            return method(self)
+            const = method(np.abs(self).real)
+            if const == 0:
+                const = 1.0
+            return const
         
 class Aligner:
     def __init__(self,
@@ -135,7 +138,7 @@ class Aligner:
         if tot_int==0:
             tot_int = 1
         cart_center = integrator(np.moveaxis(grid[:],-1,0)*abs_data[None,...])/tot_int
-        return cart_center  
+        return cart_center
 
     def shift(self,data:Map,vector:NDArray) -> Map:
         if data.domain == "real":
@@ -645,7 +648,11 @@ class AlignedAverager:
         for (d_id,ref_id),out_id in zip(layer_part,out_ids):
             if d_id == ref_id:
                 data = data_source[d_id]
-                data = data if isinstance(data,CumulativeMean) else CumulativeMean().update(data) 
+                if do_centering:
+                    data = a.center(data)
+                if do_normalization:
+                    data = data.normalize(method = self.normalization_method)
+                data = data if isinstance(data,CumulativeMean) else CumulativeMean().update(data)
                 mean_out = outs[0]
                 mean_out[out_id] = data.mean
                 count_out = outs[1]
@@ -750,7 +757,7 @@ class AlignedAverager:
     def average_pairwise(self,
                          data_source:DataSourceInterface|NDArray,
                          anchor_map_id=0,
-                         order_seed=12345,
+                         order_seed=1234,
                          consider_point_inverse=True,
                          do_centering=True,
                          do_normalization=True,
@@ -813,9 +820,7 @@ class AlignedAverager:
                       for j in range(level_size))
             step_data =  self._preprocess_data_source(results_flat,fixed_anchor=0)
 
-
         print('combining')
-        print(inversions)
         out_shapes = []
         out_dtypes = []
         for s,t in shape_types:
@@ -851,5 +856,6 @@ class AlignedAverager:
                                         results[3*d_id+2][part_id])
                     
             progression.append(tuple(v.copy() for v in variances))
+        #variances[0].mean = results_flat[0][0].mean
         return variances,tree,progression
     
