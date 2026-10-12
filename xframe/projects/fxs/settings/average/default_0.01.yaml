@@ -17,7 +17,7 @@ GPU:
 multi_processing:
   n_processes:
     _value: auto
-    _description: 'auto' or integer. Number of parallel processes to use.
+    _description: auto or integer. Number of parallel processes to use.
   n_weight_generation:
     _value: auto
     _description: number of processes to use in the weight generation of the sperical fourier transform.
@@ -27,16 +27,17 @@ selection:
     _value: False
     _description: Whether or not to use the selection file to define the included reconstructions.
   error_limits:
-    _value: [None,None]
-    _description: [min,max] Only consider reconstructions with errors between min and max. 
+    _value:
+      command: '[None,None]'
+    _description: min,max Only consider reconstructions with errors between min and max. 
   n_reconstructions:
     _value: all
-    _description: 'all' or int. Specifies a limit for the number of reconstructions to include in the average.
+    _description: all or int. Specifies a limit for the number of reconstructions to include in the average.
     
 alignment:
   align_by:
-    _value: 0 #0:density 1:,
-    _description: Map used to determine relative orientation. 0 = density 1 = scattering amplitude
+    _value: 0 
+    _description: Map used to determine relative orientation. 0 = density 1 = scattering amplitude 2 = support
   normalization:
     apply:
       _value: True
@@ -45,30 +46,35 @@ alignment:
       _value:
         command: 'np.max' # 'mean'
       _description: Function called on a dataset to figure out the normalization constant.
-  positional:
+  centering:
     apply:
       _value: True
       _description: Whether or not to shift all reconstructions to their center of density.
   rotational:
-    _value:
-      apply: True
-    _description: Whether or not to do rotational alignment.
+    apply:
+      _value: True
+      _description: Whether or not to do rotational alignment.
     r_limits:
-      _value: [None,None] #[270,350] # in angstroem
-      _description: r or q range considered during alignment. Units are Angström or Angström^{-1} depending on the align_by option. 
-    consider_point_inverse:
       _value:
-        True
-      _description: Whether or not to also detect point inversions.
+        command: '[None,None]' #[270,350] # in angstroem
+      _description: r or q range considered during alignment. Units are Angström or Angström^{-1} depending on the align_by option. 
+  consider_point_inverse:
+    _value: True
+    _description: Whether or not to also detect point inversions.
       
 averaging:
   mode:
     _value: 'pairwise' # single_reference
-    _description: "pairwise" or "single_reference". The former is a binary tree style reduction the latter alligns all datasets to a fixed reference pattern. 
+    _description: pairwise or single_reference. The former is a binary tree style reduction the latter alligns all datasets to a fixed reference pattern.
+  pairwise:
+    seed:
+      _value: 12345
+      _description: Seed for the random binary tree pairing.
+    
   single_reference:
     reference_selection_mode:
       _value: 'least_error' #'custom' , 'first_id'
-      _description: 'least_error' or 'custom', Choose the one with the lowest error value or specify the reference manually.
+      _description: least_error or custom, Choose the one with the lowest error value or specify the reference manually.
     custom:
       _value: (0,0)
       _description: (file id in reconstuction_list, reconstruction id) of the used reference

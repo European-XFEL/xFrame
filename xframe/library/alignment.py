@@ -53,9 +53,10 @@ class Map(np.ndarray):
         self.is_support = getattr(obj, 'is_support', False)
         self.is_normalized = getattr(obj, 'is_normalized', False)
         
-    def normalize(self,method = np.max):
-        if not self.is_support:
-            constant = method(self)
+    def normalize(self,constant=None,method = np.max):
+        if constant is None:
+            constant = method(np.abs(self))
+        if not self.is_support:     
             self/=constant
             self.is_normalized = True
         return self
@@ -162,19 +163,6 @@ class Aligner:
         else:
             return data        
         
-    def normalize_and_center(self,
-                             data: Map | NDArray | List[Map|NDArray],
-                             anchor_id: int = 0) -> List[Map]:
-        is_singleton = not isinstance(data,list|tuple)
-        data = self._convert_to_list_of_map(data)
-        center = self.find_center(data[anchor_id])
-        data  = tuple( self.shift(d,center) for d in data )
-        normalization_constant = data[anchor_id].normalization_constant(method=self.normalization_method)
-        data = tuple( d if d.is_support else d/normalization_constant for d in data)
-        if is_singleton:
-            data = data[0]
-        return  data
-
     def find_optimal_rotation_lm(self,
                                  data_lm,
                                  reference_lm = None,
@@ -214,7 +202,7 @@ class Aligner:
         if return_correlation:
             return euler_angles,max_corr,so3_correlation
         else:
-            return euler_angles,max_corr
+            return euler_angles,max_corr        
     def find_optimal_rotation(self,
                               data:Map,
                               reference:Map|None = None,
@@ -341,15 +329,7 @@ class Aligner:
         else:
             return rot_data,metric
         
-@dataclass
-class AlignedAveragerStruct:
-    fourier_struct: SphericalFourierTransformStruct = field(
-        default_factory=SphericalFourierTransformStruct
-    )
-    normalization_method: Callable = np.max
-    so3_radial_limits: tuple | None = None
-    consider_point_inverse: bool = True
-    n_processes: int | None = None
+
 class DataSourceInterface(abc.ABC):
     '''
     Data structur for alignment
@@ -391,18 +371,24 @@ class FixedAnchorSource(DataSourceInterface):
         return len(self.data)
     
 class AlignedAverager:
-    def __init__(self,struct:AlignedAveragerStruct|None=None,hankel_weights:NDArray|None=None):
-        if struct is None:
-            struct = AlignedAveragerStruct()
-        self.struct = struct
+    def __init__(self,
+                 fourier_struct:SphericalFourierTransformStruct|None=None,
+                 hankel_weights:NDArray|None=None,
+                 normalization_method = np.max):
+        if fourier_struct is None:
+            self.fourier_struct = SphericalFourierTransformStruct()
+        else:
+            self.fourier_struct = fourier_struct
+            
         if hankel_weights is not None:
             self.hankel_weights =  hankel_weights
         else:
-            self.hankel_weights = HankelTransformWeights.get_weights(struct.fourier_struct)
-        self.fourier = SphericalFourierTransform(struct.fourier_struct,weights=self.hankel_weights)
+            self.hankel_weights = HankelTransformWeights.get_weights(fourier_struct)
+
+        self.fourier = SphericalFourierTransform(fourier_struct,weights=self.hankel_weights)
         self.aligner = Aligner(self.fourier,
-                               normalization_method=struct.normalization_method)
-        self.so3_radial_limits = struct.so3_radial_limits
+                               normalization_method=normalization_method)
+        self.normalization_method = normalization_method
         self._const_reference = None
 
     def _preprocess_data_source(self,data,fixed_anchor=None):
@@ -490,29 +476,44 @@ class AlignedAverager:
             return layers, tree_fibers
         else:
             return layers
-
+    def radial_limits_to_ids(self,domain:MapDomain,limits:tuple):
+        if domain == 'real':
+            radial_values = self.fourier.rs
+        elif domain == 'fourier':
+            radial_values = self.fourier.qs
+        min_limit_id = 0
+        max_limit_id = len(radial_values)
+        
+        if limits[0] is not None:
+            min_limit_id = np.argmax(radial_values>limits[0])
+        if limits[1] is not None:
+            max_limit_id = np.argmax(radial_values>limits[1])
+        return (min_limit_id,max_limit_id)
+            
     def align_inversion_and_rotation(self,
                                      data_map:Map,
                                      reference_map:Map = None,
                                      aligner = None,
-                                     consider_point_inverse = True):
+                                     consider_point_inverse = True,
+                                     so3_radial_limits = [None,None]):
         
         a = aligner if isinstance(aligner,Aligner) else self.aligner
         harm = a.ft.harm
         domain = data_map.domain
         data_lm = harm.forward(data_map)
         reference_lm = None if reference_map is None else harm.forward(reference_map)
+        limit_ids = self.radial_limits_to_ids(domain,so3_radial_limits)
         rot,metric = a.find_optimal_rotation_lm(data_lm,
                                                 reference_lm = reference_lm,
                                                 domain = domain,
-                                                radial_limits=self.struct.so3_radial_limits)
+                                                radial_limits=limit_ids)
         is_point_inverted = None
         if consider_point_inverse:
             data_lm_p = data_lm.point_inverse()
             rot_p,metric_p = a.find_optimal_rotation_lm(data_lm_p,
                                                         reference_lm = reference_lm,
                                                         domain=domain,
-                                                        radial_limits=self.struct.so3_radial_limits)
+                                                        radial_limits=limit_ids)
             is_point_inverted = metric_p>metric
             if is_point_inverted:
                 rot = rot_p
@@ -523,12 +524,16 @@ class AlignedAverager:
                                  ,data_source:DataSourceInterface|NDArray,
                                  anchor_id,
                                  consider_point_inverse,
+                                 do_normalization,
+                                 do_centering,
+                                 do_rotational_alignment,
+                                 so3_radial_limits,
                                  **kwargs):
         if len(ids)==0:
             return tuple()
         # instantiate Fourier transform and Aligner since the fourier transforms are not fork safe.
-        ft = SphericalFourierTransform(self.struct.fourier_struct,weights = self.hankel_weights)
-        a = Aligner(ft,normalization_method=self.struct.normalization_method,reference=self._const_reference[anchor_id])
+        ft = SphericalFourierTransform(self.fourier_struct,weights = self.hankel_weights)
+        a = Aligner(ft,normalization_method=self.normalization_method,reference=self._const_reference[anchor_id])
         outs = kwargs['outputs']
         out_ids = kwargs['output_ids']
         
@@ -542,16 +547,28 @@ class AlignedAverager:
             if variances is None:
                 # initialize variances since only now I know how long a dataset is.
                 variances = tuple(CumulativeVariance() for i in range(len(dataset)))
-                
-            nc_dataset = a.normalize_and_center(dataset,anchor_id=anchor_id)
-            anchor = nc_dataset[anchor_id]
-            rot,metric,is_point_inverted = self.align_inversion_and_rotation(anchor,
-                                                                             aligner = a,
-                                                                             consider_point_inverse=consider_point_inverse)
+            
+            if do_centering:
+                dataset = a.center(dataset,anchor_id=anchor_id)
+            if do_normalization:
+                const = dataset[anchor_id].normalization_constant(method=self.normalization_method)
+                dataset = [d.normalize(constant=const) for d in dataset]
+
+            if do_rotational_alignment:
+                anchor = dataset[anchor_id]
+                rot,metric,is_point_inverted = self.align_inversion_and_rotation(anchor,
+                                                                                 aligner = a,
+                                                                                 consider_point_inverse=consider_point_inverse,
+                                                                                 so3_radial_limits=so3_radial_limits)
+            else:
+                rot,metric,is_point_inverted = np.array([0.0,0.0,0.0]),0.0,False
             
             if consider_point_inverse and is_point_inverted:
-                nc_dataset = a.point_invert(nc_dataset)
-            aligned_dataset = a.rotate(nc_dataset,rot)
+                dataset = a.point_invert(dataset)
+            if (not np.allclose(rot,np.eye(ft.dimensions))) and do_rotational_alignment:
+                aligned_dataset = a.rotate(dataset,rot)
+            else:
+                aligned_dataset = dataset
             for d,var in zip(aligned_dataset,variances):
                 var.update(d)
         for d_id,var in enumerate(variances):
@@ -564,6 +581,10 @@ class AlignedAverager:
                                  reference_id=0,
                                  anchor_map_id=0,
                                  consider_point_inverse = True,
+                                 do_centering = True,
+                                 do_normalization = True,
+                                 do_rotational_alignment = True,
+                                 so3_radial_limits = [None,None],
                                  n_processes = 'auto'):
         
         data_source = self._preprocess_data_source(data_source)
@@ -586,7 +607,13 @@ class AlignedAverager:
         results = Multiprocessing.process_mp_request(self._single_reference_worker,
                                                      mode = Multiprocessing.MPMode_SharedArray(out_shapes,out_dtypes,reduce_arguments=True),
                                                      input_arrays=[ids],
-                                                     const_inputs=[data_source,anchor_map_id,consider_point_inverse],
+                                                     const_inputs=[data_source,
+                                                                   anchor_map_id,
+                                                                   consider_point_inverse,
+                                                                   do_centering,
+                                                                   do_normalization,
+                                                                   do_rotational_alignment,
+                                                                   so3_radial_limits],
                                                      call_with_multiple_arguments=True,
                                                      split_mode='sequential',
                                                      n_processes = n_processes)
@@ -608,48 +635,51 @@ class AlignedAverager:
                                   consider_point_inverse,
                                   do_centering,
                                   do_normalization,
+                                  do_rotational_alignment,
+                                  so3_radial_limits,
                                   **kwargs):
-        # this needs to be reworked so it only acts on the anchor.
-        ft = SphericalFourierTransform(self.struct.fourier_struct,weights = self.hankel_weights)
-        a = Aligner(ft,normalization_method=self.struct.normalization_method)
+        ft = SphericalFourierTransform(self.fourier_struct,weights = self.hankel_weights)
+        a = Aligner(ft,normalization_method=self.normalization_method)
         outs = kwargs['outputs']
         out_ids = kwargs['output_ids'][0]
-        
         for (d_id,ref_id),out_id in zip(layer_part,out_ids):
             if d_id == ref_id:
-                print(f'yay found equal {d_id}')
                 data = data_source[d_id]
                 data = data if isinstance(data,CumulativeMean) else CumulativeMean().update(data) 
                 mean_out = outs[0]
                 mean_out[out_id] = data.mean
                 count_out = outs[1]
-                count_out[out_id] = np.array([data.count])
+                count_out[out_id] = data.count
             
                 rot_out = outs[-2]
                 rot_out[out_id]=np.eye(3)
                 inv_out = outs[-1]
                 inv_out[out_id]=False
-                continue
-                
                 # skip alignment and pass the dataset to the next layer.
+                continue                 
             ref = data_source[ref_id]
             dat = data_source[d_id]
+            
             if do_centering:
                 ref = a.center(ref)
                 dat = a.center(dat)
             if do_normalization:
-                ref = ref.normalize()
-                dat = dat.normalize()
+                ref = ref.normalize(method = self.normalization_method)
+                dat = dat.normalize(method = self.normalization_method)
 
             if not isinstance(ref,CumulativeMean):
                 ref = CumulativeMean().update(ref)
             if not isinstance(dat,CumulativeMean):
                 dat = CumulativeMean().update(dat)
-            print('aligning',dat.mean.shape,ref.mean.shape)
-            rot,metric,is_point_inverted = self.align_inversion_and_rotation(dat.mean,
-                                                                             reference_map = ref.mean,
-                                                                             aligner = a,
-                                                                             consider_point_inverse=consider_point_inverse)
+            if do_rotational_alignment:
+                rot,metric,is_point_inverted = self.align_inversion_and_rotation(dat.mean,
+                                                                                 reference_map = ref.mean,
+                                                                                 aligner = a,
+                                                                                 consider_point_inverse=consider_point_inverse,
+                                                                                 so3_radial_limits=so3_radial_limits)
+            else:
+                rot,metric,is_point_inverted = np.array([0.0,0.0,0.0]),0.0,False
+                
             dat_mean = dat.mean
             if is_point_inverted:
                 dat_mean = a.point_invert(dat_mean)
@@ -659,24 +689,26 @@ class AlignedAverager:
             mean_out = outs[0]
             mean_out[out_id] = combined_mean.mean
             count_out = outs[1]
-            count_out[out_id] = np.array([combined_mean.count])
+            count_out[out_id] = combined_mean.count
             
             rot_out = outs[-2]
             rot_out[out_id]=utils.euler_to_matrix(*rot)
             inv_out = outs[-1]
             inv_out[out_id]=is_point_inverted
-            
-                    
+                                
     def _pairwise_averaging_worker(self,
                                    ids,
                                    data_source,
                                    rotations,
                                    inversions,
                                    anchor_id,
+                                   do_centering,
+                                   do_normalization,
+                                   do_rotational_alignment,
                                    **kwargs):
         variances = None
-        ft = SphericalFourierTransform(self.struct.fourier_struct,weights = self.hankel_weights)
-        a = Aligner(ft,normalization_method=self.struct.normalization_method)
+        ft = SphericalFourierTransform(self.fourier_struct,weights = self.hankel_weights)
+        a = Aligner(ft,normalization_method=self.normalization_method)
         outs = kwargs['outputs']
         out_ids = kwargs['output_ids']
         
@@ -692,22 +724,27 @@ class AlignedAverager:
             if variances is None:
                 # initialize variances since only now I know how long a dataset is.
                 variances = tuple(CumulativeVariance() for i in range(len(dataset)))                
-            nc_dataset = a.normalize_and_center(dataset,anchor_id=anchor_id)
-            
+
+            if do_centering:
+                dataset = a.center(dataset,anchor_id=anchor_id)
+            if do_normalization:
+                const = dataset[anchor_id].normalization_constant(method=self.normalization_method)
+                dataset = [d.normalize(constant=const) for d in dataset]
+
             if inv:
-                nc_dataset = a.point_invert(nc_dataset)
+                dataset = a.point_invert(dataset)
                 
-            if not np.allclose(np.eye(3),rot):
-                aligned_dataset = a.rotate(nc_dataset,utils.matrix_to_euler(rot))
+            if (not np.allclose(np.eye(ft.dimensions),rot)) and do_rotational_alignment:
+                aligned_dataset = a.rotate(dataset,utils.matrix_to_euler(rot))
             else:
-                aligned_dataset = nc_dataset
-            
+                aligned_dataset = dataset
+                
             for d,var in zip(aligned_dataset,variances):
                 var.update(d)
                 
         for d_id,var in enumerate(variances):
             outs[3*d_id][out_ids] = var.mean
-            outs[3*d_id+1][out_ids] = np.array([var.count])
+            outs[3*d_id+1][out_ids] = var.count
             outs[3*d_id+2][out_ids] = var.m2
     
     def average_pairwise(self,
@@ -717,6 +754,8 @@ class AlignedAverager:
                          consider_point_inverse=True,
                          do_centering=True,
                          do_normalization=True,
+                         do_rotational_alignment = True,
+                         so3_radial_limits=[None,None],
                          n_processes = 'auto'):
         data_source = self._preprocess_data_source(data_source)
         fixed_anchor_source = FixedAnchorSource(data_source,anchor_map_id)
@@ -729,7 +768,9 @@ class AlignedAverager:
         n_datasets = len(data_source)
         rotations = np.array([np.eye(3) for i in range(n_datasets)])
         inversions = np.zeros(n_datasets,dtype=bool)
-        
+
+        tmp_centering = do_centering
+        tmp_normalization = do_normalization
         step_data = fixed_anchor_source
         for level_id,tree_level in enumerate(tree):
             level_size = len(tree_level)
@@ -739,11 +780,16 @@ class AlignedAverager:
             out_dtypes= [complex,int] if is_complex else [float,int]
             out_shapes += [(level_size,3,3),(level_size,)]
             out_dtypes += [float,bool]
-            print(out_shapes)
+            
             results = Multiprocessing.process_mp_request(self._pairwise_aligning_worker,
                                                          mode = Multiprocessing.MPMode_SharedArray(out_shapes,out_dtypes),
                                                          input_arrays=[tree_level],
-                                                         const_inputs=[step_data,consider_point_inverse,do_centering,do_normalization],
+                                                         const_inputs=[step_data,
+                                                                       consider_point_inverse,
+                                                                       tmp_centering,
+                                                                       tmp_normalization,
+                                                                       do_rotational_alignment, 
+                                                                       so3_radial_limits],
                                                          call_with_multiple_arguments=True,
                                                          split_mode='sequential',
                                                          n_processes = n_processes)
@@ -758,8 +804,8 @@ class AlignedAverager:
                 rotations[changed_ids] = rotations[changed_ids] @ rotation[None,...]
                 
             #setup input for next level
-            do_centering = False # only do centering + normalization in the first loop iteration
-            do_normalization = False # only do centering + normalization in the first loop iteration
+            tmp_centering = False # only do centering + normalization in the first loop iteration
+            tmp_normalization = False # only do centering + normalization in the first loop iteration
             results_flat = tuple((CumulativeMean(mean = Map(results[0][j],
                                                 domain = domain_support[anchor_map_id][0],
                                                 is_support = domain_support[anchor_map_id][1]),
@@ -769,6 +815,7 @@ class AlignedAverager:
 
 
         print('combining')
+        print(inversions)
         out_shapes = []
         out_dtypes = []
         for s,t in shape_types:
@@ -780,7 +827,12 @@ class AlignedAverager:
         results = Multiprocessing.process_mp_request(self._pairwise_averaging_worker,
                                                      mode = Multiprocessing.MPMode_SharedArray(out_shapes,out_dtypes,reduce_arguments=True),
                                                      input_arrays=[np.arange(n_datasets)],
-                                                     const_inputs=[data_source,rotations,inversions,anchor_map_id],
+                                                     const_inputs=[data_source,rotations,
+                                                                   inversions,
+                                                                   anchor_map_id,
+                                                                   do_centering,
+                                                                   do_normalization,
+                                                                   do_rotational_alignment],
                                                      call_with_multiple_arguments=True,
                                                      split_mode='sequential',
                                                      n_processes = n_processes)
@@ -799,5 +851,5 @@ class AlignedAverager:
                                         results[3*d_id+2][part_id])
                     
             progression.append(tuple(v.copy() for v in variances))
-        return variances,progression
+        return variances,tree,progression
     

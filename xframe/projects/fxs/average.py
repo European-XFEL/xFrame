@@ -2,9 +2,11 @@ import logging
 import numpy as np
 import traceback
 import os
-
+from numbers import Integral
 from xframe.library.math_transforms import SphericalFourierTransform,SphericalFourierTransformStruct
-from xframe.library.mathLibrary import Alignment, AlignedAveragerStruct, AlignedAverager,SphericalIntegrator
+from xframe.library.alignment import Aligner, AlignedAverager,DataSourceInterface,Map
+from xframe.library.mathLibrary import SphericalIntegrator
+
 from xframe.library.pythonLibrary import xprint
 from xframe.interfaces import ProjectWorkerInterface
 
@@ -31,22 +33,20 @@ class ProjectWorker(ProjectWorkerInterface):
         self.fourier_struct = SphericalFourierTransformStruct()
 
         opt = self.opt
-        self.averager_struct = AlignedAveragerStruct(fourier_struct = self.fourier_struct,
-                                                     alignment = opt.alignment,
-                                                     averaging = opt.averaging,
-                                                     n_processes = opt.multi_processing.n_processes)
+        self.averager = None
         
-        self.use_specific_reference = False
+        self.use_single_reference = False
         if opt.averaging.mode =='single_reference':
-            if isinstance(opt.averaging.single_reference.selection,(list,tuple)):
-                self.use_specific_reference = True
+            if opt.averaging.mode == 'single_reference':
+                self.use_single_reference = True
                 
         self.reconstruction_files = None
         self.reconstruction_specifiers = None
         self.main_reconstruction_errors = None
-        self.data_loader = None
+        self.data_source = None
         self.averager = None
         self.input_proj_matrices = None
+        self._single_reference_id = None
 
     def load_reconstruction_info(self):
         opt = self.opt
@@ -58,10 +58,8 @@ class ProjectWorker(ProjectWorkerInterface):
         _struct = SphericalFourierTransformStruct(**db.load(file_paths[0],h5_path='fourier_transform_struct'))
         _struct.use_gpu=self.opt.GPU.use
         self.fourier_struct = _struct
-        self.averager_struct = AlignedAveragerStruct(fourier_struct = self.fourier_struct,
-                                                     alignment = opt.alignment,
-                                                     averaging = opt.averaging,
-                                                     n_processes = opt.multi_processing.n_processes)
+        self.averager = AlignedAverager(fourier_struct = self.fourier_struct,
+                                        normalization_method = opt.alignment.normalization.method)
         self.dim = _struct.dimension
         input_proj_dict = db.load(file_paths[0],h5_path = 'projection_matrices')
         self.input_proj_matrices = tuple(input_proj_dict) #tuple(input_proj_dict[int(f'{i}')] for i in range(_struct.angular_bandwidth))
@@ -75,17 +73,11 @@ class ProjectWorker(ProjectWorkerInterface):
             else:
                 keys = list(rec_results.keys())
             for key in keys:
-                if self.use_specific_reference:
-                    if (np.array(file_id)==np.array(self.opt.averaging.single_reference.selection)).all():
-                        continue
                 rec = rec_results[str(key)]
                 rec_ids.append((file_id,int(key)))
                 errors.append(rec['error_dict/main'][-1])
             dat.close()
             
-        if self.use_specific_reference:
-            rec_ids = [(self.opt.averaging.single_reference.selection[0],self.opt.averaging.single_reference.selection[1])]+rec_ids
-            errors =  [-np.inf]+errors 
         rec_ids = np.array(rec_ids)
         errors = np.array(errors)
         
@@ -106,8 +98,7 @@ class ProjectWorker(ProjectWorkerInterface):
         errors = self.main_reconstruction_errors
         error_mask = (errors>error_limits[0]) & (errors < error_limits[1])
 
-        if self.use_specific_reference:
-            error_mask[0]=True #reference is at 0'th position and should not be filtered
+        # how to make sure the reference is not maske if use_single_reference is true
             
         self.main_reconstruction_errors = errors[error_mask]
         self.reconstruction_specifiers = self.reconstruction_specifiers[error_mask]
@@ -120,33 +111,53 @@ class ProjectWorker(ProjectWorkerInterface):
         
         self.main_reconstruction_errors = self.main_reconstruction_errors[sort_ids][sl]
         self.reconstruction_specifiers = self.reconstruction_specifiers[sort_ids][sl]
+        
+        if self.use_single_reference:
+            if self.opt.averaging.single_reference.reference_selection_mode == 'least_error':
+                self._single_reference_id = 0
+            else:
+                reference_specifier = opt.averaging.single_reference.custom
+                ref_id = int(np.flatnonzero(np.all(self.reconstruction_specifiers == reference_specifier, axis=1))[0])
+                self._single_reference_id = ref_id
 
-        
-        
-        
-    def average_2d(self):
-        averager_struct = self.averager_struct
-        averager_struct.alignment.rotational.apply=False
-        averager = AlignedAverager(self.averager_struct)
-        self.averager = averager
-        averages = averager.average(self.data_loader.load,self.data_loader.n_reconstructions)
-    def average_3d(self):        
-        averager = AlignedAverager(self.averager_struct,dataset_length = 3)        
-        self.averager = averager
-        averages = averager.average(self.data_loader.load,self.data_loader.n_reconstructions)        
+    def average(self):
+        opt = self.opt
+        do_rotational_alignment = self.opt.alignment.rotational.apply
+        if self.dim == 2:
+            do_rotational_alignment = False
+            
+        if self.opt.averaging.mode == 'pairwise':
+            print(opt.alignment)
+            averages = self.averager.average_pairwise(
+                self.data_source,
+                anchor_map_id = opt.alignment.align_by,
+                consider_point_inverse = opt.alignment.consider_point_inverse,
+                do_centering = opt.alignment.centering.apply,
+                do_normalization = opt.alignment.normalization.apply,
+                do_rotational_alignment = do_rotational_alignment,
+                so3_radial_limits = opt.alignment.rotational.r_limits,
+                n_processes = opt.multi_processing.n_processes                
+            )
+        elif self.opt.averaging.mode == 'single_reference':
+            reference_id = self._single_reference_id
+            averages = self.averager.average_single_reference(
+                self.data_source,
+                reference_id = reference_id,
+                anchor_map = opt.alignment.align_by,
+                consider_point_inverse = opt.alignment.consider_point_inverse,
+                do_centering = opt.alignment.centering.apply,
+                do_normalization = opt.alignment.normalization.apply,
+                do_rotational_alignment = do_rotational_alignment,
+                so3_radial_limits = opt.alignment.rotational.r_limits,
+                n_processes = opt.multi_processing.n_processes                
+            )
         return averages
-        
         
     def run(self):
         self.load_reconstruction_info()
         self.select_reconstructions()
-        self.data_loader = DataLoader(self.reconstruction_files,self.reconstruction_specifiers)
-        
-        if self.dim ==2:
-            res = self.average_2d()
-        else:
-            res = self.average_3d()
-
+        self.data_source = DataSource(self.reconstruction_files,self.reconstruction_specifiers)
+        res = self.average()
         out_dict = self.post_processing(res)
         try:
             self.db.save('average_results',out_dict)
@@ -157,22 +168,22 @@ class ProjectWorker(ProjectWorkerInterface):
     def compute_resolution_metrics(self,results):
         ft = self.averager.fourier
         main_res = results[0][0]
-        rmean = np.abs(ft.forward_cmplx(main_res[0].mean)).real**2
-        qmean = np.abs(main_res[1].mean).real**2
-        var = main_res[1].variance
+        rmean = np.abs(ft.forward_cmplx(main_res.mean)).real**2
+        qmean = np.abs(results[0][1].mean).real**2
+        qvar = results[0][1].variance
         
         integrator = SphericalIntegrator(ft.real_grid)
         mean_std_integrated_progression = np.array([integrator(res[0].mean.real/np.sqrt(np.abs(res[0].variance).real),normed = True) for res in results[2]])
         progression_counts = np.array([res[0].count for res in results[2]])
 
-        print("yay new PRTFS")
-        PRTF1 = integrator.angular_only(np.sqrt(qmean/(var+qmean)),normed = True)
-        PRTF2 = integrator.angular_only(np.sqrt(rmean/(var+rmean)),normed = True)
+        print("yay new PRTFS",f"qmean{qmean.shape} qvar {qvar.shape}")
+        PRTF1 = integrator.angular_only(np.sqrt(qmean/(qvar+qmean)),normed = True)
+        PRTF2 = integrator.angular_only(np.sqrt(rmean/(qvar+rmean)),normed = True)
         metrics = {"PRTF":PRTF2,"PRTF_from_scattering_amplitude":PRTF1,'mean_std_integrated_progression':mean_std_integrated_progression,'progression_counts':progression_counts}
         return metrics
     
     def post_processing(self,results):
-        var_objects = results[0][0]
+        var_objects = results[0]
         resolution_metrics_dict = self.compute_resolution_metrics(results)
         ft_d = self.averager.fourier.forward_cmplx(var_objects[0].mean)
         I = (ft_d*ft_d.conj()).real
@@ -189,18 +200,18 @@ class ProjectWorker(ProjectWorkerInterface):
                'resolution_metrics': resolution_metrics_dict,
                'n_used_reconstructions':var_objects[0].count,
                'fourier_transform_struct':self.fourier_struct.__dict__,
-               'initial_ids':results[1],
+               'initial_ids': results[1],
+               'reconstruction_specifiers':self.data_source.reconstruction_specifiers,
+               'reconstruction_files':self.data_source.paths,
                'input_proj_matrices':self.input_proj_matrices,
                "SAXS_from_density":SAXS
                }
         first_variance_per_step = {f'{i}':{label:{'mean':v[n].mean,'count':v[n].count,'variance':v[n].variance} for n,label in enumerate(['real','reciprocal','mask'])} for i,v in enumerate(results[2])}
         out['variance_step_progression']=first_variance_per_step
-        all_variances = {f'{i}':{label:{'mean':v[n].mean,'count':v[n].count,'variance':v[n].variance} for n,label in enumerate(['real','reciprocal','mask'])} for i,v in enumerate(results[0][1:])}
-        out['other_index_combinations'] = all_variances
         return out        
                 
 
-class DataLoader:
+class DataSource(DataSourceInterface):
     def __init__(self,file_paths,specifiers):
         self.paths = file_paths
         self.current_h5_object = None
@@ -210,8 +221,7 @@ class DataLoader:
         db =self.db
         self.n_reconstructions = len(specifiers)
         
-    def _open_file(self):
-        path_id,data_id = self.reconstruction_specifiers[rec_id]
+    def _open_file(self,path_id):
         path = self.paths[path_id]
         if path != self.current_path:
             if self.current_path is not None:
@@ -219,18 +229,34 @@ class DataLoader:
             self.current_h5_object = self.db.load(path,as_h5_object = True)
         o= self.current_h5_object
         return o
-    def __getitem__(self,rec_id):
-        o = self._open_file()
+    
+    def __getitem__(self,items):
+        anchor_id = None
+        if isinstance(items,tuple):
+            if len(items)==2 and isinstance(items[0],Integral) and isinstance(items[1],Integral):
+                rec_id = items[0]
+                anchor_id = items[1]
+            else:
+                IndexError('DataSource only supports integer indexing of dimensons 1 or 2. but index {items} was given')
+        elif isinstance(items,Integral):
+            rec_id=items
+        else:
+            IndexError('DataSource only supports integer indexing of dimensons 1 or 2. but index {items} was given')
+            
+        path_id,data_id = self.reconstruction_specifiers.__getitem__(rec_id)
+        o = self._open_file(path_id)
         result = o[f'reconstruction_results/{data_id}']
-        dataset = tuple((result['density_history'][-1].astype(complex),
-                         result['ft_density_history'][-1].astype(complex),
-                         result['support'][:].astype(complex)))
+        dataset = (Map(result['density_history'][-1].astype(complex,copy=False)),
+                   Map(result['ft_density_history'][-1].astype(complex,copy=False),
+                       domain='fourier'),
+                   Map(result['support'][:].astype(complex,copy=False),
+                       is_support=True))
         o.close()
-        return dataset
+        if anchor_id is not None:
+            return dataset[anchor_id]
+        else:
+            return dataset
     
     def __len__(self):
-        o = self._open_file()
-        n_reconstructions =  len(o[f'reconstruction_results'])
-        o.close()
-        return n_reconstructions
+        return len(self.reconstruction_specifiers)
 
