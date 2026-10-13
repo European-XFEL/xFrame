@@ -11,6 +11,7 @@ from xframe.library.mathLibrary import (PolarIntegrator,
                                         spherical_to_cartesian,
                                         CumulativeVariance,
                                         CumulativeMean)
+from xframe.library.pythonLibrary import xprint
 from xframe import Multiprocessing
 from dataclasses import dataclass,field
 import abc
@@ -460,8 +461,6 @@ class AlignedAverager:
             support[:k] += support[-k:][::-1]
             support = support[:k+is_odd]
             
-        print(initial_layer)
-        print()
         # apply initial random ordering
         for i,pair in enumerate(layers[0]):
             layers[0][i,0] = initial_layer[pair[0]]
@@ -523,8 +522,9 @@ class AlignedAverager:
                 metric = metric_p
         return rot,metric,is_point_inverted
 
-    def _single_reference_worker(self,ids
-                                 ,data_source:DataSourceInterface|NDArray,
+    def _single_reference_worker(self,
+                                 ids,
+                                 data_source:DataSourceInterface|NDArray,
                                  anchor_id,
                                  consider_point_inverse,
                                  do_normalization,
@@ -536,7 +536,7 @@ class AlignedAverager:
             return tuple()
         # instantiate Fourier transform and Aligner since the fourier transforms are not fork safe.
         ft = SphericalFourierTransform(self.fourier_struct,weights = self.hankel_weights)
-        a = Aligner(ft,normalization_method=self.normalization_method,reference=self._const_reference[anchor_id])
+        a = Aligner(ft,normalization_method=self.normalization_method,reference=self._const_reference)
         outs = kwargs['outputs']
         out_ids = kwargs['output_ids']
         
@@ -582,6 +582,7 @@ class AlignedAverager:
     def average_single_reference(self,
                                  data_source:DataSourceInterface|NDArray,
                                  reference_id=0,
+                                 custom_reference: Map|tuple = None,
                                  anchor_map_id=0,
                                  consider_point_inverse = True,
                                  do_centering = True,
@@ -589,23 +590,37 @@ class AlignedAverager:
                                  do_rotational_alignment = True,
                                  so3_radial_limits = [None,None],
                                  n_processes = 'auto'):
-        
+
+        ft = SphericalFourierTransform(self.fourier_struct,weights = self.hankel_weights)
+        a = Aligner(ft,normalization_method=self.normalization_method)
         data_source = self._preprocess_data_source(data_source)
         n_datasets = len(data_source)
         if reference_id<0 or reference_id>=n_datasets:
             raise ValueError(f"invalid reference_id {reference_id}. Has to be >=0 and  < {n_datasets} (the number of provided datasets.")
         ids = np.delete(np.arange(n_datasets),reference_id)
-        
+
         # Reference creation
-        self._const_reference = self.aligner.normalize_and_center(data_source[reference_id],anchor_id=anchor_map_id)
-        shape_types = tuple((d.shape,d.dtype) for d in self._const_reference)
+        if custom_reference is None:
+            reference_map = data_source[reference_id][anchor_map_id]
+        else:
+            if isinstance(custom_reference,tuple):
+                reference_map = custom_reference[anchor_map_id]
+            else:
+                reference_map = custom_reference
+        if do_centering:
+            reference_map = a.center(reference_map)
+        if do_normalization:
+            reference_map = reference_map.normalize(method = self.normalization_method)
+        self._const_reference = reference_map
+
+        initial_dataset =  data_source[0]
+        shape_types = tuple((d.shape,d.dtype) for d in initial_dataset)
         out_shapes = []
         out_dtypes = []
         for s,t in shape_types:
             out_shapes += [s,(1,),s]
             is_complex = np.issubdtype(np.dtype(t),np.complexfloating)
             out_dtypes += [complex,int,float] if is_complex else [float,int,float]
-        #self.aligner.reference = self._const_reference[anchor_map_id]
         
         results = Multiprocessing.process_mp_request(self._single_reference_worker,
                                                      mode = Multiprocessing.MPMode_SharedArray(out_shapes,out_dtypes,reduce_arguments=True),
@@ -621,7 +636,7 @@ class AlignedAverager:
                                                      split_mode='sequential',
                                                      n_processes = n_processes)
         
-        variances = tuple(CumulativeVariance().update(self._const_reference[i]) for i in range(len(self._const_reference)))
+        variances = tuple(CumulativeVariance() for i in range(len(shape_types)))
         progression = []
         for part_id in range(len(results[0])):
             for d_id,var in enumerate(variances):
@@ -859,3 +874,88 @@ class AlignedAverager:
         #variances[0].mean = results_flat[0][0].mean
         return variances,tree,progression
     
+
+    def average_pairwise_reference(self,
+                         data_source:DataSourceInterface|NDArray,
+                         anchor_map_id=0,
+                         order_seed=1234,
+                         consider_point_inverse=True,
+                         do_centering=True,
+                         do_normalization=True,
+                         do_rotational_alignment = True,
+                         so3_radial_limits=[None,None],
+                         n_processes = 'auto'):
+        data_source = self._preprocess_data_source(data_source)
+        fixed_anchor_source = FixedAnchorSource(data_source,anchor_map_id)
+        
+        tree,fibers = self._create_balanced_binary_tree(len(data_source),seed=order_seed,return_fibers=True)
+        initial_dataset =  data_source[0]
+        shape_types = tuple((d.shape,d.dtype) for d in initial_dataset)
+        domain_support = tuple((d.domain,d.is_support) for d in initial_dataset)
+        dataset_length = len(shape_types)
+        n_datasets = len(data_source)
+        rotations = np.array([np.eye(3) for i in range(n_datasets)])
+        inversions = np.zeros(n_datasets,dtype=bool)
+
+        tmp_centering = do_centering
+        tmp_normalization = do_normalization
+        step_data = fixed_anchor_source
+        xprint("Creating Reference:")
+        xprint("Using Binary tree alignment")
+        for level_id,tree_level in enumerate(tree):
+            xprint(f'\t Tree level {level_id+1}/{len(tree)}')
+            level_size = len(tree_level)
+            fiber = fibers[level_id]
+            out_shapes= [(level_size,)+shape_types[anchor_map_id][0],(level_size,)]
+            is_complex = np.issubdtype(np.dtype(shape_types[anchor_map_id][1]),np.complexfloating)
+            out_dtypes= [complex,int] if is_complex else [float,int]
+            out_shapes += [(level_size,3,3),(level_size,)]
+            out_dtypes += [float,bool]
+            
+            results = Multiprocessing.process_mp_request(self._pairwise_aligning_worker,
+                                                         mode = Multiprocessing.MPMode_SharedArray(out_shapes,out_dtypes),
+                                                         input_arrays=[tree_level],
+                                                         const_inputs=[step_data,
+                                                                       consider_point_inverse,
+                                                                       tmp_centering,
+                                                                       tmp_normalization,
+                                                                       do_rotational_alignment, 
+                                                                       so3_radial_limits],
+                                                         call_with_multiple_arguments=True,
+                                                         split_mode='sequential',
+                                                         n_processes = n_processes)
+            applied_rotations = results[-2]
+            applied_inversions = results[-1]
+            # update rotations and inversions
+            for (idx,_),rotation,inversion in zip(tree_level,applied_rotations,applied_inversions):
+                # idx is the data id of the current leaf i.e. the structure that was rotated and invertied
+                # during alignment.
+                changed_ids = fiber[idx]
+                inversions[changed_ids] = inversions[changed_ids] != inversion
+                rotations[changed_ids] = rotations[changed_ids] @ rotation[None,...]
+                
+            #setup input for next level
+            tmp_centering = False # only do centering + normalization in the first loop iteration
+            tmp_normalization = False # only do centering + normalization in the first loop iteration
+            results_flat = tuple((CumulativeMean(mean = Map(results[0][j],
+                                                domain = domain_support[anchor_map_id][0],
+                                                is_support = domain_support[anchor_map_id][1]),
+                                                 count = results[1][j]),)
+                      for j in range(level_size))
+            step_data =  self._preprocess_data_source(results_flat,fixed_anchor=0)
+        reference_map = Map(results[0][0],
+                            domain = domain_support[anchor_map_id][0],
+                            is_support = domain_support[anchor_map_id][1])
+        xprint('Aligning to Reference.')
+        variances, progression =  self.average_single_reference(data_source,
+                                                                reference_id=0,
+                                                                custom_reference = reference_map,
+                                                                anchor_map_id=anchor_map_id,
+                                                                consider_point_inverse = consider_point_inverse,
+                                                                do_centering = do_centering,
+                                                                do_normalization = do_normalization,
+                                                                do_rotational_alignment = do_rotational_alignment,
+                                                                so3_radial_limits = so3_radial_limits,
+                                                                n_processes = n_processes)
+        
+        return variances,tree,progression

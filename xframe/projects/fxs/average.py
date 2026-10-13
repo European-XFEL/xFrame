@@ -127,8 +127,18 @@ class ProjectWorker(ProjectWorkerInterface):
             do_rotational_alignment = False
             
         if self.opt.averaging.mode == 'pairwise':
-            print(opt.alignment)
             averages = self.averager.average_pairwise(
+                self.data_source,
+                anchor_map_id = opt.alignment.align_by,
+                consider_point_inverse = opt.alignment.consider_point_inverse,
+                do_centering = opt.alignment.centering.apply,
+                do_normalization = opt.alignment.normalization.apply,
+                do_rotational_alignment = do_rotational_alignment,
+                so3_radial_limits = opt.alignment.rotational.r_limits,
+                n_processes = opt.multi_processing.n_processes                
+            )
+        elif self.opt.averaging.mode == 'pairwise_reference':
+            averages = self.averager.average_pairwise_reference(
                 self.data_source,
                 anchor_map_id = opt.alignment.align_by,
                 consider_point_inverse = opt.alignment.consider_point_inverse,
@@ -183,6 +193,8 @@ class ProjectWorker(ProjectWorkerInterface):
         return metrics
     
     def post_processing(self,results):
+        if len(results) == 2:
+            results = (results[0],np.arange(len(self.data_source.reconstruction_specifiers)),results[1])
         var_objects = results[0]
         resolution_metrics_dict = self.compute_resolution_metrics(results)
         ft_d = self.averager.fourier.forward_cmplx(var_objects[0].mean)
