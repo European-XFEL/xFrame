@@ -34,6 +34,7 @@ from scipy.optimize import root_scalar as sp_root
 
 from xframe.library.pythonLibrary import DictNamespace,xprint
 from xframe import Multiprocessing
+from enum import Enum
 ######################
 ## This library is a convoluted mess where half of the functions
 ## are useless and not needed anymore ... but the other half is important
@@ -113,8 +114,14 @@ class plane3D:
     def y_direction(self,y_direction:np.ndarray):
         self._y_direction = y_direction
         self.updateStandardForm()
+
+class platonic_solids(Enum):
+    tetrahedron = "tetrahedron"
+    cube = "cube"
+    octahedron = "octahedron"
+    dodecahedron = "dodecahedron"
+    icosahedron = "icosahedron"
     
-        
 class SampleShapeFunctions:
     coords_cartesian='cartesian'
     coords_polar='polar'
@@ -144,7 +151,11 @@ class SampleShapeFunctions:
             #log.info('support mask=\n{}'.format(support_mask))
             # log.info(points[support_mask].shape)
             # log.info(values[support_mask].shape)
-            values[support_mask]=amplitude_function(points[support_mask])
+            if support_mask.dtype==np.dtype(bool):
+                values[support_mask]=amplitude_function(points[support_mask])
+            else:
+                sup_mask = support_mask > 1e-15
+                values[sup_mask] = support_mask[sup_mask]*amplitude_function(points[sup_mask])
             return values
         return shape_function
 
@@ -224,48 +235,79 @@ class SampleShapeFunctions:
         return polygon_function
         
     @classmethod
-    def get_tetrahedral_function(cls,radius,amplitude_function=lambda points: np.full(points.shape[:-1],1),coordSys='spherical',center=np.zeros(3), orientation=np.eye(3),random_orientation=False):        
+    def get_platonic_solid_function(cls,
+                                    radius = 1,
+                                    solid = platonic_solids.tetrahedron,
+                                    distance_tolerance = 0,
+                                    amplitude_function=lambda points: np.full(points.shape[:-1],1),
+                                    coordSys='spherical',
+                                    center=np.zeros(3),
+                                    orientation=np.eye(3),
+                                    random_orientation=False):        
         if random_orientation:
-            orientation = special_ortho_group.rvs(3)   
-        planes = cls.get_tetrahedron_planes(radius = radius)
-        is_in_thetrahedron_bare = cls.get_is_in_shape_from_planes(planes,orientation=orientation)
-        def is_in_thetrahedron_cart(points):
-            points -= center
-            shape = is_in_thetrahedron_bare(points)
+            orientation = special_ortho_group.rvs(3)
+            
+        if solid == platonic_solids.tetrahedron.value:
+            planes = cls._get_tetrahedron_planes(radius = radius)
+        elif solid == platonic_solids.octahedron.value:
+            planes = cls._get_octahedron_planes(radius = radius)
+        elif solid == platonic_solids.cube.value:
+            planes = cls._get_cube_planes(radius = radius)
+        elif solid == platonic_solids.dodecahedron.value:
+            planes = cls._get_dodecahedron_planes(radius = radius)
+        elif solid == platonic_solids.icosahedron.value:
+            planes = cls._get_icosahedron_planes(radius = radius)
+        else:
+            raise AttributeError(f"The given solid={solid} is not a platonic solid.")
+            
+        is_in_solid_bare = cls._get_is_in_shape_from_planes(planes,orientation=orientation)
+        def is_in_solid_cart(points):
+            local_points = points - center
+            shape = is_in_solid_bare(local_points,distance_tolerance=distance_tolerance)
             return shape
         
-        def is_in_thetrahedron_spherical(points):
+        def is_in_solid_spherical(points):
             cart_points = spherical_to_cartesian(points)[:]
             cart_center = spherical_to_cartesian(np.asarray(center))
             cart_points -= cart_center 
-            shape = is_in_thetrahedron_bare(cart_points)
+            shape = is_in_solid_bare(cart_points,distance_tolerance=distance_tolerance)
             #log.info('point {} < radius {} = {}'.format(point,radius,point[0]<radius))
             return shape
 
-        is_in_tetrahedron=cls.select_fct_by_coord_sys(coordSys,[is_in_thetrahedron_cart,None,is_in_thetrahedron_spherical])
-        tetrahedral_function=cls.get_shape_function(is_in_tetrahedron,amplitude_function)
-        return tetrahedral_function
-
+        is_in_solid=cls.select_fct_by_coord_sys(coordSys,[is_in_solid_cart,None,is_in_solid_spherical])
+        solid_function=cls.get_shape_function(is_in_solid,amplitude_function)
+        return solid_function
     @classmethod
-    def get_is_in_shape_from_planes(cls,planes,orientation = np.eye(3)):
+    def _get_is_in_shape_from_planes(cls,planes,orientation = np.eye(3)):
         SO = special_ortho_group.rvs
-        def is_in_shape(cart_points):
+        def is_in_shape(cart_points,distance_tolerance = 0):
             if not isinstance(orientation,np.ndarray):
                 rot = SO(3)
             else:
                 rot = orientation
             cart_points = cart_points.dot(rot)            
             shape = np.array([True])
+            if distance_tolerance!=0:
+                tolerance = np.ones(cart_points.shape[:-1],dtype=float)
             for plane in planes:
                 #orth vector from plane to point in units of normal of plane
                 d=plane.base.dot(plane.normal)-cart_points[:].dot(plane.normal)
                 in_cut = (d>=0)
                 shape = (shape & in_cut)
-            return shape
+                if distance_tolerance!=0:
+                    in_tolerance = (d<0)&(d>-distance_tolerance) 
+                    #tolerance[in_tolerance] *= 1- np.abs(d[in_tolerance])/distance_tolerance
+                    distance = 1-np.abs(d[in_tolerance])/distance_tolerance
+                    tolerance[in_tolerance] = np.where(tolerance[in_tolerance] <= distance,tolerance[in_tolerance],distance)
+                    tolerance[d<=-distance_tolerance]=0
+            if distance_tolerance!=0:
+                return tolerance
+            else:
+                return shape
         return is_in_shape
-    
+    ## platonic solid planes
     @classmethod
-    def get_tetrahedron_planes(cls,radius=1):
+    def _get_tetrahedron_planes(cls,radius=1):
         z=1/np.sqrt(2)
         R=radius/np.linalg.norm(np.array([0,-1,-z]))
         b1 = R*np.array([0,-1,-z])
@@ -282,9 +324,100 @@ class SampleShapeFunctions:
         p3=plane3D(base=b2,x_direction = x2,y_direction = y3)
         p4=plane3D(base=b2,x_direction = x2,y_direction = y4)
         return [p1,p2,p3,p4]
-
     @classmethod
-    def get_rectangle_function(cls,lengths,center = np.zeros(3),amplitude_function=lambda points: np.full(points.shape[:-1],1),coordSys='spherical'):        
+    def _get_octahedron_planes(cls,radius=1):
+        planes = []
+        phi = (1+np.sqrt(5))/2
+        for s in [1.,-1.]:
+            for t in [1.,-1.]:
+                for r in [1.,-1.]:
+                    b = np.array([s*radius,0,0])
+                    x = np.array([-s,t,0])
+                    y = np.array([-s,0,r])
+                    planes.append(plane3D(base=b,
+                                   x_direction=x,
+                                   y_direction=y))
+        return planes
+    @classmethod
+    def _get_cube_planes(cls,radius=1):
+        planes = []
+        a = radius/np.sqrt(3)
+        for s in [1.,-1.]:
+            bs = np.array([[s*a,0,0],
+                          [0,s*a,0],
+                          [0,0,s*a]])
+            xs = np.array([[0,1.,0],
+                          [1.,0,0],
+                          [1.,0,0]])
+            ys = np.array([[0,0,1.],
+                          [0,0,1.],
+                          [0,1.,0]])
+            planes += [plane3D(base=b,
+                               x_direction=x,
+                               y_direction=y)
+                       for b,x,y in zip(bs,xs,ys)]
+        return planes
+    @classmethod
+    def _get_dodecahedron_planes(cls,radius=1):
+        planes = []
+        phi = (1+np.sqrt(5))/2
+        circumsphere_scale = radius/np.sqrt(3)
+        for s in [1.,-1.]:
+            for t in [1.,-1.]:
+                bs = circumsphere_scale*np.array([[0,s,t],
+                                                  [s,0,t],
+                                                  [s,t,0]
+                                                  ])
+                xvecs = np.array([[1.,0,0],
+                                 [0,1.,0],
+                                 [0,0,1.]
+                                 ])
+                yvecs = np.array([[0,s,- phi*t],
+                                 [-phi*s,0,t],
+                                 [s,-phi*t,0]
+                                 ]) 
+                planes += [plane3D(base=b,
+                                   x_direction=x,
+                                   y_direction=y)
+                           for b,x,y in zip(bs,xvecs,yvecs)]
+        return planes
+    @classmethod
+    def _get_icosahedron_planes(cls,radius=1):
+        planes = []
+        phi = (1+np.sqrt(5))/2
+        circumsphere_scale = radius/np.sqrt(phi+2)
+        for s in [1.,-1.]:
+            for t in [1.,-1.]:
+                bs = circumsphere_scale*np.array([[0,s*phi,0],
+                                                  [0,0,t*phi],
+                                                  [s*phi,0,0]
+                                                  ])
+                xvecs = np.array([[1.,0,0],
+                                 [0,1.,0],
+                                 [0,0,1.]
+                                 ])
+                yvecs = np.array([[0,-s,t*phi**2],
+                                 [s*phi**2,0,-t],
+                                 [-s,t*phi**2,0]
+                                 ]) 
+                planes += [plane3D(base=b,
+                                   x_direction=x,
+                                   y_direction=y)
+                           for b,x,y in zip(bs,xvecs,yvecs)]
+                for r in [1.,-1.]:
+                    b = circumsphere_scale*np.array([0,t,r*phi])
+                    x = np.array([s,-t,0])
+                    y = np.array([s,0,-r])
+                    planes.append(plane3D(base=b,
+                                         x_direction = x,
+                                         y_direction = y
+                                        )
+                                )
+        return planes
+
+    #2D shapes
+    @classmethod
+    def get_rectangle_function(cls,lengths,center = np.zeros(3),amplitude_function=lambda points: np.full(points.shape[:-1],1),coordSys='spherical'): 
         def is_in_rectangle_cartesian(points):
             n_dims = len(lengths)
             limits = tuple([center[i]-lengths[i]/2,center[i]+lengths[i]/2] for i in range(n_dims))
@@ -331,7 +464,6 @@ class SampleShapeFunctions:
             is_in_anulus=cls.select_fct_by_coord_sys(coordSys,[is_in_anulus_cartesian,is_in_anulus_polar,is_in_anulus_polar])
             anulus_function=cls.get_shape_function(is_in_anulus,amplitude_function)
         return anulus_function
-
     
 def output_lowValuesToZero_decorator(function):
     def lowValuesToZero(array):
