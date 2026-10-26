@@ -1178,7 +1178,7 @@ class Deg2Invar:
             B = np.array(tuple(coeff.lm[...,l,:] @ np.conj(coeff.lm[...,l,:].T) for l in coeff.ls))
         return B
     @staticmethod
-    def rcegularize(b_matrices,
+    def regularize(b_matrices,
                    dim=3,
                    q_id_limits=None,
                    sort_mode=0,
